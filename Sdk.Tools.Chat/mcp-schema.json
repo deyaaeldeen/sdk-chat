@@ -1,0 +1,57 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/specification/main/schema/mcp-server.json",
+  "name": "sdk-chat",
+  "version": "0.1.0",
+  "description": "SDK Chat - Generate production-quality code samples for Azure SDKs with 70% less AI token usage",
+  "author": "Microsoft",
+  "license": "MIT",
+  "homepage": "https://github.com/Azure/azure-sdk-tools",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Azure/azure-sdk-tools.git",
+    "directory": "tools/sdk-chat"
+  },
+  "tools": [
+    {
+      "name": "generate_samples",
+      "description": "Generate production-quality SDK samples with 70% less AI token usage than raw source. Uses semantic API extraction to understand operations and coverage analysis to avoid duplicates. Supports .NET/C#, Python, Java, JavaScript, TypeScript, and Go SDKs. Auto-detects project structure, locates source folders, and creates samples in the appropriate output directory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packagePath": {
+            "type": "string",
+            "description": "Absolute path to the SDK package root directory. The tool will automatically detect source folders (src/, lib/, etc.) and sample output locations (samples/, examples/, etc.)."
+          },
+          "outputPath": {
+            "type": "string",
+            "description": "Optional output directory for generated samples. If not specified, the tool auto-detects the appropriate folder (e.g., 'samples', 'examples') or creates one."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Optional custom prompt to guide sample generation. Examples: 'Generate samples for authentication scenarios', 'Create examples showing error handling', 'Focus on async/await patterns'."
+          }
+        },
+        "required": ["packagePath"]
+      }
+    }
+  ],
+  "transport": {
+    "stdio": {
+      "command": "sdk-chat",
+      "args": ["mcp"]
+    }
+  },
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": false
+  },
+  "supportedLanguages": [
+    "csharp",
+    "python",
+    "java",
+    "javascript",
+    "typescript",
+    "go"
+  ]
+}

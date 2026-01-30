@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Sdk.Tools.Chat</RootNamespace>
+    
+    <!-- Enable as dotnet global tool -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sdk-chat</ToolCommandName>
+    <PackageId>Microsoft.Azure.Sdk.Tools.Chat</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Microsoft</Authors>
+    <Description>SDK CLI - Generate code samples and SDK utilities for Azure SDKs. Supports .NET, Python, Java, JavaScript, TypeScript, and Go.</Description>
+    <PackageTags>azure;sdk;samples;codegen;ai;mcp;acp</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ACP SDK (local project reference - will become NuGet when extracted) -->
+    <ProjectReference Include="..\AgentClientProtocol.Sdk\AgentClientProtocol.Sdk.csproj" />
+    
+    <!-- API Extractors for efficient context extraction -->
+    <ProjectReference Include="..\ApiExtractor.DotNet\ApiExtractor.DotNet.csproj" />
+    <ProjectReference Include="..\ApiExtractor.Python\ApiExtractor.Python.csproj" />
+    <ProjectReference Include="..\ApiExtractor.Java\ApiExtractor.Java.csproj" />
+    <ProjectReference Include="..\ApiExtractor.Go\ApiExtractor.Go.csproj" />
+    <ProjectReference Include="..\ApiExtractor.TypeScript\ApiExtractor.TypeScript.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- GitHub Copilot SDK https://www.nuget.org/packages/GitHub.Copilot.SDK -->
+    <PackageReference Include="GitHub.Copilot.SDK" Version="0.1.19" />
+    
+    <!-- MCP Server (for VS Code, Claude Desktop integration) -->
+    <PackageReference Include="ModelContextProtocol" Version="0.7.0-preview.1" />
+    
+    <!-- Infrastructure -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.2" />
+    <PackageReference Include="System.CommandLine" Version="2.0.2" />
+    <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.2" />
+    
+    <!-- Professional CLI UX -->
+    <PackageReference Include="Spectre.Console" Version="0.50.0" />
+    
+    <!-- OpenTelemetry for observability -->
+    <PackageReference Include="OpenTelemetry" Version="1.15.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.15.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Templates/**/*.md" />
+    <EmbeddedResource Include="Prompts/**/*.md" />
+  </ItemGroup>
+
+</Project>

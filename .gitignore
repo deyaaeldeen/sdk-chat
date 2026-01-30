@@ -1,0 +1,27 @@
+# Build outputs
+bin/
+obj/
+artifacts/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.local
+
+# Logs
+*.log
+
+# NuGet
+*.nupkg
