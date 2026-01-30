@@ -60,7 +60,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         }
         catch (Exception ex)
         {
-            return ExtractorResult<ApiIndex>.CreateFailure(ex.Message);
+            return ExtractorResult<ApiIndex>.CreateFailure($"{ex.Message}\n{ex.StackTrace}");
         }
     }
 

@@ -19,9 +19,20 @@ public sealed record ConnectionOptions
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
     
     /// <summary>
+    /// Default handshake timeout (10 seconds for fast-fail on connection issues).
+    /// </summary>
+    public static readonly TimeSpan DefaultHandshakeTimeout = TimeSpan.FromSeconds(10);
+    
+    /// <summary>
     /// Timeout for individual requests. Defaults to 5 minutes.
     /// </summary>
     public TimeSpan RequestTimeout { get; init; } = DefaultTimeout;
+    
+    /// <summary>
+    /// Timeout for handshake/initialization requests. Defaults to 10 seconds.
+    /// Fast-fail for connection issues - AI generation uses RequestTimeout instead.
+    /// </summary>
+    public TimeSpan HandshakeTimeout { get; init; } = DefaultHandshakeTimeout;
     
     /// <summary>
     /// Maximum number of pending inbound messages before backpressure is applied.
