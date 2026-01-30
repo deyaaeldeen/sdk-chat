@@ -9,14 +9,22 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0
     
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
+      - name: Install test dependencies
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            python3 python3-pip \
+            nodejs npm \
+            golang-go \
+            curl unzip
+          # Install JBang
+          curl -Ls https://sh.jbang.dev | bash -s - app setup
+          echo "$HOME/.jbang/bin" >> $GITHUB_PATH
       
       - name: Restore dependencies
         run: dotnet restore sdk-chat.sln
