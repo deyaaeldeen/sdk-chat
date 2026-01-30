@@ -92,6 +92,10 @@ public class AiService : IAiService
         ContextInfo? contextInfo = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var sessionId = Guid.NewGuid().ToString("N");
+        var effectiveModel = _settings.GetModel(model);
+        using var activity = Telemetry.SdkChatTelemetry.StartPrompt(sessionId, effectiveModel);
+        
         // Materialize the streamed prompt (APIs require full prompt upfront)
         var promptBuilder = new StringBuilder();
         await foreach (var chunk in userPromptStream.WithCancellation(cancellationToken))
@@ -112,7 +116,6 @@ public class AiService : IAiService
             "- Do NOT output any extra text\n\n" +
             $"Each JSON object MUST match this schema:\n{schema}";
         
-        var effectiveModel = _settings.GetModel(model);
         var provider = _settings.UseOpenAi ? "OpenAI" : "Copilot";
 
         // Fire prompt ready event (used by UX to print model/size and start spinners)

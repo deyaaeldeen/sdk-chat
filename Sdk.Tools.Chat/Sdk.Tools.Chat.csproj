@@ -49,9 +49,6 @@
     <PackageReference Include="System.CommandLine" Version="2.0.2" />
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.2" />
     
-    <!-- Professional CLI UX -->
-    <PackageReference Include="Spectre.Console" Version="0.50.0" />
-    
     <!-- OpenTelemetry for observability -->
     <PackageReference Include="OpenTelemetry" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.15.0" />

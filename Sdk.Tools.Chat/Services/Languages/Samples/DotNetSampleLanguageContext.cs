@@ -106,7 +106,8 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
         
         if (_cachedApiIndex != null && _cachedSourcePath == normalizedPath)
             return _cachedApiIndex;
-            
+        
+        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("dotnet", normalizedPath);
         _cachedApiIndex = await _extractor.ExtractAsync(normalizedPath, ct);
         _cachedSourcePath = normalizedPath;
         

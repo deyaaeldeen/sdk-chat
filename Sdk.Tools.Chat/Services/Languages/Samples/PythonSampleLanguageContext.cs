@@ -130,13 +130,18 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
         
         if (_cachedApiIndex != null && _cachedSourcePath == normalizedPath)
             return _cachedApiIndex;
-            
+        
+        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("python", normalizedPath);
         try
         {
             _cachedApiIndex = await _extractor.ExtractAsync(normalizedPath, ct);
             _cachedSourcePath = normalizedPath;
             return _cachedApiIndex;
         }
-        catch { return null; }
+        catch (Exception ex) 
+        { 
+            Telemetry.SdkChatTelemetry.RecordError(activity, ex);
+            return null; 
+        }
     }
 }

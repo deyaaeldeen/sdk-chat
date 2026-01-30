@@ -127,7 +127,8 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
         
         if (_cachedApiIndex != null && _cachedSourcePath == normalizedPath)
             return _cachedApiIndex;
-            
+        
+        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("java", normalizedPath);
         try
         {
             var extractor = new JavaApiExtractor();
@@ -135,6 +136,10 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
             _cachedSourcePath = normalizedPath;
             return _cachedApiIndex;
         }
-        catch { return null; }
+        catch (Exception ex) 
+        { 
+            Telemetry.SdkChatTelemetry.RecordError(activity, ex);
+            return null; 
+        }
     }
 }

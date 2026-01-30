@@ -217,6 +217,7 @@ public class SdkInfo
 
     private static SdkInfo ScanInternal(string root)
     {
+        using var activity = Telemetry.SdkChatTelemetry.StartScan(root);
         try
         {
             // Detect language and source folder
@@ -225,7 +226,7 @@ public class SdkInfo
             // Detect samples folders
             var (samplesFolder, allCandidates) = DetectSamplesFolder(root);
             
-            return new SdkInfo(
+            var result = new SdkInfo(
                 rootPath: root,
                 language: languageEnum,
                 languageName: languageName,
@@ -234,9 +235,15 @@ public class SdkInfo
                 samplesFolder: samplesFolder,
                 allSamplesCandidates: allCandidates
             );
+            
+            activity?.SetTag("sdk.language", languageName ?? "unknown");
+            activity?.SetTag("sdk.has_samples", samplesFolder != null);
+            
+            return result;
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
+            Telemetry.SdkChatTelemetry.RecordError(activity, ex);
             // Return minimal info if we can't access the directory
             return new SdkInfo(
                 rootPath: root,

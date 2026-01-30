@@ -125,7 +125,8 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
         
         if (_cachedApiIndex != null && _cachedSourcePath == normalizedPath)
             return _cachedApiIndex;
-            
+        
+        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("go", normalizedPath);
         try
         {
             var extractor = new GoApiExtractor();
@@ -133,6 +134,10 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
             _cachedSourcePath = normalizedPath;
             return _cachedApiIndex;
         }
-        catch { return null; }
+        catch (Exception ex) 
+        { 
+            Telemetry.SdkChatTelemetry.RecordError(activity, ex);
+            return null; 
+        }
     }
 }

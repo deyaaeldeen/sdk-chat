@@ -43,6 +43,7 @@ public class SampleGeneratorTool
         bool dryRun,
         CancellationToken cancellationToken = default)
     {
+        using var activity = Telemetry.SdkChatTelemetry.StartSampleGeneration(sdkPath, language);
         var totalStopwatch = Stopwatch.StartNew();
 
         sdkPath = Path.GetFullPath(sdkPath);
