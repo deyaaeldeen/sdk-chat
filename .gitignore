@@ -25,3 +25,8 @@ Thumbs.db
 
 # NuGet
 *.nupkg
+
+# Excluded from repo
+IMPLEMENTATION_PLAN.md
+SAMPLE_GENERATOR_REVIEW.md
+docs/
