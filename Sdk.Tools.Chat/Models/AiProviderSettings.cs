@@ -99,14 +99,4 @@ public sealed record AiProviderSettings
         if (!string.IsNullOrEmpty(Model)) return Model;
         return DefaultModel;
     }
-    
-    /// <summary>
-    /// Get the effective endpoint. Returns null if using default OpenAI endpoint.
-    /// </summary>
-    public Uri? GetEndpoint()
-    {
-        if (!string.IsNullOrEmpty(Endpoint))
-            return new Uri(Endpoint);
-        return null; // Use default OpenAI endpoint
-    }
 }

@@ -291,8 +291,6 @@ public class AiDebugSession
             ? Path.Combine(debugDir, $"{sessionId}.md") 
             : null;
     }
-    
-    public bool IsEnabled => FilePath != null;
 }
 
 /// <summary>

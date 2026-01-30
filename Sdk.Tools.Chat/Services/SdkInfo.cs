@@ -504,20 +504,6 @@ public class SdkInfo
         return false;
     }
     
-    private static bool HasSourceFiles(string folder, string extension)
-    {
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(folder, "*" + extension, DeepOptions))
-            {
-                return true;
-            }
-        }
-        catch (UnauthorizedAccessException) { }
-        
-        return false;
-    }
-    
     private static bool HasAnySourceFiles(string folder)
     {
         var commonExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

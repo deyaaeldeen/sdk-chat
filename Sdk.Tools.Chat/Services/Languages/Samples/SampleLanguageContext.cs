@@ -100,24 +100,6 @@ public abstract class SampleLanguageContext
     }
 
     /// <summary>
-    /// Loads context for sample generation from the specified paths.
-    /// FALLBACK implementation - prefers API extraction in language-specific contexts.
-    /// </summary>
-    public virtual async Task<string> LoadContextAsync(
-        IEnumerable<string> paths, 
-        SdkChatConfig? config = null,
-        int totalBudget = SampleConstants.DefaultContextCharacters,
-        CancellationToken ct = default)
-    {
-        var contextBuilder = new StringBuilder();
-        await foreach (var chunk in StreamContextAsync(paths, config, totalBudget, ct))
-        {
-            contextBuilder.Append(chunk);
-        }
-        return contextBuilder.ToString();
-    }
-
-    /// <summary>
     /// Priority function - override in subclass for language-specific prioritization.
     /// Lower number = higher priority.
     /// </summary>
