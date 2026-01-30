@@ -1,0 +1,11 @@
+{
+  "mcp": {
+    "servers": {
+      "sdk-chat": {
+        "type": "stdio",
+        "command": "dotnet",
+        "args": ["run", "--project", "${workspaceFolder}/Sdk.Tools.Chat/Sdk.Tools.Chat.csproj", "--", "mcp"]
+      }
+    }
+  }
+}
