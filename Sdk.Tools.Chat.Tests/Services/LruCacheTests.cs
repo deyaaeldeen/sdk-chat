@@ -299,35 +299,30 @@ public class LruCacheTests
         // Arrange
         var cache = new LruCache<int, int>(50);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var writeTasks = new List<Task>();
-        var readTasks = new List<Task>();
-        var readSuccesses = 0;
+        var tasks = new List<Task>();
+        var corruptionDetected = false;
         
-        // Act - concurrent reads and writes
-        for (var i = 0; i < 100; i++)
-        {
-            var key = i;
-            writeTasks.Add(Task.Run(() => cache.GetOrAdd(key, k => k), cts.Token));
-        }
-        
-        for (var i = 0; i < 200; i++)
+        // Act - true concurrent reads and writes using GetOrAdd for both
+        // This tests that concurrent access doesn't corrupt the cache
+        for (var i = 0; i < 300; i++)
         {
             var key = i % 100;
-            readTasks.Add(Task.Run(() =>
+            tasks.Add(Task.Run(() =>
             {
-                if (cache.TryGetValue(key, out var value))
+                var result = cache.GetOrAdd(key, k => k);
+                // Value should always equal key - if not, corruption occurred
+                if (result != key)
                 {
-                    Assert.Equal(key, value);
-                    Interlocked.Increment(ref readSuccesses);
+                    corruptionDetected = true;
                 }
             }, cts.Token));
         }
         
-        await Task.WhenAll(writeTasks.Concat(readTasks));
+        await Task.WhenAll(tasks);
         
-        // Assert - some reads should succeed
-        Assert.True(readSuccesses > 0);
-        Assert.True(cache.Count <= 50);
+        // Assert - no corruption and cache invariant maintained
+        Assert.False(corruptionDetected, "Cache returned incorrect value - corruption detected");
+        Assert.True(cache.Count <= 50, $"Cache count {cache.Count} exceeds max size 50");
     }
     
     [Fact]

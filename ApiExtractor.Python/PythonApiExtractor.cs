@@ -17,6 +17,8 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         Path.GetDirectoryName(typeof(PythonApiExtractor).Assembly.Location) ?? ".",
         "extract_api.py");
 
+    private static readonly string[] PythonCandidates = { "python3", "python" };
+
     private string? _pythonPath;
     private string? _unavailableReason;
 
@@ -26,11 +28,16 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public bool IsAvailable()
     {
-        _pythonPath = FindPython();
-        if (_pythonPath == null)
+        var result = ToolPathResolver.ResolveWithDetails("python", PythonCandidates);
+        if (!result.IsAvailable)
         {
             _unavailableReason = "Python 3 not found. Install Python 3.9+ and ensure it's in PATH.";
             return false;
+        }
+        _pythonPath = result.Path;
+        if (result.WarningOrError != null)
+        {
+            Console.Error.WriteLine($"Warning: {result.WarningOrError}");
         }
         return true;
     }
@@ -67,7 +74,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
         // Find python executable
-        var python = _pythonPath ?? FindPython();
+        var python = _pythonPath ?? ToolPathResolver.Resolve("python", PythonCandidates);
         if (python == null)
             throw new InvalidOperationException("Python 3 not found. Install Python 3.9+ and ensure it's in PATH.");
 
@@ -104,34 +111,6 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
             ?? throw new InvalidOperationException("Failed to parse Python extractor output");
 
         return ConvertToApiIndex(raw);
-    }
-
-    private static string? FindPython()
-    {
-        // Try common Python executables
-        foreach (var name in new[] { "python3", "python" })
-        {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = name,
-                    Arguments = "--version",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var p = Process.Start(psi);
-                if (p != null)
-                {
-                    p.WaitForExit(1000);
-                    if (p.ExitCode == 0)
-                        return name;
-                }
-            }
-            catch { }
-        }
-        return null;
     }
 
     private static string GetScriptPath()

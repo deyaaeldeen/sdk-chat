@@ -12,6 +12,10 @@ namespace ApiExtractor.TypeScript;
 /// </summary>
 public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 {
+    private static readonly string[] NodeCandidates = { "node" };
+    private static readonly SemaphoreSlim NpmInstallLock = new(1, 1);
+
+    private string? _nodePath;
     private string? _unavailableReason;
 
     /// <inheritdoc />
@@ -20,24 +24,18 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public bool IsAvailable()
     {
-        try
+        var result = ToolPathResolver.ResolveWithDetails("node", NodeCandidates);
+        if (!result.IsAvailable)
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "node",
-                Arguments = "--version",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var p = Process.Start(psi);
-            p?.WaitForExit(3000);
-            if (p?.ExitCode == 0) return true;
+            _unavailableReason = "Node.js not found. Install Node.js 20+ and ensure it's in PATH.";
+            return false;
         }
-        catch { }
-
-        _unavailableReason = "Node.js not found. Install Node.js 20+ and ensure it's in PATH.";
-        return false;
+        _nodePath = result.Path;
+        if (result.WarningOrError != null)
+        {
+            Console.Error.WriteLine($"Warning: {result.WarningOrError}");
+        }
+        return true;
     }
 
     /// <inheritdoc />
@@ -76,6 +74,9 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        var nodePath = _nodePath ?? ToolPathResolver.Resolve("node", NodeCandidates)
+            ?? throw new InvalidOperationException("Node.js not found");
+
         var scriptDir = GetScriptDir();
         await EnsureDependenciesAsync(scriptDir, ct);
 
@@ -88,7 +89,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 
         var psi = new ProcessStartInfo
         {
-            FileName = "node",
+            FileName = nodePath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -126,6 +127,9 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsTypeScriptAsync(string rootPath, CancellationToken ct = default)
     {
+        var nodePath = _nodePath ?? ToolPathResolver.Resolve("node", NodeCandidates)
+            ?? throw new InvalidOperationException("Node.js not found");
+
         var scriptDir = GetScriptDir();
         await EnsureDependenciesAsync(scriptDir, ct);
 
@@ -138,7 +142,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 
         var psi = new ProcessStartInfo
         {
-            FileName = "node",
+            FileName = nodePath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -171,19 +175,31 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         var nodeModules = Path.Combine(scriptDir, "node_modules");
         if (Directory.Exists(nodeModules)) return;
 
-        var psi = new ProcessStartInfo
+        // Use semaphore to prevent concurrent npm install on the same directory
+        await NpmInstallLock.WaitAsync(ct);
+        try
         {
-            FileName = "npm",
-            Arguments = "install --silent",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = scriptDir
-        };
+            // Double-check after acquiring lock
+            if (Directory.Exists(nodeModules)) return;
 
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start npm");
-        await process.WaitForExitAsync(ct);
+            var psi = new ProcessStartInfo
+            {
+                FileName = "npm",
+                Arguments = "install --silent",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = scriptDir
+            };
+
+            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start npm");
+            await process.WaitForExitAsync(ct);
+        }
+        finally
+        {
+            NpmInstallLock.Release();
+        }
     }
 
     private static string GetScriptDir()

@@ -20,11 +20,16 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public bool IsAvailable()
     {
-        _goPath = FindGoExecutable();
-        if (_goPath == null)
+        var result = ToolPathResolver.ResolveWithDetails("go", GoPaths, "version");
+        if (!result.IsAvailable)
         {
-            _unavailableReason = "Go not found. Install Go (https://go.dev) and ensure it's in PATH.";
+            _unavailableReason = result.WarningOrError ?? "Go not found. Install Go (https://go.dev) and ensure it's in PATH.";
             return false;
+        }
+        _goPath = result.Path;
+        if (result.WarningOrError != null)
+        {
+            Console.Error.WriteLine($"Warning: {result.WarningOrError}");
         }
         return true;
     }
@@ -60,35 +65,13 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         }
     }
     
-    private static string? FindGoExecutable()
-    {
-        foreach (var path in GoPaths)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = path,
-                    Arguments = "version",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var p = Process.Start(psi);
-                p?.WaitForExit(1000);
-                if (p?.ExitCode == 0) return path;
-            }
-            catch { }
-        }
-        return null;
-    }
-
     /// <summary>
     /// Extract API from a Go module directory.
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
-        var goPath = _goPath ?? FindGoExecutable() ?? throw new FileNotFoundException("Go executable not found");
+        var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version") 
+            ?? throw new FileNotFoundException("Go executable not found");
         
         var scriptPath = GetScriptPath();
         if (!File.Exists(scriptPath))
@@ -136,7 +119,8 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsGoAsync(string rootPath, CancellationToken ct = default)
     {
-        var goPath = _goPath ?? FindGoExecutable() ?? throw new FileNotFoundException("Go executable not found");
+        var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version") 
+            ?? throw new FileNotFoundException("Go executable not found");
         var scriptPath = GetScriptPath();
         
         var psi = new ProcessStartInfo

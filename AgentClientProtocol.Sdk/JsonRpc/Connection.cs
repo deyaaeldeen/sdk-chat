@@ -49,9 +49,11 @@ public class Connection : IAsyncDisposable
     private readonly ILogger? _logger;
     private readonly ConnectionOptions _options;
     private readonly ConcurrentDictionary<object, TaskCompletionSource<JsonRpcResponse>> _pendingRequests = new();
+    private readonly ConcurrentDictionary<string, Task> _activeHandlers = new();
     private readonly Channel<JsonRpcMessageBase> _inboundChannel;
     private readonly CancellationTokenSource _cts = new();
     private int _requestId;
+    private int _handlerId;
     private int _disposed;
     
     private Func<string, object?, Task<object?>>? _requestHandler;
@@ -136,8 +138,24 @@ public class Connection : IAsyncDisposable
     {
         await foreach (var message in _inboundChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
         {
-            // Process in order - no fire-and-forget
-            await HandleMessageAsync(message).ConfigureAwait(false);
+            // Launch handler concurrently - critical for receiving cancel notifications during long AI operations
+            var handlerKey = $"h_{Interlocked.Increment(ref _handlerId)}";
+            var handlerTask = HandleMessageAsync(message).ContinueWith(t =>
+            {
+                _activeHandlers.TryRemove(handlerKey, out _);
+                if (t.IsFaulted)
+                {
+                    _logger?.LogError(t.Exception, "Unhandled exception in message handler");
+                }
+            }, TaskScheduler.Default);
+            _activeHandlers[handlerKey] = handlerTask;
+        }
+        
+        // Wait for all active handlers to complete before exiting
+        var handlers = _activeHandlers.Values.ToArray();
+        if (handlers.Length > 0)
+        {
+            await Task.WhenAll(handlers).ConfigureAwait(false);
         }
     }
     

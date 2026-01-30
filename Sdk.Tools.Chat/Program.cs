@@ -10,6 +10,7 @@ using Sdk.Tools.Chat.Helpers;
 using Sdk.Tools.Chat.Models;
 using Sdk.Tools.Chat.Services;
 using Sdk.Tools.Chat.Telemetry;
+using Sdk.Tools.Chat.Tools;
 using Sdk.Tools.Chat.Tools.Package.Samples;
 
 namespace Sdk.Tools.Chat;
@@ -41,7 +42,8 @@ public static class Program
                 LoadDotEnvOption,
                 BuildMcpCommand(),
                 BuildAcpCommand(),
-                BuildPackageCommand()
+                BuildPackageCommand(),
+                BuildDoctorCommand()
             };
             
             return await rootCommand.Parse(args).InvokeAsync();
@@ -113,6 +115,25 @@ public static class Program
 
             var logLevel = parseResult.GetValue(logLevelOption)!;
             await SampleGeneratorAgentHost.RunAsync(logLevel);
+        });
+        
+        return command;
+    }
+    
+    private static Command BuildDoctorCommand()
+    {
+        var verboseOption = new Option<bool>("--verbose", "-v") { Description = "Show detailed path information" };
+        
+        var command = new Command("doctor", "Validate external dependencies and report status")
+        {
+            verboseOption
+        };
+        
+        command.SetAction(async (parseResult, ct) =>
+        {
+            var verbose = parseResult.GetValue(verboseOption);
+            var tool = new DoctorTool();
+            Environment.ExitCode = await tool.ExecuteAsync(verbose, ct);
         });
         
         return command;

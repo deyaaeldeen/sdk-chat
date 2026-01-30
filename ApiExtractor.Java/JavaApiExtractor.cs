@@ -12,6 +12,9 @@ namespace ApiExtractor.Java;
 /// </summary>
 public class JavaApiExtractor : IApiExtractor<ApiIndex>
 {
+    private static readonly string[] JBangCandidates = { "jbang" };
+
+    private string? _jbangPath;
     private string? _unavailableReason;
 
     /// <inheritdoc />
@@ -20,24 +23,18 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public bool IsAvailable()
     {
-        try
+        var result = ToolPathResolver.ResolveWithDetails("jbang", JBangCandidates);
+        if (!result.IsAvailable)
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "jbang",
-                Arguments = "--version",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var p = Process.Start(psi);
-            p?.WaitForExit(3000);
-            if (p?.ExitCode == 0) return true;
+            _unavailableReason = "JBang not found. Install JBang (https://jbang.dev) and ensure it's in PATH.";
+            return false;
         }
-        catch { }
-        
-        _unavailableReason = "JBang not found. Install JBang (https://jbang.dev) and ensure it's in PATH.";
-        return false;
+        _jbangPath = result.Path;
+        if (result.WarningOrError != null)
+        {
+            Console.Error.WriteLine($"Warning: {result.WarningOrError}");
+        }
+        return true;
     }
 
     /// <inheritdoc />
@@ -76,6 +73,9 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        var jbangPath = _jbangPath ?? ToolPathResolver.Resolve("jbang", JBangCandidates)
+            ?? throw new InvalidOperationException("JBang not found");
+
         var scriptPath = GetScriptPath();
         if (!File.Exists(scriptPath))
         {
@@ -84,7 +84,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 
         var psi = new ProcessStartInfo
         {
-            FileName = "jbang",
+            FileName = jbangPath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -121,11 +121,14 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsJavaAsync(string rootPath, CancellationToken ct = default)
     {
+        var jbangPath = _jbangPath ?? ToolPathResolver.Resolve("jbang", JBangCandidates)
+            ?? throw new InvalidOperationException("JBang not found");
+
         var scriptPath = GetScriptPath();
         
         var psi = new ProcessStartInfo
         {
-            FileName = "jbang",
+            FileName = jbangPath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
