@@ -77,19 +77,23 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         var psi = new ProcessStartInfo
         {
             FileName = python,
-            Arguments = $"\"{scriptPath}\" \"{rootPath}\" --json",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        psi.ArgumentList.Add(scriptPath);
+        psi.ArgumentList.Add(rootPath);
+        psi.ArgumentList.Add("--json");
 
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start Python");
 
-        var output = await process.StandardOutput.ReadToEndAsync(ct);
-        var error = await process.StandardError.ReadToEndAsync(ct);
-
-        await process.WaitForExitAsync(ct);
+        // Read streams in parallel to prevent deadlocks when buffer fills
+        var outputTask = process.StandardOutput.ReadToEndAsync(ct);
+        var errorTask = process.StandardError.ReadToEndAsync(ct);
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(ct));
+        var output = await outputTask;
+        var error = await errorTask;
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"Python extractor failed: {error}");

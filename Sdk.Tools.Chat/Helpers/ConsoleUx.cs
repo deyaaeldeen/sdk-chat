@@ -104,12 +104,25 @@ public static class ConsoleUx
     public static void Info(string message) => Console.WriteLine($"  {Dim(message)}");
     
     /// <summary>
+    /// Writes a header line.
+    /// </summary>
+    public static void Header(string message) => Console.WriteLine($"\n{Bold(message)}");
+    
+    /// <summary>
     /// Writes a tree item (for streaming samples).
     /// </summary>
     public static void TreeItem(string text, bool isLast = false)
     {
         var prefix = isLast ? "└" : "├";
         Console.WriteLine($"    {Dim(prefix)} {text}");
+    }
+    
+    /// <summary>
+    /// Writes a numbered item during streaming.
+    /// </summary>
+    public static void NumberedItem(int number, string text)
+    {
+        Console.WriteLine($"    {Dim($"[{number}]")} {Green("✓")} {text}");
     }
     
     private static async Task RunSpinnerAsync(string message, CancellationToken ct)
