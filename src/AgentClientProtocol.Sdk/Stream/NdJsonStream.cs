@@ -120,8 +120,25 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
         
-        _input.Dispose();
-        _output.Dispose();
-        _writeLock.Dispose();
+        // Wait for any in-flight writes to complete before disposing
+        try
+        {
+            await _writeLock.WaitAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed, that's fine
+        }
+        
+        try
+        {
+            _input.Dispose();
+            _output.Dispose();
+        }
+        finally
+        {
+            try { _writeLock.Release(); } catch { }
+            _writeLock.Dispose();
+        }
     }
 }
