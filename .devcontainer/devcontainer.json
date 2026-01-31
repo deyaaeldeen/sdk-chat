@@ -1,0 +1,19 @@
+{
+  "name": "SDK Chat",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csharp",
+        "ms-dotnettools.csdevkit"
+      ],
+      "settings": {
+        "dotnet.defaultSolution": "sdk-chat.sln"
+      }
+    }
+  },
+  "postCreateCommand": "dotnet restore",
+  "remoteUser": "root"
+}

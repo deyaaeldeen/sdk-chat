@@ -21,6 +21,30 @@ dotnet build
 dotnet test
 ```
 
+### Using Docker
+
+A unified development container includes all language runtimes and tools:
+
+```bash
+# Build container
+docker build -t sdk-chat-dev .
+
+# Run tests
+docker run --rm -v "$(pwd):/workspace" sdk-chat-dev
+
+# Interactive shell
+docker run -it --rm -v "$(pwd):/workspace" sdk-chat-dev bash
+
+# Build only
+docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet build
+```
+
+### VS Code Dev Container
+
+Open in container: F1 → "Dev Containers: Reopen in Container"
+
+The dev container includes: .NET SDK 10, Python 3, Node.js, Go, JBang, VHS, Copilot CLI.
+
 ---
 
 ## Project Structure

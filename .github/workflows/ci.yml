@@ -9,34 +9,15 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0
     
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install test dependencies
-        run: |
-          apt-get update && apt-get install -y --no-install-recommends \
-            python3 python3-pip \
-            nodejs npm \
-            golang-go \
-            curl unzip
-      
-      - name: Install JBang
-        run: |
-          curl -Ls https://sh.jbang.dev | bash -s - app setup
-          # Verify installation
-          $HOME/.jbang/bin/jbang --version
-      
-      - name: Add JBang to PATH
-        run: echo "$HOME/.jbang/bin" >> $GITHUB_PATH
-      
-      - name: Restore dependencies
-        run: dotnet restore sdk-chat.sln
+      - name: Build dev container
+        run: docker build -t sdk-chat-dev .
       
       - name: Build
-        run: dotnet build sdk-chat.sln --no-restore --configuration Release
+        run: docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet build --configuration Release
       
       - name: Test
-        run: dotnet test sdk-chat.sln --no-build --configuration Release --verbosity normal
+        run: docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet test --configuration Release --verbosity normal

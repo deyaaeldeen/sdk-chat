@@ -187,6 +187,26 @@ dotnet build
 dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/sdk
 ```
 
+## Development Container
+
+A unified Docker container is provided for development, CI, and demo recording:
+
+```bash
+# Build container
+docker build -t sdk-chat-dev .
+
+# Run tests
+docker run --rm -v "$(pwd):/workspace" sdk-chat-dev
+
+# Interactive shell
+docker run -it --rm -v "$(pwd):/workspace" sdk-chat-dev bash
+
+# Record demo (requires GH_TOKEN or .env)
+GH_TOKEN=$(gh auth token) ./demo/record-demo.sh
+```
+
+**VS Code**: Open in Container via Dev Containers extension (F1 → "Reopen in Container")
+
 ---
 
 ## Project Structure
