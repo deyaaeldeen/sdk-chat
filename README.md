@@ -2,21 +2,7 @@
 
 **Generate production-ready SDK samples in seconds using AI.**
 
-<!-- 
-TODO: Record demo GIF using https://github.com/charmbracelet/vhs or asciinema:
-
-```tape
-Output docs/demo.gif
-Set Width 800
-Set Height 400
-Type "sdk-chat package sample generate ./openai-dotnet --count 3"
-Enter
-Sleep 5s
-```
-
-Then uncomment the line below:
--->
-![SDK Chat Demo](docs/demo.gif)
+![SDK Chat Demo](demo/demo.gif)
 
 ```bash
 # One command. Production samples.

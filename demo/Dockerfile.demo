@@ -1,0 +1,100 @@
+# Dockerfile for automated demo GIF recording
+# Build: docker build -f demo/Dockerfile.demo -t sdk-chat-demo .
+# Run:   docker run --rm -v $(pwd)/demo:/out sdk-chat-demo
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+# Install dependencies for VHS (use chromium from apt, not snap)
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    ffmpeg \
+    ttyd \
+    fonts-liberation \
+    libasound2t64 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Chromium via direct download (avoiding snap)
+RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o /tmp/chrome.deb \
+    && dpkg -i /tmp/chrome.deb || apt-get install -fy \
+    && rm /tmp/chrome.deb
+
+# Install VHS
+RUN curl -fsSL https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Linux_x86_64.tar.gz \
+    | tar -xz --strip-components=1 -C /usr/local/bin vhs_0.10.0_Linux_x86_64/vhs
+
+# Set up working directory
+WORKDIR /workspace
+
+# Clone the repo
+RUN git clone https://github.com/deyaaeldeen/sdk-chat .
+
+# Pre-build to speed up recording
+RUN dotnet build Microsoft.SdkChat -c Release
+
+# Copy tape file (use local version if needed)
+COPY demo/demo.tape /workspace/demo/demo.tape
+
+# Create output directory
+RUN mkdir -p /out
+
+# Set Chrome flags for headless operation in container
+ENV VHS_NO_SANDBOX=true
+
+# Recording script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+export DOTNET_ROOT=/usr/share/dotnet\n\
+export PATH="$PATH:$HOME/.dotnet/tools"\n\
+export VHS_NO_SANDBOX=true\n\
+\n\
+# Uninstall any existing tool\n\
+dotnet tool uninstall -g microsoft.sdkchat 2>/dev/null || true\n\
+\n\
+# Pack and install\n\
+dotnet pack Microsoft.SdkChat -o ./nupkg -c Release\n\
+dotnet tool install -g --add-source ./nupkg Microsoft.SdkChat\n\
+\n\
+# Record the demo\n\
+cd /workspace\n\
+vhs demo/demo-container.tape\n\
+\n\
+# Copy output\n\
+cp demo/demo.gif /out/demo.gif\n\
+echo "Demo recorded to /out/demo.gif"\n\
+' > /record.sh && chmod +x /record.sh
+
+# Simplified tape for container (no hidden setup needed - already installed)
+RUN echo '# VHS tape file for SDK Chat demo\n\
+Output demo/demo.gif\n\
+Set Shell "bash"\n\
+Set FontSize 14\n\
+Set Width 900\n\
+Set Height 500\n\
+Set Theme "Dracula"\n\
+Set Padding 20\n\
+Set TypingSpeed 40ms\n\
+\n\
+# Generate a sample\n\
+Type "sdk-chat package sample generate ~/openai-dotnet --count 1"\n\
+Sleep 300ms\n\
+Enter\n\
+Sleep 25s\n\
+' > /workspace/demo/demo-container.tape
+
+ENTRYPOINT ["/record.sh"]
