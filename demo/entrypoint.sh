@@ -13,7 +13,7 @@ echo "export GH_TOKEN=\"$GH_TOKEN\"" >> ~/.bashrc
 dotnet tool uninstall -g microsoft.sdkchat 2>/dev/null || true
 
 # Pack and install from bind-mounted workspace
-dotnet pack Microsoft.SdkChat -o ./nupkg -c Release
+dotnet pack src/Microsoft.SdkChat -o ./nupkg -c Release
 dotnet tool install -g --add-source ./nupkg Microsoft.SdkChat
 
 # Copy .env to home for --load-dotenv to find it

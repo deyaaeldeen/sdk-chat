@@ -23,12 +23,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ApiExtractor.DotNet\ApiExtractor.DotNet.csproj" />
-    <ProjectReference Include="..\ApiExtractor.Python\ApiExtractor.Python.csproj" />
-    <ProjectReference Include="..\ApiExtractor.Java\ApiExtractor.Java.csproj" />
-    <ProjectReference Include="..\ApiExtractor.TypeScript\ApiExtractor.TypeScript.csproj" />
-    <ProjectReference Include="..\ApiExtractor.Go\ApiExtractor.Go.csproj" />
-    <ProjectReference Include="..\Microsoft.SdkChat\Microsoft.SdkChat.csproj" />
+    <ProjectReference Include="../../src/ApiExtractor.DotNet/ApiExtractor.DotNet.csproj" />
+    <ProjectReference Include="../../src/ApiExtractor.Python/ApiExtractor.Python.csproj" />
+    <ProjectReference Include="../../src/ApiExtractor.Java/ApiExtractor.Java.csproj" />
+    <ProjectReference Include="../../src/ApiExtractor.TypeScript/ApiExtractor.TypeScript.csproj" />
+    <ProjectReference Include="../../src/ApiExtractor.Go/ApiExtractor.Go.csproj" />
+    <ProjectReference Include="../../src/Microsoft.SdkChat/Microsoft.SdkChat.csproj" />
   </ItemGroup>
 
   <ItemGroup>

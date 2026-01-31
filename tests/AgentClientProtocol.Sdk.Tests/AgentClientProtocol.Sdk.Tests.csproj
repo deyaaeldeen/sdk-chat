@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AgentClientProtocol.Sdk\AgentClientProtocol.Sdk.csproj" />
+    <ProjectReference Include="../../src/AgentClientProtocol.Sdk/AgentClientProtocol.Sdk.csproj" />
   </ItemGroup>
 
 </Project>
