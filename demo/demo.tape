@@ -20,12 +20,9 @@ Enter
 Sleep 25s
 
 # Clear and show OpenAI mode
-Type "# Mode 2: OpenAI (requires OPENAI_API_KEY in .env)"
+Type "# Mode 2: OpenAI (load OPENAI_API_KEY from .env)"
 Enter
 Sleep 500ms
-Type "echo 'OPENAI_API_KEY=sk-...' > .env  # set your key"
-Enter
-Sleep 1s
 Type "sdk-chat package sample generate ~/openai-dotnet --use-openai --load-dotenv --count 1"
 Sleep 300ms
 Enter
