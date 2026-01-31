@@ -436,13 +436,15 @@ export function extractPackage(rootPath: string): ApiIndex {
     for (const sourceFile of project.getSourceFiles()) {
         const filePath = sourceFile.getFilePath();
 
-        // Skip tests, node_modules, etc
+        // Skip tests, node_modules, etc (but allow TestFixtures for extractor tests)
+        const isTestFixture = filePath.includes("TestFixtures");
         if (
-            filePath.includes("node_modules") ||
+            !isTestFixture &&
+            (filePath.includes("node_modules") ||
             filePath.includes(".test.") ||
             filePath.includes(".spec.") ||
             filePath.includes("/test/") ||
-            filePath.includes("/tests/")
+            filePath.includes("/tests/"))
         ) {
             continue;
         }

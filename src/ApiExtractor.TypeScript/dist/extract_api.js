@@ -306,12 +306,14 @@ export function extractPackage(rootPath) {
     const modules = [];
     for (const sourceFile of project.getSourceFiles()) {
         const filePath = sourceFile.getFilePath();
-        // Skip tests, node_modules, etc
-        if (filePath.includes("node_modules") ||
-            filePath.includes(".test.") ||
-            filePath.includes(".spec.") ||
-            filePath.includes("/test/") ||
-            filePath.includes("/tests/")) {
+        // Skip tests, node_modules, etc (but allow TestFixtures for extractor tests)
+        const isTestFixture = filePath.includes("TestFixtures");
+        if (!isTestFixture &&
+            (filePath.includes("node_modules") ||
+                filePath.includes(".test.") ||
+                filePath.includes(".spec.") ||
+                filePath.includes("/test/") ||
+                filePath.includes("/tests/"))) {
             continue;
         }
         // Calculate module name

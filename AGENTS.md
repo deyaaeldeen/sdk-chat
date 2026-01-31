@@ -6,6 +6,27 @@ Instructions for AI coding agents working on this codebase.
 
 SDK Chat - CLI tool for generating SDK code samples using AI. .NET 10, C#.
 
+## Development Container
+
+**Use the Docker container for all development and testing.** This ensures consistent environments with all dependencies (Python, Node.js, Go, JBang).
+
+```bash
+# Build container (first time or after Dockerfile changes)
+docker build -t sdk-chat-dev .
+
+# Run tests (recommended - ensures all extractors work)
+docker run --rm -v "$(pwd):/workspace" sdk-chat-dev
+
+# Interactive development shell
+docker run -it --rm -v "$(pwd):/workspace" sdk-chat-dev bash
+
+# Build only
+docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet build
+
+# Run specific test
+docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet test --filter "FullyQualifiedName~AiServiceTests"
+```
+
 ## Structure
 
 ```
@@ -19,6 +40,7 @@ demo/                       # Demo recording
 
 ## Build & Test
 
+Inside container (preferred):
 ```bash
 dotnet build               # Build all
 dotnet test                # Run all tests (480+)
@@ -73,11 +95,17 @@ public string? OptionalProperty { get; init; }
 ## Test Commands
 
 ```bash
+# Run all tests (inside container)
+dotnet test
+
 # Run specific test class
 dotnet test --filter "FullyQualifiedName~AiServiceTests"
 
 # Run tests for a feature
 dotnet test --filter "DisplayName~streaming"
+
+# Run from host (uses container)
+docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet test
 ```
 
 ## Do Not
@@ -86,3 +114,4 @@ dotnet test --filter "DisplayName~streaming"
 - Add new NuGet packages without explicit request
 - Change public API signatures in AgentClientProtocol.Sdk (breaking change)
 - Remove copyright headers
+- Run tests outside Docker if Python/Node/Go tests fail (container has all deps)

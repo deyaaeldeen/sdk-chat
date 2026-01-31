@@ -190,7 +190,8 @@ def extract_package(root_path: Path) -> dict[str, Any]:
     for py_file in sorted(root_path.rglob("*.py")):
         # Skip tests, caches, venvs, and build artifacts
         path_str = str(py_file)
-        if any(skip in path_str for skip in [
+        # Allow TestFixtures (used for testing extractors themselves)
+        if 'TestFixtures' not in path_str and any(skip in path_str for skip in [
             '__pycache__', 
             'venv', '.venv', 
             'test_', '_test.py', '/tests/', '\\tests\\',
