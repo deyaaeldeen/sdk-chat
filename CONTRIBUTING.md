@@ -153,7 +153,7 @@ Add fixtures in `ApiExtractor.Tests/TestFixtures/NewLang/`.
 
 ### 7. Register in Main Tool
 
-Update `Sdk.Tools.Chat/Services/Languages/LanguageDetector.cs` to detect the new language.
+Update `Microsoft.SdkChat/Services/Languages/LanguageDetector.cs` to detect the new language.
 
 ---
 
@@ -231,10 +231,10 @@ dotnet build
 dotnet run --project ApiExtractor.DotNet -- /path --json --pretty
 
 # Pack as tool
-dotnet pack Sdk.Tools.Chat -o ./artifacts
+dotnet pack Microsoft.SdkChat -o ./artifacts
 
 # Publish self-contained
-dotnet publish Sdk.Tools.Chat -c Release -r linux-x64 --self-contained
+dotnet publish Microsoft.SdkChat -c Release -r linux-x64 --self-contained
 ```
 
 ---

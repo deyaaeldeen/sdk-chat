@@ -28,7 +28,7 @@
     <ProjectReference Include="..\ApiExtractor.Java\ApiExtractor.Java.csproj" />
     <ProjectReference Include="..\ApiExtractor.TypeScript\ApiExtractor.TypeScript.csproj" />
     <ProjectReference Include="..\ApiExtractor.Go\ApiExtractor.Go.csproj" />
-    <ProjectReference Include="..\Sdk.Tools.Chat\Sdk.Tools.Chat.csproj" />
+    <ProjectReference Include="..\Microsoft.SdkChat\Microsoft.SdkChat.csproj" />
   </ItemGroup>
 
   <ItemGroup>

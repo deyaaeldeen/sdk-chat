@@ -10,7 +10,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentClientProtocol.Sdk.Tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentClientProtocol.Sdk", "AgentClientProtocol.Sdk\AgentClientProtocol.Sdk.csproj", "{2FDB672D-1A69-D7FB-E2C1-8DF4CD3995A9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.SdkChat", "Sdk.Tools.Chat\Sdk.Tools.Chat.csproj", "{17872FD9-286B-A8BE-3CE5-E96FC8F1162D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.SdkChat", "Microsoft.SdkChat\Microsoft.SdkChat.csproj", "{17872FD9-286B-A8BE-3CE5-E96FC8F1162D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.Java", "ApiExtractor.Java\ApiExtractor.Java.csproj", "{600FAB73-7201-B254-0C70-BAFA52B887EF}"
 EndProject
@@ -22,7 +22,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentClientProtocol.Sdk.Gen
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.Go", "ApiExtractor.Go\ApiExtractor.Go.csproj", "{817696C1-5738-DCE3-1D86-EB0360C08121}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.SdkChat.Tests", "Sdk.Tools.Chat.Tests\Sdk.Tools.Chat.Tests.csproj", "{209E0ED5-5A1F-24CE-57CC-4A521CA78D7E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.SdkChat.Tests", "Microsoft.SdkChat.Tests\Microsoft.SdkChat.Tests.csproj", "{209E0ED5-5A1F-24CE-57CC-4A521CA78D7E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.Contracts", "ApiExtractor.Contracts\ApiExtractor.Contracts.csproj", "{DA24FC43-3FCE-E023-99B7-633EE5BC0177}"
 EndProject

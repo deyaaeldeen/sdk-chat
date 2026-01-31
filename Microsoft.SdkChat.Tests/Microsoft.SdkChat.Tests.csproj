@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Sdk.Tools.Chat\Sdk.Tools.Chat.csproj" />
+    <ProjectReference Include="..\Microsoft.SdkChat\Microsoft.SdkChat.csproj" />
     <ProjectReference Include="..\AgentClientProtocol.Sdk\AgentClientProtocol.Sdk.csproj" />
   </ItemGroup>
 

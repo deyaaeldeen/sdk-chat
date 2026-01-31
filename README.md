@@ -173,7 +173,7 @@ Create `.sdk-chat.json` in your SDK root:
 git clone https://github.com/deyaaeldeen/sdk-chat
 cd sdk-chat
 dotnet build
-dotnet run --project Sdk.Tools.Chat -- package sample generate /path/to/sdk
+dotnet run --project Microsoft.SdkChat -- package sample generate /path/to/sdk
 ```
 
 Run tests:
@@ -187,7 +187,7 @@ dotnet test  # 480+ tests
 
 ```
 sdk-chat/
-├── Sdk.Tools.Chat/           # Main CLI (Microsoft.SdkChat, MCP + ACP modes)
+├── Microsoft.SdkChat/           # Main CLI (Microsoft.SdkChat, MCP + ACP modes)
 ├── AgentClientProtocol.Sdk/  # ACP protocol implementation
 ├── ApiExtractor.DotNet/      # C# extractor (Roslyn)
 ├── ApiExtractor.Python/      # Python extractor (ast)
