@@ -1,10 +1,10 @@
 # Dockerfile for automated demo GIF recording
 # Build: docker build -f demo/Dockerfile.demo -t sdk-chat-demo .
-# Run:   docker run --rm -v $(pwd)/demo:/out sdk-chat-demo
+# Run:   docker run --rm -v $(pwd):/workspace -v $(pwd)/demo:/out sdk-chat-demo
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0
 
-# Install dependencies for VHS (use chromium from apt, not snap)
+# Install dependencies for VHS
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -38,28 +38,11 @@ RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_a
 RUN curl -fsSL https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Linux_x86_64.tar.gz \
     | tar -xz --strip-components=1 -C /usr/local/bin vhs_0.10.0_Linux_x86_64/vhs
 
-# Install GitHub Copilot CLI (required by SDK even for OpenAI mode)
-RUN curl -fsSL https://github.com/github/gh-copilot/releases/latest/download/linux-amd64 -o /usr/local/bin/copilot \
-    && chmod +x /usr/local/bin/copilot
-
-# Set up working directory
-WORKDIR /workspace
-
-# Cache buster - change this value to force re-clone
-ARG CACHEBUST=1
-
-# Clone the repo
-RUN git clone https://github.com/deyaaeldeen/sdk-chat .
+# Install GitHub Copilot CLI (from github/copilot-cli releases)
+RUN curl -fsSL https://gh.io/copilot-install | bash
 
 # Clone openai-dotnet SDK for demo (pre-done so it's not in recording)
-# Use retry logic for large repo
 RUN for i in 1 2 3; do git clone --depth 1 https://github.com/openai/openai-dotnet /root/openai-dotnet && break || sleep 5; done
-
-# Pre-build to speed up recording
-RUN dotnet build Microsoft.SdkChat -c Release
-
-# Copy tape file (use local version if needed)
-COPY demo/demo.tape /workspace/demo/demo.tape
 
 # Create output directory
 RUN mkdir -p /out
@@ -67,11 +50,14 @@ RUN mkdir -p /out
 # Set Chrome flags for headless operation in container
 ENV VHS_NO_SANDBOX=true
 
-# Recording script - uses OpenAI API key passed at runtime
+# Working directory will be bind-mounted at runtime
+WORKDIR /workspace
+
+# Recording script - uses local repo bind-mounted at /workspace
 RUN echo '#!/bin/bash\n\
 set -e\n\
 export DOTNET_ROOT=/usr/share/dotnet\n\
-export PATH="$PATH:$HOME/.dotnet/tools"\n\
+export PATH="$PATH:$HOME/.dotnet/tools:$HOME/.local/bin"\n\
 export VHS_NO_SANDBOX=true\n\
 \n\
 # Verify OpenAI API key is provided\n\
@@ -84,17 +70,15 @@ echo "Using OpenAI mode"\n\
 # Uninstall any existing tool\n\
 dotnet tool uninstall -g microsoft.sdkchat 2>/dev/null || true\n\
 \n\
-# Pack and install\n\
+# Pack and install from bind-mounted workspace\n\
 dotnet pack Microsoft.SdkChat -o ./nupkg -c Release\n\
 dotnet tool install -g --add-source ./nupkg Microsoft.SdkChat\n\
 \n\
-# Record the demo using the copied tape file\n\
-cd /workspace\n\
+# Record the demo\n\
 vhs demo/demo.tape\n\
 \n\
-# Copy output\n\
-cp demo/demo.gif /out/demo.gif\n\
-echo "Demo recorded to /out/demo.gif"\n\
+# Output is already in the bind-mounted demo folder\n\
+echo "Demo recorded to demo/demo.gif"\n\
 ' > /record.sh && chmod +x /record.sh
 
 ENTRYPOINT ["/record.sh"]

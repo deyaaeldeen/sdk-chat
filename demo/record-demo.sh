@@ -1,16 +1,23 @@
 #!/bin/bash
-# Record demo GIF using Docker container
-# Usage: OPENAI_API_KEY=your-key ./record-demo.sh
+# Record demo GIF using Docker container with local repo bind-mounted
+# Usage: ./record-demo.sh
+# The script will read OPENAI_API_KEY from ../.env if not set
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Try to load from .env if OPENAI_API_KEY not set
+if [ -z "$OPENAI_API_KEY" ] && [ -f "$REPO_ROOT/.env" ]; then
+    echo "Loading API keys from .env..."
+    export $(grep -E '^(OPENAI_API_KEY|GH_TOKEN)=' "$REPO_ROOT/.env" | xargs)
+fi
+
 # Check for OpenAI API key
 if [ -z "$OPENAI_API_KEY" ]; then
-    echo "Error: OPENAI_API_KEY environment variable is required"
-    echo "Usage: OPENAI_API_KEY=your-key ./record-demo.sh"
+    echo "Error: OPENAI_API_KEY not found"
+    echo "Set it in the environment or in $REPO_ROOT/.env"
     exit 1
 fi
 
@@ -21,13 +28,11 @@ if [ -f "$HOME/.config/gh/hosts.yml" ]; then
 fi
 
 echo "Building demo recording container..."
-docker build -f "$SCRIPT_DIR/Dockerfile.demo" \
-    --build-arg CACHEBUST=$(date +%s) \
-    -t sdk-chat-demo "$REPO_ROOT"
+docker build -f "$SCRIPT_DIR/Dockerfile.demo" -t sdk-chat-demo "$REPO_ROOT"
 
-echo "Recording demo..."
+echo "Recording demo (using local repo)..."
 docker run --rm \
-    -v "$SCRIPT_DIR:/out" \
+    -v "$REPO_ROOT:/workspace" \
     -e OPENAI_API_KEY="$OPENAI_API_KEY" \
     -e GH_TOKEN="$GH_TOKEN" \
     -e SDK_CLI_USE_OPENAI=true \
