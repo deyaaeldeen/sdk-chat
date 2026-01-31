@@ -199,10 +199,11 @@ public class SampleGeneratorTool
                 {
                     samples.Add(sample);
                     // Use FilePath if provided, otherwise generate from Name
-                    var displayPath = !string.IsNullOrEmpty(sample.FilePath)
+                    var relativePath = !string.IsNullOrEmpty(sample.FilePath)
                         ? SanitizeFilePath(sample.FilePath, context.FileExtension)
                         : SanitizeFileName(sample.Name) + context.FileExtension;
-                    progress?.Update(displayPath);
+                    var fullPath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
+                    progress?.Update(fullPath);
                 }
             }
         }
@@ -270,14 +271,14 @@ public class SampleGeneratorTool
                     : SanitizeFileName(sample.Name) + context.FileExtension;
                 var isLast = i == samples.Count - 1;
                 
-                var filePath = Path.Combine(outputDir, relativePath);
+                var filePath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
                 var fileDir = Path.GetDirectoryName(filePath);
                 if (!string.IsNullOrEmpty(fileDir))
                 {
                     Directory.CreateDirectory(fileDir);
                 }
                 await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken);
-                ConsoleUx.TreeItem($"{ConsoleUx.Green("✓")} {relativePath}", isLast);
+                ConsoleUx.TreeItem($"{ConsoleUx.Green("✓")} {filePath}", isLast);
             }
         }
         

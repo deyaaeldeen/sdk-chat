@@ -80,7 +80,7 @@ public class SampleGeneratorMcpTool(
             }
             
             // Write to auto-detected or specified output folder
-            var output = outputPath ?? sdkInfo.SuggestedSamplesFolder;
+            var output = Path.GetFullPath(outputPath ?? sdkInfo.SuggestedSamplesFolder);
             Directory.CreateDirectory(output);
             
             foreach (var sample in samples)
@@ -89,7 +89,7 @@ public class SampleGeneratorMcpTool(
                 var relativePath = !string.IsNullOrEmpty(sample.FilePath) 
                     ? PathSanitizer.SanitizeFilePath(sample.FilePath, context.FileExtension)
                     : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
-                var filePath = Path.Combine(output, relativePath);
+                var filePath = Path.GetFullPath(Path.Combine(output, relativePath));
                 
                 // Create subdirectories if needed
                 var fileDir = Path.GetDirectoryName(filePath);
@@ -98,7 +98,7 @@ public class SampleGeneratorMcpTool(
                     Directory.CreateDirectory(fileDir);
                 }
                 await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken).ConfigureAwait(false);
-                generatedFiles.Add(relativePath);
+                generatedFiles.Add(filePath);
             }
             
             // Record telemetry with token counts

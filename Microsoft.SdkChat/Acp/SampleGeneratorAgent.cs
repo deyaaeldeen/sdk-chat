@@ -162,7 +162,7 @@ public sealed class SampleGeneratorAgent(
             var relativePath = !string.IsNullOrEmpty(sample.FilePath) 
                 ? PathSanitizer.SanitizeFilePath(sample.FilePath, context.FileExtension)
                 : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
-            var filePath = Path.Combine(outputFolder, relativePath);
+            var filePath = Path.GetFullPath(Path.Combine(outputFolder, relativePath));
             
             // Create subdirectories if needed
             var fileDir = Path.GetDirectoryName(filePath);
@@ -175,7 +175,7 @@ public sealed class SampleGeneratorAgent(
             
             if (_currentConnection != null)
             {
-                await _currentConnection.SendTextAsync(request.SessionId, $"✓ {relativePath}\n", effectiveCt).ConfigureAwait(false);
+                await _currentConnection.SendTextAsync(request.SessionId, $"✓ {filePath}\n", effectiveCt).ConfigureAwait(false);
             }
         }
         
