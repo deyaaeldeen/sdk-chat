@@ -37,7 +37,7 @@
 
   <ItemGroup>
     <!-- GitHub Copilot SDK https://www.nuget.org/packages/GitHub.Copilot.SDK -->
-    <PackageReference Include="GitHub.Copilot.SDK" Version="0.1.19" />
+    <PackageReference Include="GitHub.Copilot.SDK" Version="0.1.20" />
     
     <!-- MCP Server (for VS Code, Claude Desktop integration) -->
     <PackageReference Include="ModelContextProtocol" Version="0.7.0-preview.1" />

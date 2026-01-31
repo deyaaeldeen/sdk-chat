@@ -242,12 +242,17 @@ public class AiService : IAiService
             var cliPath = Environment.GetEnvironmentVariable("COPILOT_CLI_PATH") ?? "copilot";
             _logger.LogDebug("Using Copilot CLI at: {CliPath}", cliPath);
             
+            // Check for GitHub token in environment (GH_TOKEN or GITHUB_TOKEN)
+            var githubToken = Environment.GetEnvironmentVariable("GH_TOKEN") 
+                           ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+            
             _copilotClient = new CopilotClient(new CopilotClientOptions
             {
                 CliPath = cliPath,
                 UseStdio = true,
                 AutoStart = true,
-                LogLevel = "debug"
+                LogLevel = "debug",
+                GithubToken = githubToken  // Pass token for auth if available
             });
             
             await _copilotClient.StartAsync();

@@ -14,6 +14,12 @@ if [ -z "$OPENAI_API_KEY" ]; then
     exit 1
 fi
 
+# Extract GitHub token from gh CLI config for Copilot SDK auth
+GH_TOKEN=""
+if [ -f "$HOME/.config/gh/hosts.yml" ]; then
+    GH_TOKEN=$(grep oauth_token "$HOME/.config/gh/hosts.yml" 2>/dev/null | awk '{print $2}' | head -1)
+fi
+
 echo "Building demo recording container..."
 docker build -f "$SCRIPT_DIR/Dockerfile.demo" \
     --build-arg CACHEBUST=$(date +%s) \
@@ -23,6 +29,7 @@ echo "Recording demo..."
 docker run --rm \
     -v "$SCRIPT_DIR:/out" \
     -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+    -e GH_TOKEN="$GH_TOKEN" \
     -e SDK_CLI_USE_OPENAI=true \
     sdk-chat-demo
 
