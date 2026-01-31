@@ -1,79 +1,29 @@
-# Dockerfile for automated demo GIF recording
+# Dockerfile for demo GIF recording
 # Build: docker build -f demo/Dockerfile.demo -t sdk-chat-demo .
-# Run:   docker run --rm -v $(pwd):/workspace -v $(pwd)/demo:/out sdk-chat-demo
+# Run:   docker run --rm -v $(pwd):/workspace sdk-chat-demo
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0
 
-# Install dependencies for VHS
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    ffmpeg \
-    ttyd \
-    fonts-liberation \
-    libasound2t64 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    xdg-utils \
-    && rm -rf /var/lib/apt/lists/*
+# Install VHS dependencies + Chrome for headless rendering
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl git ffmpeg ttyd fonts-liberation \
+    libasound2t64 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdbus-1-3 \
+    libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 \
+    libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 xdg-utils \
+    && curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o /tmp/chrome.deb \
+    && (dpkg -i /tmp/chrome.deb || apt-get install -fy) \
+    && rm -rf /tmp/chrome.deb /var/lib/apt/lists/*
 
-# Install Chromium via direct download (avoiding snap)
-RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o /tmp/chrome.deb \
-    && dpkg -i /tmp/chrome.deb || apt-get install -fy \
-    && rm /tmp/chrome.deb
-
-# Install VHS
+# Install VHS and Copilot CLI
 RUN curl -fsSL https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Linux_x86_64.tar.gz \
-    | tar -xz --strip-components=1 -C /usr/local/bin vhs_0.10.0_Linux_x86_64/vhs
+    | tar -xz --strip-components=1 -C /usr/local/bin vhs_0.10.0_Linux_x86_64/vhs \
+    && curl -fsSL https://gh.io/copilot-install | bash
 
-# Install GitHub Copilot CLI (from github/copilot-cli releases)
-RUN curl -fsSL https://gh.io/copilot-install | bash
+# Clone demo SDK (pre-done so it's not in recording)
+RUN git clone --depth 1 https://github.com/openai/openai-dotnet /root/openai-dotnet
 
-# Clone openai-dotnet SDK for demo (pre-done so it's not in recording)
-RUN for i in 1 2 3; do git clone --depth 1 https://github.com/openai/openai-dotnet /root/openai-dotnet && break || sleep 5; done
-
-# Create output directory
-RUN mkdir -p /out
-
-# Set Chrome flags for headless operation in container
 ENV VHS_NO_SANDBOX=true
-
-# Working directory will be bind-mounted at runtime
 WORKDIR /workspace
 
-# Recording script - uses local repo bind-mounted at /workspace
-RUN echo '#!/bin/bash\n\
-set -e\n\
-export DOTNET_ROOT=/usr/share/dotnet\n\
-export PATH="$PATH:$HOME/.dotnet/tools:$HOME/.local/bin"\n\
-export VHS_NO_SANDBOX=true\n\
-\n\
-# Uninstall any existing tool\n\
-dotnet tool uninstall -g microsoft.sdkchat 2>/dev/null || true\n\
-\n\
-# Pack and install from bind-mounted workspace\n\
-dotnet pack Microsoft.SdkChat -o ./nupkg -c Release\n\
-dotnet tool install -g --add-source ./nupkg Microsoft.SdkChat\n\
-\n\
-# Copy .env to home for --load-dotenv to find it\n\
-cp /workspace/.env ~/.env 2>/dev/null || true\n\
-\n\
-# Record the demo\n\
-vhs demo/demo.tape\n\
-\n\
-echo "Demo recorded to demo/demo.gif"\n\
-' > /record.sh && chmod +x /record.sh
-
-ENTRYPOINT ["/record.sh"]
+# Entrypoint script is bind-mounted from demo/entrypoint.sh
+ENTRYPOINT ["/workspace/demo/entrypoint.sh"]
