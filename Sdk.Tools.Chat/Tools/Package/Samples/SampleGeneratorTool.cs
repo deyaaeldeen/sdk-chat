@@ -199,6 +199,13 @@ public class SampleGeneratorTool
                 }
             }
         }
+        catch (OperationCanceledException)
+        {
+            // Propagate cancellation - don't swallow it
+            preparingProgress?.Dispose();
+            progress?.Dispose();
+            throw;
+        }
         catch (Exception ex)
         {
             if (promptPrepStopwatch.IsRunning)

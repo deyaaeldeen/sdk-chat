@@ -87,6 +87,7 @@ public class MockAiService : IAiService
 {
     private readonly List<object> _samplesToReturn = [];
     private Exception? _exceptionToThrow;
+    private TimeSpan _delayBeforeResponse = TimeSpan.Zero;
     
     public bool IsUsingOpenAi => false;
     
@@ -116,6 +117,14 @@ public class MockAiService : IAiService
         _exceptionToThrow = ex;
     }
     
+    /// <summary>
+    /// Configure a delay before returning responses (for cancellation testing).
+    /// </summary>
+    public void SetDelayBeforeResponse(TimeSpan delay)
+    {
+        _delayBeforeResponse = delay;
+    }
+    
     public async IAsyncEnumerable<T> StreamItemsAsync<T>(
         string systemPrompt,
         IAsyncEnumerable<string> userPromptStream,
@@ -133,6 +142,12 @@ public class MockAiService : IAiService
             promptBuilder.Append(chunk);
         }
         LastUserPrompt = promptBuilder.ToString();
+        
+        // Apply configured delay (for cancellation testing)
+        if (_delayBeforeResponse > TimeSpan.Zero)
+        {
+            await Task.Delay(_delayBeforeResponse, cancellationToken);
+        }
         
         // Fire events
         var promptChars = systemPrompt.Length + LastUserPrompt.Length;

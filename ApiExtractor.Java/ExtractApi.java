@@ -272,6 +272,7 @@ public class ExtractApi {
     static Map<String, Object> extractClassOrInterface(ClassOrInterfaceDeclaration cid) {
         Map<String, Object> info = new LinkedHashMap<>();
         info.put("name", cid.getNameAsString());
+        boolean isInterface = cid.isInterface();
         
         List<String> mods = getModifiers(cid);
         if (!mods.isEmpty()) info.put("modifiers", mods);
@@ -294,18 +295,21 @@ public class ExtractApi {
         
         getDocString(cid).ifPresent(doc -> info.put("doc", doc));
         
-        // Constructors
-        List<Map<String, Object>> constructors = new ArrayList<>();
-        for (ConstructorDeclaration cd : cid.getConstructors()) {
-            if (!isPublicOrProtected(cd)) continue;
-            constructors.add(extractMethod(cd));
+        // Constructors (not applicable for interfaces)
+        if (!isInterface) {
+            List<Map<String, Object>> constructors = new ArrayList<>();
+            for (ConstructorDeclaration cd : cid.getConstructors()) {
+                if (!isPublicOrProtected(cd)) continue;
+                constructors.add(extractMethod(cd));
+            }
+            if (!constructors.isEmpty()) info.put("constructors", constructors);
         }
-        if (!constructors.isEmpty()) info.put("constructors", constructors);
         
-        // Methods
+        // Methods - for interfaces, all methods are implicitly public
         List<Map<String, Object>> methods = new ArrayList<>();
         for (MethodDeclaration md : cid.getMethods()) {
-            if (!isPublicOrProtected(md)) continue;
+            // Interface methods are implicitly public
+            if (!isInterface && !isPublicOrProtected(md)) continue;
             methods.add(extractMethod(md));
         }
         if (!methods.isEmpty()) info.put("methods", methods);

@@ -371,7 +371,7 @@ public class SdkInfoTests
         // Arrange
         File.WriteAllText(Path.Combine(_testRoot, "setup.py"), "");
         File.WriteAllText(Path.Combine(_testRoot, "main.py"), "print('hello')");
-        var samplesDir = Path.Combine(_testRoot, "samples");
+        var samplesDir = Path.Combine(_testRoot, "examples");
         Directory.CreateDirectory(samplesDir);
         File.WriteAllText(Path.Combine(samplesDir, "sample.py"), "print('sample')");
         
@@ -488,7 +488,7 @@ public class SdkInfoTests
         File.WriteAllText(Path.Combine(_testRoot, "main.py"), "");
         
         // Create samples folder with 1 file
-        var samplesDir = Path.Combine(_testRoot, "samples");
+        var samplesDir = Path.Combine(_testRoot, "examples");
         Directory.CreateDirectory(samplesDir);
         File.WriteAllText(Path.Combine(samplesDir, "sample1.py"), "");
         

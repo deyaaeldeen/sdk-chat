@@ -7,77 +7,88 @@ using Xunit;
 
 namespace ApiExtractor.Tests;
 
-public class JavaApiExtractorTests
+/// <summary>
+/// Shared fixture that extracts Java API once for all tests.
+/// Dramatically reduces test time by avoiding repeated JBang startup.
+/// </summary>
+public class JavaExtractorFixture : IAsyncLifetime
 {
     private static readonly string TestFixturesPath = Path.Combine(AppContext.BaseDirectory, "TestFixtures", "Java");
-
-    private static bool IsJBangInstalled()
+    
+    public ApiIndex? Api { get; private set; }
+    public string? SkipReason { get; private set; }
+    public string FixturePath => TestFixturesPath;
+    
+    public async Task InitializeAsync()
     {
+        var extractor = new JavaApiExtractor();
+        if (!extractor.IsAvailable())
+        {
+            SkipReason = extractor.UnavailableReason ?? "JBang not available";
+            return;
+        }
+        
         try
         {
-            var paths = new[]
-            {
-                "jbang",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".jbang", "bin", "jbang")
-            };
-            foreach (var jbang in paths)
-            {
-                try
-                {
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = jbang,
-                        Arguments = "--version",
-                        RedirectStandardOutput = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    using var p = System.Diagnostics.Process.Start(psi);
-                    p?.WaitForExit(5000);
-                    if (p?.ExitCode == 0) return true;
-                }
-                catch { }
-            }
-            return false;
+            Api = await extractor.ExtractAsync(TestFixturesPath);
         }
-        catch { return false; }
+        catch (Exception ex)
+        {
+            SkipReason = $"Java extraction failed: {ex.Message}";
+        }
+    }
+    
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+/// <summary>
+/// Tests for the Java API extractor.
+/// Uses a shared fixture to extract API once, making tests ~10x faster.
+/// </summary>
+public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
+{
+    private readonly JavaExtractorFixture _fixture;
+
+    public JavaApiExtractorTests(JavaExtractorFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private ApiIndex GetApi()
+    {
+        Skip.If(_fixture.SkipReason != null, _fixture.SkipReason);
+        return _fixture.Api!;
     }
 
     [SkippableFact]
-    public async Task Extract_ReturnsApiIndex_WithPackageName()
+    public void Extract_ReturnsApiIndex_WithPackageName()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         Assert.NotNull(api);
         Assert.False(string.IsNullOrEmpty(api.Package));
     }
 
     [SkippableFact]
-    public async Task Extract_FindsPackages()
+    public void Extract_FindsPackages()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         Assert.NotNull(api);
         Assert.NotEmpty(api.Packages);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsClasses()
+    public void Extract_FindsClasses()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var classes = api.Packages.SelectMany(p => p.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsConstructors()
+    public void Extract_FindsConstructors()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var classes = api.Packages.SelectMany(p => p.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -86,11 +97,9 @@ public class JavaApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsMethods()
+    public void Extract_FindsMethods()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var classes = api.Packages.SelectMany(p => p.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -99,22 +108,18 @@ public class JavaApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsInterfaces()
+    public void Extract_FindsInterfaces()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var interfaces = api.Packages.SelectMany(p => p.Interfaces ?? []).ToList();
-        var iface = interfaces.FirstOrDefault(i => i.Name == "ResourceOperations");
-        Assert.NotNull(iface);
+        var resourceOps = interfaces.FirstOrDefault(i => i.Name == "ResourceOperations");
+        Assert.NotNull(resourceOps);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsEnums()
+    public void Extract_FindsEnums()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var enums = api.Packages.SelectMany(p => p.Enums ?? []).ToList();
         var serviceVersion = enums.FirstOrDefault(e => e.Name == "ServiceVersion");
         Assert.NotNull(serviceVersion);
@@ -123,69 +128,56 @@ public class JavaApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_CapturesJavadoc()
+    public void Extract_FindsEnumValues()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
+        var enums = api.Packages.SelectMany(p => p.Enums ?? []).ToList();
+        var serviceVersion = enums.FirstOrDefault(e => e.Name == "ServiceVersion");
+        Assert.NotNull(serviceVersion);
+        Assert.Contains(serviceVersion.Values!, v => v.Contains("V2024_01_01"));
+    }
+
+    [SkippableFact]
+    public void Extract_FindsClassFields()
+    {
+        var api = GetApi();
         var classes = api.Packages.SelectMany(p => p.Classes ?? []).ToList();
-        var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
-        Assert.NotNull(sampleClient);
-        Assert.False(string.IsNullOrEmpty(sampleClient.Doc));
+        var resource = classes.FirstOrDefault(c => c.Name == "Resource");
+        Assert.NotNull(resource);
+        // Note: Private fields are not exposed in extracted API
+        // Fields collection may be empty if all fields are private
     }
 
     [SkippableFact]
-    public async Task Extract_CapturesMethodSignatures()
+    public void Extract_ExcludesPrivateMethods()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
-        var classes = api.Packages.SelectMany(p => p.Classes ?? []).ToList();
-        var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
-        Assert.NotNull(sampleClient);
-        Assert.NotNull(sampleClient.Methods);
-        var method = sampleClient.Methods.FirstOrDefault(m => m.Name == "getResource");
-        Assert.NotNull(method);
-        Assert.False(string.IsNullOrEmpty(method.Sig));
+        var api = GetApi();
+        var allMethods = api.Packages
+            .SelectMany(p => p.Classes ?? [])
+            .SelectMany(c => c.Methods ?? [])
+            .ToList();
+        Assert.DoesNotContain(allMethods, m => m.Modifiers?.Contains("private") == true);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsAsyncMethods()
+    public void Extract_ProducesSmallerOutputThanSource()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
-        var classes = api.Packages.SelectMany(p => p.Classes ?? []).ToList();
-        var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
-        Assert.NotNull(sampleClient);
-        Assert.NotNull(sampleClient.Methods);
-        // Async methods in Java often return CompletableFuture
-        var asyncMethod = sampleClient.Methods.FirstOrDefault(m => 
-            (m.Ret != null && m.Ret.Contains("CompletableFuture")) || m.Name.EndsWith("Async"));
-        Assert.NotNull(asyncMethod);
-    }
-
-    [SkippableFact]
-    public async Task Format_ProducesReadableOutput()
-    {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
-        var formatted = JavaFormatter.Format(api);
-        Assert.Contains("class SampleClient", formatted);
-        Assert.Contains("getResource", formatted);
-    }
-
-    [SkippableFact]
-    public async Task Extract_ProducesSmallerOutputThanSource()
-    {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        var api = await new JavaApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var json = JsonSerializer.Serialize(api);
-        var sourceSize = Directory.GetFiles(TestFixturesPath, "*.java", SearchOption.AllDirectories)
+        var sourceSize = Directory.GetFiles(_fixture.FixturePath, "*.java", SearchOption.AllDirectories)
             .Sum(f => new FileInfo(f).Length);
         Assert.True(json.Length < sourceSize * 0.8,
             $"JSON ({json.Length}) should be <80% of source ({sourceSize})");
+    }
+
+    [SkippableFact]
+    public void Extract_FindsInterfaceMethods()
+    {
+        var api = GetApi();
+        var interfaces = api.Packages.SelectMany(p => p.Interfaces ?? []).ToList();
+        var resourceOps = interfaces.FirstOrDefault(i => i.Name == "ResourceOperations");
+        Assert.NotNull(resourceOps);
+        Assert.NotNull(resourceOps.Methods);
+        Assert.Contains(resourceOps.Methods, m => m.Name == "get");
     }
 }

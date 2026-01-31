@@ -6,61 +6,86 @@ using Xunit;
 
 namespace ApiExtractor.Tests;
 
-public class PythonApiExtractorTests
+/// <summary>
+/// Shared fixture that extracts Python API once for all tests.
+/// Dramatically reduces test time by avoiding repeated Python invocations.
+/// </summary>
+public class PythonExtractorFixture : IAsyncLifetime
 {
     private static readonly string TestFixturesPath = Path.Combine(AppContext.BaseDirectory, "TestFixtures", "Python");
-    private readonly PythonApiExtractor _extractor = new();
-
-    private static bool IsPythonInstalled()
+    
+    public ApiIndex? Api { get; private set; }
+    public string? SkipReason { get; private set; }
+    public string FixturePath => TestFixturesPath;
+    
+    public async Task InitializeAsync()
     {
+        var extractor = new PythonApiExtractor();
+        if (!extractor.IsAvailable())
+        {
+            SkipReason = extractor.UnavailableReason ?? "Python not available";
+            return;
+        }
+        
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "python3",
-                Arguments = "--version",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var p = System.Diagnostics.Process.Start(psi);
-            p?.WaitForExit(1000);
-            return p?.ExitCode == 0;
+            Api = await extractor.ExtractAsync(TestFixturesPath);
         }
-        catch { return false; }
+        catch (Exception ex)
+        {
+            SkipReason = $"Python extraction failed: {ex.Message}";
+        }
+    }
+    
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+/// <summary>
+/// Tests for the Python API extractor.
+/// Uses a shared fixture to extract API once, making tests faster.
+/// </summary>
+public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
+{
+    private readonly PythonExtractorFixture _fixture;
+
+    public PythonApiExtractorTests(PythonExtractorFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private ApiIndex GetApi()
+    {
+        Skip.If(_fixture.SkipReason != null, _fixture.SkipReason);
+        return _fixture.Api!;
     }
 
     [SkippableFact]
-    public async Task Extract_ReturnsApiIndex_WithPackageName()
+    public void Extract_ReturnsApiIndex_WithPackageName()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         Assert.False(string.IsNullOrEmpty(api.Package));
     }
 
     [SkippableFact]
-    public async Task Extract_FindsModules()
+    public void Extract_FindsModules()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         Assert.NotEmpty(api.Modules);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsClasses()
+    public void Extract_FindsClasses()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsMethods()
+    public void Extract_FindsMethods()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -69,10 +94,9 @@ public class PythonApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsAsyncMethods()
+    public void Extract_FindsAsyncMethods()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -81,10 +105,9 @@ public class PythonApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsClassMethods()
+    public void Extract_FindsClassMethods()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -93,10 +116,9 @@ public class PythonApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsStaticMethods()
+    public void Extract_FindsStaticMethods()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -105,20 +127,18 @@ public class PythonApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsModuleFunctions()
+    public void Extract_FindsModuleFunctions()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var functions = api.Modules.SelectMany(m => m.Functions ?? []).ToList();
         Assert.NotEmpty(functions);
         Assert.Contains(functions, f => f.Name == "create_default_client");
     }
 
     [SkippableFact]
-    public async Task Extract_CapturesDocstrings()
+    public void Extract_CapturesDocstrings()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -126,10 +146,9 @@ public class PythonApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_CapturesMethodSignatures()
+    public void Extract_CapturesMethodSignatures()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -140,10 +159,9 @@ public class PythonApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_ExcludesPrivateMethods()
+    public void Extract_ExcludesPrivateMethods()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var allMethods = api.Modules
             .SelectMany(m => m.Classes ?? [])
             .SelectMany(c => c.Methods ?? [])
@@ -155,10 +173,9 @@ public class PythonApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_IncludesDunderMethods()
+    public void Extract_IncludesDunderMethods()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var allMethods = api.Modules
             .SelectMany(m => m.Classes ?? [])
             .SelectMany(c => c.Methods ?? [])
@@ -167,22 +184,20 @@ public class PythonApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Format_ProducesReadableOutput()
+    public void Format_ProducesReadableOutput()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var formatted = PythonFormatter.Format(api);
         Assert.Contains("class SampleClient", formatted);
         Assert.Contains("def get_resource", formatted);
     }
 
     [SkippableFact]
-    public async Task Extract_ProducesSmallerOutputThanSource()
+    public void Extract_ProducesSmallerOutputThanSource()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python3 not installed");
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         var json = api.ToJson();
-        var sourceSize = Directory.GetFiles(TestFixturesPath, "*.py", SearchOption.AllDirectories)
+        var sourceSize = Directory.GetFiles(_fixture.FixturePath, "*.py", SearchOption.AllDirectories)
             .Sum(f => new FileInfo(f).Length);
         // For small test fixtures, the overhead ratio is higher; real-world packages show much better compression
         Assert.True(json.Length < sourceSize,

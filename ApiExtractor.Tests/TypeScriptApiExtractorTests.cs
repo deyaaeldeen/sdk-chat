@@ -7,11 +7,39 @@ using Xunit;
 
 namespace ApiExtractor.Tests;
 
-public class TypeScriptApiExtractorTests
+/// <summary>
+/// Shared fixture that extracts TypeScript API once for all tests.
+/// Dramatically reduces test time by avoiding repeated npm install and node invocations.
+/// </summary>
+public class TypeScriptExtractorFixture : IAsyncLifetime
 {
     private static readonly string TestFixturesPath = Path.Combine(AppContext.BaseDirectory, "TestFixtures", "TypeScript");
-
-    private static bool IsNodeInstalled()
+    
+    public ApiIndex? Api { get; private set; }
+    public string? SkipReason { get; private set; }
+    public string FixturePath => TestFixturesPath;
+    
+    public async Task InitializeAsync()
+    {
+        if (!CheckNodeInstalled())
+        {
+            SkipReason = "Node.js not installed";
+            return;
+        }
+        
+        try
+        {
+            Api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
+        }
+        catch (Exception ex)
+        {
+            SkipReason = $"TypeScript extraction failed: {ex.Message}";
+        }
+    }
+    
+    public Task DisposeAsync() => Task.CompletedTask;
+    
+    private static bool CheckNodeInstalled()
     {
         try
         {
@@ -29,42 +57,56 @@ public class TypeScriptApiExtractorTests
         }
         catch { return false; }
     }
+}
+
+/// <summary>
+/// Tests for the TypeScript API extractor.
+/// Uses a shared fixture to extract API once, making tests ~10x faster.
+/// </summary>
+public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixture>
+{
+    private readonly TypeScriptExtractorFixture _fixture;
+
+    public TypeScriptApiExtractorTests(TypeScriptExtractorFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private ApiIndex GetApi()
+    {
+        Skip.If(_fixture.SkipReason != null, _fixture.SkipReason);
+        return _fixture.Api!;
+    }
 
     [SkippableFact]
-    public async Task Extract_ReturnsApiIndex_WithPackageName()
+    public void Extract_ReturnsApiIndex_WithPackageName()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         Assert.NotNull(api);
         Assert.False(string.IsNullOrEmpty(api.Package));
     }
 
     [SkippableFact]
-    public async Task Extract_FindsModules()
+    public void Extract_FindsModules()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         Assert.NotNull(api);
         Assert.NotEmpty(api.Modules);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsClasses()
+    public void Extract_FindsClasses()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsConstructors()
+    public void Extract_FindsConstructors()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -73,11 +115,9 @@ public class TypeScriptApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsMethods()
+    public void Extract_FindsMethods()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -86,22 +126,18 @@ public class TypeScriptApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsInterfaces()
+    public void Extract_FindsInterfaces()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var interfaces = api.Modules.SelectMany(m => m.Interfaces ?? []).ToList();
         var resource = interfaces.FirstOrDefault(i => i.Name == "Resource");
         Assert.NotNull(resource);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsEnums()
+    public void Extract_FindsEnums()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var enums = api.Modules.SelectMany(m => m.Enums ?? []).ToList();
         var resultStatus = enums.FirstOrDefault(e => e.Name == "ResultStatus");
         Assert.NotNull(resultStatus);
@@ -110,32 +146,26 @@ public class TypeScriptApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsTypeAliases()
+    public void Extract_FindsTypeAliases()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var types = api.Modules.SelectMany(m => m.Types ?? []).ToList();
         Assert.NotEmpty(types);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsFunctions()
+    public void Extract_FindsFunctions()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var functions = api.Modules.SelectMany(m => m.Functions ?? []).ToList();
         Assert.NotEmpty(functions);
         Assert.Contains(functions, f => f.Name == "createDefaultClient" || f.Name == "batchGetResources");
     }
 
     [SkippableFact]
-    public async Task Extract_FindsAsyncMethods()
+    public void Extract_FindsAsyncMethods()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -144,11 +174,9 @@ public class TypeScriptApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsStaticMethods()
+    public void Extract_FindsStaticMethods()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var sampleClient = classes.FirstOrDefault(c => c.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -157,11 +185,9 @@ public class TypeScriptApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsProperties()
+    public void Extract_FindsProperties()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var interfaces = api.Modules.SelectMany(m => m.Interfaces ?? []).ToList();
         var resource = interfaces.FirstOrDefault(i => i.Name == "Resource");
         Assert.NotNull(resource);
@@ -170,27 +196,22 @@ public class TypeScriptApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_ExcludesPrivateMethods()
+    public void Extract_ExcludesPrivateMethods()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var allMethods = api.Modules
             .SelectMany(m => m.Classes ?? [])
             .SelectMany(c => c.Methods ?? [])
             .ToList();
-        // Private methods (with #) should be excluded
         Assert.DoesNotContain(allMethods, m => m.Name.StartsWith("#"));
     }
 
     [SkippableFact]
-    public async Task Extract_ProducesSmallerOutputThanSource()
+    public void Extract_ProducesSmallerOutputThanSource()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        var api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var json = JsonSerializer.Serialize(api);
-        var sourceSize = Directory.GetFiles(TestFixturesPath, "*.ts", SearchOption.AllDirectories)
+        var sourceSize = Directory.GetFiles(_fixture.FixturePath, "*.ts", SearchOption.AllDirectories)
             .Sum(f => new FileInfo(f).Length);
         Assert.True(json.Length < sourceSize * 0.8,
             $"JSON ({json.Length}) should be <80% of source ({sourceSize})");

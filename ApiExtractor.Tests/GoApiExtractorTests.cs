@@ -7,73 +7,88 @@ using Xunit;
 
 namespace ApiExtractor.Tests;
 
-public class GoApiExtractorTests
+/// <summary>
+/// Shared fixture that extracts Go API once for all tests.
+/// Dramatically reduces test time by avoiding repeated Go invocations.
+/// </summary>
+public class GoExtractorFixture : IAsyncLifetime
 {
     private static readonly string TestFixturesPath = Path.Combine(AppContext.BaseDirectory, "TestFixtures", "Go");
-
-    private static bool IsGoInstalled()
+    
+    public ApiIndex? Api { get; private set; }
+    public string? SkipReason { get; private set; }
+    public string FixturePath => TestFixturesPath;
+    
+    public async Task InitializeAsync()
     {
+        var extractor = new GoApiExtractor();
+        if (!extractor.IsAvailable())
+        {
+            SkipReason = extractor.UnavailableReason ?? "Go not available";
+            return;
+        }
+        
         try
         {
-            var paths = new[] { "go", "/usr/local/go/bin/go" };
-            foreach (var goPath in paths)
-            {
-                try
-                {
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = goPath,
-                        Arguments = "version",
-                        RedirectStandardOutput = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    using var p = System.Diagnostics.Process.Start(psi);
-                    p?.WaitForExit(1000);
-                    if (p?.ExitCode == 0) return true;
-                }
-                catch { }
-            }
-            return false;
+            Api = await extractor.ExtractAsync(TestFixturesPath);
         }
-        catch { return false; }
+        catch (Exception ex)
+        {
+            SkipReason = $"Go extraction failed: {ex.Message}";
+        }
+    }
+    
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+/// <summary>
+/// Tests for the Go API extractor.
+/// Uses a shared fixture to extract API once, making tests faster.
+/// </summary>
+public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
+{
+    private readonly GoExtractorFixture _fixture;
+
+    public GoApiExtractorTests(GoExtractorFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private ApiIndex GetApi()
+    {
+        Skip.If(_fixture.SkipReason != null, _fixture.SkipReason);
+        return _fixture.Api!;
     }
 
     [SkippableFact]
-    public async Task Extract_ReturnsApiIndex_WithPackageName()
+    public void Extract_ReturnsApiIndex_WithPackageName()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         Assert.NotNull(api);
         Assert.False(string.IsNullOrEmpty(api.Package));
     }
 
     [SkippableFact]
-    public async Task Extract_FindsPackages()
+    public void Extract_FindsPackages()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
+        var api = GetApi();
         Assert.NotNull(api);
         Assert.NotEmpty(api.Packages);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsStructs()
+    public void Extract_FindsStructs()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var structs = api.Packages.SelectMany(p => p.Structs ?? []).ToList();
         var sampleClient = structs.FirstOrDefault(s => s.Name == "SampleClient");
         Assert.NotNull(sampleClient);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsStructMethods()
+    public void Extract_FindsStructMethods()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var structs = api.Packages.SelectMany(p => p.Structs ?? []).ToList();
         var sampleClient = structs.FirstOrDefault(s => s.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -82,53 +97,43 @@ public class GoApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsInterfaces()
+    public void Extract_FindsInterfaces()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var interfaces = api.Packages.SelectMany(p => p.Interfaces ?? []).ToList();
         var iface = interfaces.FirstOrDefault(i => i.Name == "ResourceOperations");
         Assert.NotNull(iface);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsFunctions()
+    public void Extract_FindsFunctions()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var functions = api.Packages.SelectMany(p => p.Functions ?? []).ToList();
         Assert.NotEmpty(functions);
         Assert.Contains(functions, f => f.Name == "NewSampleClient");
     }
 
     [SkippableFact]
-    public async Task Extract_FindsTypeAliases()
+    public void Extract_FindsTypeAliases()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var types = api.Packages.SelectMany(p => p.Types ?? []).ToList();
         Assert.NotEmpty(types);
     }
 
     [SkippableFact]
-    public async Task Extract_FindsConstants()
+    public void Extract_FindsConstants()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var constants = api.Packages.SelectMany(p => p.Constants ?? []).ToList();
         Assert.NotEmpty(constants);
     }
 
     [SkippableFact]
-    public async Task Extract_CapturesDocComments()
+    public void Extract_CapturesDocComments()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var structs = api.Packages.SelectMany(p => p.Structs ?? []).ToList();
         var sampleClient = structs.FirstOrDefault(s => s.Name == "SampleClient");
         Assert.NotNull(sampleClient);
@@ -136,11 +141,9 @@ public class GoApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_CapturesFunctionSignatures()
+    public void Extract_CapturesFunctionSignatures()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var functions = api.Packages.SelectMany(p => p.Functions ?? []).ToList();
         var newClient = functions.FirstOrDefault(f => f.Name == "NewSampleClient");
         Assert.NotNull(newClient);
@@ -148,11 +151,9 @@ public class GoApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_OnlyIncludesExportedSymbols()
+    public void Extract_OnlyIncludesExportedSymbols()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
 
         var allStructs = api.Packages.SelectMany(p => p.Structs ?? []).ToList();
         var allFunctions = api.Packages.SelectMany(p => p.Functions ?? []).ToList();
@@ -174,11 +175,9 @@ public class GoApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsStructFields()
+    public void Extract_FindsStructFields()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var structs = api.Packages.SelectMany(p => p.Structs ?? []).ToList();
         var resource = structs.FirstOrDefault(s => s.Name == "Resource");
         Assert.NotNull(resource);
@@ -187,11 +186,9 @@ public class GoApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_FindsInterfaceMethods()
+    public void Extract_FindsInterfaceMethods()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var interfaces = api.Packages.SelectMany(p => p.Interfaces ?? []).ToList();
         var iface = interfaces.FirstOrDefault(i => i.Name == "ResourceOperations");
         Assert.NotNull(iface);
@@ -200,15 +197,13 @@ public class GoApiExtractorTests
     }
 
     [SkippableFact]
-    public async Task Extract_ProducesSmallerOutputThanSource()
+    public void Extract_ProducesSmallerOutputThanSource()
     {
         // For small test fixtures, API surface can be 80-90% of source.
         // Real SDK packages (100s of KB) show >90% reduction.
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
-        var api = await new GoApiExtractor().ExtractAsync(TestFixturesPath);
-        Assert.NotNull(api);
+        var api = GetApi();
         var json = JsonSerializer.Serialize(api);
-        var sourceSize = Directory.GetFiles(TestFixturesPath, "*.go", SearchOption.AllDirectories)
+        var sourceSize = Directory.GetFiles(_fixture.FixturePath, "*.go", SearchOption.AllDirectories)
             .Where(f => !f.EndsWith("_test.go"))
             .Sum(f => new FileInfo(f).Length);
         Assert.True(json.Length <= sourceSize,
