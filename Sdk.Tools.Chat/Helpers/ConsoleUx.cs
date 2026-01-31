@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-namespace Sdk.Tools.Chat.Helpers;
+namespace Microsoft.SdkChat.Helpers;
 
 /// <summary>
 /// Console UX helpers for streaming output and animations.

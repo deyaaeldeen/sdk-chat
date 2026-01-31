@@ -2,7 +2,7 @@
  * Sample TypeScript package for testing API extraction.
  */
 
-import { AbortSignalLike } from '@azure/abort-controller';
+import { AbortSignalLike } from '@sdk/abort-controller';
 
 /**
  * Result status enumeration.

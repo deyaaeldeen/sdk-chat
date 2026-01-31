@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-namespace Sdk.Tools.Chat.Models;
+namespace Microsoft.SdkChat.Models;
 
 /// <summary>
 /// Event args when prompt is materialized and ready to send.

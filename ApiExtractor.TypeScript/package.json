@@ -1,5 +1,5 @@
 {
-  "name": "@azure-sdk-tools/api-extractor-typescript",
+  "name": "@microsoft-sdkchat/api-extractor-typescript",
   "version": "1.0.0",
   "description": "Extract public API surface from TypeScript/JavaScript packages",
   "type": "module",

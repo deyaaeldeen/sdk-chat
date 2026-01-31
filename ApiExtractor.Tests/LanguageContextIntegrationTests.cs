@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Services.Languages.Samples;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Services.Languages.Samples;
 using Xunit;
 
 namespace ApiExtractor.Tests;

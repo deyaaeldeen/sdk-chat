@@ -2,14 +2,14 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using ModelContextProtocol.Server;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Services.Languages;
-using Sdk.Tools.Chat.Services.Languages.Samples;
-using Sdk.Tools.Chat.Telemetry;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Services.Languages;
+using Microsoft.SdkChat.Services.Languages.Samples;
+using Microsoft.SdkChat.Telemetry;
 
-namespace Sdk.Tools.Chat.Mcp;
+namespace Microsoft.SdkChat.Mcp;
 
 /// <summary>
 /// MCP tool wrapper for the sample generator.

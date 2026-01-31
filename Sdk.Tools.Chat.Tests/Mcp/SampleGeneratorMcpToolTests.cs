@@ -1,14 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Mcp;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Tests.Mocks;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Mcp;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Tests.Mocks;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Mcp;
+namespace Microsoft.SdkChat.Tests.Mcp;
 
 /// <summary>
 /// Comprehensive tests for the MCP Sample Generator tool.

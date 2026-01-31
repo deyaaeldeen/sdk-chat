@@ -5,13 +5,13 @@ using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Services.Languages;
-using Sdk.Tools.Chat.Services.Languages.Samples;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Services.Languages;
+using Microsoft.SdkChat.Services.Languages.Samples;
 
-namespace Sdk.Tools.Chat.Tools.Package.Samples;
+namespace Microsoft.SdkChat.Tools.Package.Samples;
 
 public class SampleGeneratorTool
 {
@@ -140,8 +140,11 @@ public class SampleGeneratorTool
         var promptPrepStopwatch = Stopwatch.StartNew();
         promptPrepStopwatch.Stop();
         
-        // Register event handlers - PromptReady fires during materialization inside StreamItemsAsync
-        _aiService.PromptReady += (sender, args) =>
+        // Named event handlers for proper cleanup (prevents memory leaks)
+        int? responseTokens = null;
+        TimeSpan? generationDuration = null;
+        
+        void OnPromptReady(object? sender, AiPromptReadyEventArgs args)
         {
             promptTokens = args.EstimatedTokens;
 
@@ -161,16 +164,20 @@ public class SampleGeneratorTool
                 !string.IsNullOrWhiteSpace(modelName)
                     ? $"Generating with {providerName} ({modelName})..."
                     : $"Generating with {providerName}...");
-        };
+        }
         
-        int? responseTokens = null;
-        TimeSpan? generationDuration = null;
-        _aiService.StreamComplete += (sender, args) =>
+        void OnStreamComplete(object? sender, AiStreamCompleteEventArgs args)
         {
             responseTokens = args.EstimatedResponseTokens;
             generationDuration = args.Duration;
-        };
+        }
         
+        // Register event handlers - PromptReady fires during materialization inside StreamItemsAsync
+        _aiService.PromptReady += OnPromptReady;
+        _aiService.StreamComplete += OnStreamComplete;
+        
+        try
+        {
         // Create streaming user prompt (materialization happens inside AiService)
         var userPromptStream = StreamUserPromptAsync(prompt, count ?? 5, existingSamplesCount > 0, sdkInfo.SourceFolder, existingSamplesPath, outputDir, context, config, contextBudget, cancellationToken);
         
@@ -299,6 +306,13 @@ public class SampleGeneratorTool
             $"Summary: time scan {FormatDuration(scanStopwatch.Elapsed)}, files {FormatDuration(filesStopwatch.Elapsed)}, prompt {FormatDuration(promptPrepDuration)}, generate {FormatDuration(genDuration)}, total {FormatDuration(totalStopwatch.Elapsed)}");
         
         return 0;
+        }
+        finally
+        {
+            // Always unsubscribe event handlers to prevent memory leaks
+            _aiService.PromptReady -= OnPromptReady;
+            _aiService.StreamComplete -= OnStreamComplete;
+        }
     }
 
     private static string FormatDuration(TimeSpan duration)

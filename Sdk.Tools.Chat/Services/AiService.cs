@@ -7,10 +7,10 @@ using System.Text.Json;
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
 
-namespace Sdk.Tools.Chat.Services;
+namespace Microsoft.SdkChat.Services;
 
 /// <summary>
 /// Unified AI service that streams responses via GitHub Copilot CLI.
@@ -36,6 +36,15 @@ public class AiService : IAiService
     private readonly AiDebugLogger _debugLogger;
     private readonly SemaphoreSlim _clientLock = new(1, 1);
     private readonly TimeSpan _requestTimeout;
+    
+    // Cached JSON options for deserialization (avoids repeated allocation)
+    private static readonly JsonSerializerOptions CachedJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+    
+    // Cached JSON schema per type (reflection is expensive)
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, string> SchemaCache = new();
     
     // Thread-safe disposal tracking
     private int _disposed;
@@ -138,10 +147,7 @@ public class AiService : IAiService
         
         IAsyncEnumerable<string> stream = StreamCopilotAsync(enhancedSystemPrompt, userPrompt, effectiveModel, cancellationToken);
         
-        var jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        };
+        var jsonOptions = CachedJsonOptions;
 
         await using var enumerator = NdjsonStreamParser
             .ParseAsync<T>(TapStream(stream, responseBuilder, cancellationToken), jsonOptions, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
@@ -195,13 +201,15 @@ public class AiService : IAiService
     
     private static string GenerateJsonSchema<T>()
     {
-        var type = typeof(T);
-        var properties = type.GetProperties()
-            .Where(p => p.CanRead)
-            .Select(p => $"  \"{ToCamelCase(p.Name)}\": {GetJsonType(p.PropertyType)}")
-            .ToList();
-        
-        return "{\n" + string.Join(",\n", properties) + "\n}";
+        return SchemaCache.GetOrAdd(typeof(T), static type =>
+        {
+            var properties = type.GetProperties()
+                .Where(p => p.CanRead)
+                .Select(p => $"  \"{ToCamelCase(p.Name)}\": {GetJsonType(p.PropertyType)}")
+                .ToList();
+            
+            return "{\n" + string.Join(",\n", properties) + "\n}";
+        });
     }
     
     private static string ToCamelCase(string name) =>

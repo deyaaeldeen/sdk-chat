@@ -4,10 +4,10 @@
 using System.Runtime.CompilerServices;
 using ApiExtractor.Contracts;
 using ApiExtractor.Go;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
 
-namespace Sdk.Tools.Chat.Services.Languages.Samples;
+namespace Microsoft.SdkChat.Services.Languages.Samples;
 
 public sealed class GoSampleLanguageContext : SampleLanguageContext
 {
@@ -35,7 +35,7 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
         var name = Path.GetFileName(file.FilePath).ToLowerInvariant();
         
         // Deprioritize generated code - load human-written code first
-        // Azure SDK Go uses zz_ prefix for generated files
+        // Go SDKs commonly use zz_ prefix for generated files
         var isGenerated = path.Contains("/generated/") ||
                           name.StartsWith("zz_") ||
                           name.Contains("_autorest");

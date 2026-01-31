@@ -4,16 +4,16 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Sdk.Tools.Chat.Acp;
-using Sdk.Tools.Chat.Mcp;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Telemetry;
-using Sdk.Tools.Chat.Tools;
-using Sdk.Tools.Chat.Tools.Package.Samples;
+using Microsoft.SdkChat.Acp;
+using Microsoft.SdkChat.Mcp;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Telemetry;
+using Microsoft.SdkChat.Tools;
+using Microsoft.SdkChat.Tools.Package.Samples;
 
-namespace Sdk.Tools.Chat;
+namespace Microsoft.SdkChat;
 
 public static class Program
 {

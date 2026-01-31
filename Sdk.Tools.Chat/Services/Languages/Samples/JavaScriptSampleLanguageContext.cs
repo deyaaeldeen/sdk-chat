@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
 
-namespace Sdk.Tools.Chat.Services.Languages.Samples;
+namespace Microsoft.SdkChat.Services.Languages.Samples;
 
 public sealed class JavaScriptSampleLanguageContext : SampleLanguageContext
 {

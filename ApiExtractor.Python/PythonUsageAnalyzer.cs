@@ -49,12 +49,15 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             var psi = new ProcessStartInfo
             {
                 FileName = python,
-                Arguments = $"\"{ScriptPath}\" --usage \"{tempApiFile}\" \"{normalizedPath}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            psi.ArgumentList.Add(ScriptPath);
+            psi.ArgumentList.Add("--usage");
+            psi.ArgumentList.Add(tempApiFile);
+            psi.ArgumentList.Add(normalizedPath);
 
             using var process = Process.Start(psi);
             if (process == null)
@@ -67,10 +70,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 return new UsageIndex { FileCount = 0 };
 
             // Parse the JSON output
-            var result = JsonSerializer.Deserialize<UsageResult>(output, new JsonSerializerOptions 
-            { 
-                PropertyNameCaseInsensitive = true 
-            });
+            var result = JsonSerializer.Deserialize<UsageResult>(output, JsonOptionsCache.CaseInsensitive);
 
             if (result == null)
                 return new UsageIndex { FileCount = 0 };

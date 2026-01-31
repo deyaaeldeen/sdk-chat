@@ -4,10 +4,10 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using ApiExtractor.Contracts;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
 
-namespace Sdk.Tools.Chat.Services.Languages.Samples;
+namespace Microsoft.SdkChat.Services.Languages.Samples;
 
 /// <summary>
 /// Provides language-specific behaviors for sample generation.

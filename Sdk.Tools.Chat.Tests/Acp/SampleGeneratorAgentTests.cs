@@ -10,14 +10,14 @@ using AgentClientProtocol.Sdk.Stream;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Sdk.Tools.Chat.Acp;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Tests.Mocks;
+using Microsoft.SdkChat.Acp;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Tests.Mocks;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Acp;
+namespace Microsoft.SdkChat.Tests.Acp;
 
 /// <summary>
 /// Comprehensive tests for the ACP Sample Generator agent.

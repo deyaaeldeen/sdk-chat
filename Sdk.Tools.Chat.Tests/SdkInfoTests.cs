@@ -1,8 +1,8 @@
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests;
+namespace Microsoft.SdkChat.Tests;
 
 public class SdkInfoTests
 {
@@ -329,7 +329,7 @@ public class SdkInfoTests
     [Fact]
     public void Scan_GoPkgPattern_UsesPkg()
     {
-        // Arrange - Go project with pkg folder (Azure SDK style)
+        // Arrange - Go project with pkg folder (SDK style)
         File.WriteAllText(Path.Combine(_testRoot, "go.mod"), "module test");
         
         var pkgDir = Path.Combine(_testRoot, "pkg");

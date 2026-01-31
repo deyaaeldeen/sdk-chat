@@ -2,13 +2,13 @@
   "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/specification/main/schema/mcp-server.json",
   "name": "sdk-chat",
   "version": "0.1.0",
-  "description": "SDK Chat - Generate production-quality code samples for Azure SDKs with 70% less AI token usage",
+  "description": "SDK Chat - Generate production-quality SDK code samples with 70% less AI token usage",
   "author": "Microsoft",
   "license": "MIT",
-  "homepage": "https://github.com/Azure/azure-sdk-tools",
+  "homepage": "https://github.com/deyaaeldeen/sdk-chat",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Azure/azure-sdk-tools.git",
+    "url": "https://github.com/deyaaeldeen/sdk-chat.git",
     "directory": "tools/sdk-chat"
   },
   "tools": [

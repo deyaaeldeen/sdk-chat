@@ -2,12 +2,12 @@ using ModelContextProtocol.Server;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Services.Languages;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Services.Languages;
 
-namespace Sdk.Tools.Chat.Mcp;
+namespace Microsoft.SdkChat.Mcp;
 
 /// <summary>
 /// MCP server implementation for AI agent integration.

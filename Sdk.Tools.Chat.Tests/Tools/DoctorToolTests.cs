@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Sdk.Tools.Chat.Tools;
+using Microsoft.SdkChat.Tools;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Tools;
+namespace Microsoft.SdkChat.Tests.Tools;
 
 /// <summary>
 /// Tests for the DoctorTool dependency validation.

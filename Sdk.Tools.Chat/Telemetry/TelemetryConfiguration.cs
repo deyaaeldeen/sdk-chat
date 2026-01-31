@@ -4,7 +4,7 @@
 using OpenTelemetry.Trace;
 using OpenTelemetry.Resources;
 
-namespace Sdk.Tools.Chat.Telemetry;
+namespace Microsoft.SdkChat.Telemetry;
 
 /// <summary>
 /// Configures OpenTelemetry tracing with OTLP and Console exporters.

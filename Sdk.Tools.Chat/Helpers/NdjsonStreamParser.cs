@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 
-namespace Sdk.Tools.Chat.Helpers;
+namespace Microsoft.SdkChat.Helpers;
 
 /// <summary>
 /// Parses NDJSON (newline-delimited JSON) from streaming chunks.

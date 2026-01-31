@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 
-namespace Sdk.Tools.Chat.Models;
+namespace Microsoft.SdkChat.Models;
 
 /// <summary>
 /// Represents a generated code sample from AI.

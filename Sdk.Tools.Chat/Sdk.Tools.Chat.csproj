@@ -5,16 +5,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>Sdk.Tools.Chat</RootNamespace>
+    <RootNamespace>Microsoft.SdkChat</RootNamespace>
     
     <!-- Enable as dotnet global tool -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>sdk-chat</ToolCommandName>
-    <PackageId>Microsoft.Azure.Sdk.Tools.Chat</PackageId>
+    <PackageId>Microsoft.SdkChat</PackageId>
     <Version>0.1.0</Version>
     <Authors>Microsoft</Authors>
-    <Description>SDK CLI - Generate code samples and SDK utilities for Azure SDKs. Supports .NET, Python, Java, JavaScript, TypeScript, and Go.</Description>
-    <PackageTags>azure;sdk;samples;codegen;ai;mcp;acp</PackageTags>
+    <Description>SDK CLI - Generate code samples and SDK utilities for SDKs. Supports .NET, Python, Java, JavaScript, TypeScript, and Go.</Description>
+    <PackageTags>sdk;samples;codegen;ai;mcp;acp</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>

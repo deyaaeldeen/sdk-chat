@@ -4,7 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Sdk.Tools.Chat.Mcp;
+namespace Microsoft.SdkChat.Mcp;
 
 /// <summary>
 /// Structured result for MCP tool responses.

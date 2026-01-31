@@ -3,7 +3,7 @@
 
 using System.Text.Json.Serialization;
 
-namespace Sdk.Tools.Chat.Models;
+namespace Microsoft.SdkChat.Models;
 
 public enum SdkLanguage
 {

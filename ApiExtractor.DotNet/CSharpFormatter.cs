@@ -272,36 +272,67 @@ public static class CSharpFormatter
         sb.AppendLine();
         sb.AppendLine($"{indent}{{");
         
-        // Members grouped by kind
-        var members = type.Members ?? [];
+        // Group members by kind once for efficient iteration (instead of 7x .Where() scans)
+        var membersByKind = new Dictionary<string, List<MemberInfo>>();
+        foreach (var m in type.Members ?? [])
+        {
+            var key = m.Kind ?? "other";
+            if (!membersByKind.TryGetValue(key, out var list))
+            {
+                list = [];
+                membersByKind[key] = list;
+            }
+            list.Add(m);
+        }
         
         // Constants first
-        foreach (var m in members.Where(m => m.Kind == "const"))
-            FormatMember(sb, m, indent + "    ");
+        if (membersByKind.TryGetValue("const", out var consts))
+        {
+            foreach (var m in consts)
+                FormatMember(sb, m, indent + "    ");
+        }
         
         // Static properties
-        foreach (var m in members.Where(m => m.Kind == "property" && m.IsStatic == true))
-            FormatMember(sb, m, indent + "    ");
+        if (membersByKind.TryGetValue("property", out var properties))
+        {
+            foreach (var m in properties.Where(m => m.IsStatic == true))
+                FormatMember(sb, m, indent + "    ");
+        }
         
         // Constructors
-        foreach (var m in members.Where(m => m.Kind == "ctor"))
-            FormatMember(sb, m, indent + "    ");
+        if (membersByKind.TryGetValue("ctor", out var ctors))
+        {
+            foreach (var m in ctors)
+                FormatMember(sb, m, indent + "    ");
+        }
         
         // Instance properties
-        foreach (var m in members.Where(m => m.Kind == "property" && m.IsStatic != true))
-            FormatMember(sb, m, indent + "    ");
+        if (membersByKind.TryGetValue("property", out var props))
+        {
+            foreach (var m in props.Where(m => m.IsStatic != true))
+                FormatMember(sb, m, indent + "    ");
+        }
         
         // Indexers
-        foreach (var m in members.Where(m => m.Kind == "indexer"))
-            FormatMember(sb, m, indent + "    ");
+        if (membersByKind.TryGetValue("indexer", out var indexers))
+        {
+            foreach (var m in indexers)
+                FormatMember(sb, m, indent + "    ");
+        }
         
         // Events
-        foreach (var m in members.Where(m => m.Kind == "event"))
-            FormatMember(sb, m, indent + "    ");
+        if (membersByKind.TryGetValue("event", out var events))
+        {
+            foreach (var m in events)
+                FormatMember(sb, m, indent + "    ");
+        }
         
         // Methods
-        foreach (var m in members.Where(m => m.Kind == "method"))
-            FormatMember(sb, m, indent + "    ");
+        if (membersByKind.TryGetValue("method", out var methods))
+        {
+            foreach (var m in methods)
+                FormatMember(sb, m, indent + "    ");
+        }
         
         sb.AppendLine($"{indent}}}");
         sb.AppendLine();

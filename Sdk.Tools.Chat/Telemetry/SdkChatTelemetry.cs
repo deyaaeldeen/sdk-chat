@@ -3,7 +3,7 @@
 
 using System.Diagnostics;
 
-namespace Sdk.Tools.Chat.Telemetry;
+namespace Microsoft.SdkChat.Telemetry;
 
 /// <summary>
 /// Centralized telemetry for SDK Chat using OpenTelemetry-compatible ActivitySource.
@@ -14,7 +14,7 @@ public static class SdkChatTelemetry
     /// <summary>
     /// Activity source name for SDK Chat operations.
     /// </summary>
-    public const string SourceName = "Sdk.Tools.Chat";
+    public const string SourceName = "Microsoft.SdkChat";
     
     /// <summary>
     /// Activity source version.

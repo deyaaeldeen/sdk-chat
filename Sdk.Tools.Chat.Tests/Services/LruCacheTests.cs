@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Sdk.Tools.Chat.Services;
+using Microsoft.SdkChat.Services;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Services;
+namespace Microsoft.SdkChat.Tests.Services;
 
 /// <summary>
 /// Tests for the LruCache class.

@@ -2,9 +2,9 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
-using Sdk.Tools.Chat.Models;
+using Microsoft.SdkChat.Models;
 
-namespace Sdk.Tools.Chat.Services;
+namespace Microsoft.SdkChat.Services;
 
 /// <summary>
 /// Interface for AI service operations. Enables mocking for unit tests.

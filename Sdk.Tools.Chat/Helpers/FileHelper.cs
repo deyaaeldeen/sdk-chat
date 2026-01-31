@@ -6,7 +6,7 @@ using System.Text;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.Logging;
 
-namespace Sdk.Tools.Chat.Helpers;
+namespace Microsoft.SdkChat.Helpers;
 
 /// <summary>
 /// Represents a streamed file chunk with metadata.

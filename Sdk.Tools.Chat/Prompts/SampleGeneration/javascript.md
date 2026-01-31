@@ -1,7 +1,7 @@
 # JavaScript Sample Generation Guidelines
 
 ## Overview
-Generate clear, runnable JavaScript code samples for Azure SDK packages.
+Generate clear, runnable JavaScript code samples for SDK packages.
 
 ## Code Style
 - Use ES modules (import/export) or CommonJS as appropriate for the package
@@ -16,8 +16,8 @@ Generate clear, runnable JavaScript code samples for Azure SDK packages.
 // Sample: [Sample Name]
 // Description: [Brief description]
 
-const { ClientName } = require("@azure/package-name");
-// or: import { ClientName } from "@azure/package-name";
+const { ClientName } = require("@sdk/package-name");
+// or: import { ClientName } from "@sdk/package-name";
 
 async function main() {
     // Initialize client
@@ -58,8 +58,8 @@ try {
 
 ## Environment Configuration
 ```javascript
-const endpoint = process.env.AZURE_ENDPOINT || "<your-endpoint>";
-const apiKey = process.env.AZURE_API_KEY;
+const endpoint = process.env.SDK_ENDPOINT || "<your-endpoint>";
+const apiKey = process.env.SDK_API_KEY;
 ```
 
 ## Best Practices

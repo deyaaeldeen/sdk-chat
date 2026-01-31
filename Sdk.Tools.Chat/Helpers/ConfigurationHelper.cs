@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Sdk.Tools.Chat.Models;
+using Microsoft.SdkChat.Models;
 
-namespace Sdk.Tools.Chat.Helpers;
+namespace Microsoft.SdkChat.Helpers;
 
 public class ConfigurationHelper
 {

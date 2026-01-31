@@ -4,14 +4,14 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Tests.Mocks;
-using Sdk.Tools.Chat.Tools.Package.Samples;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Tests.Mocks;
+using Microsoft.SdkChat.Tools.Package.Samples;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Tools;
+namespace Microsoft.SdkChat.Tests.Tools;
 
 /// <summary>
 /// Tests for the SampleGeneratorTool CLI entry point.

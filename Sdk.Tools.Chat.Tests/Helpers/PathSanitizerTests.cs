@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Sdk.Tools.Chat.Helpers;
+using Microsoft.SdkChat.Helpers;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Helpers;
+namespace Microsoft.SdkChat.Tests.Helpers;
 
 /// <summary>
 /// Tests for the PathSanitizer utility.
@@ -113,6 +113,33 @@ public class PathSanitizerTests
         var result = PathSanitizer.SanitizeFilePath("a/b/c/d/e/f/g/file.cs", ".cs");
         var segments = result.Split(Path.DirectorySeparatorChar);
         Assert.Equal(8, segments.Length);
+    }
+    
+    [Theory]
+    [InlineData("../../../etc/passwd", ".cs")]
+    [InlineData("..\\..\\Windows\\System32\\config", ".cs")]
+    [InlineData("a/../b/../c/file.cs", ".cs")]
+    [InlineData("./file.cs", ".cs")]
+    [InlineData("a/./b/file.cs", ".cs")]
+    public void SanitizeFilePath_BlocksPathTraversalAttempts(string maliciousPath, string ext)
+    {
+        var result = PathSanitizer.SanitizeFilePath(maliciousPath, ext);
+        
+        // Result should not contain any ".." or "." path components
+        var normalizedResult = result.Replace(Path.DirectorySeparatorChar, '/');
+        var parts = normalizedResult.Split('/');
+        Assert.DoesNotContain("..", parts);
+        Assert.DoesNotContain(".", parts);
+        
+        // Result should be a safe relative path
+        Assert.False(Path.IsPathRooted(result), "Result should not be an absolute path");
+    }
+    
+    [Fact]
+    public void SanitizeFilePath_OnlyDotsReturnsDefault()
+    {
+        var result = PathSanitizer.SanitizeFilePath("../../../..", ".cs");
+        Assert.Equal("Sample.cs", result);
     }
     
     #endregion

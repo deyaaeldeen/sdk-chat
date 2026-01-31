@@ -3,18 +3,23 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
-namespace Sdk.Tools.Chat.Tools;
+namespace Microsoft.SdkChat.Tools;
 
 /// <summary>
 /// Validates all external dependencies required by the SDK Chat tool.
 /// Reports version information, path locations, and potential security concerns.
 /// </summary>
-public sealed class DoctorTool
+public sealed partial class DoctorTool
 {
     private const string Checkmark = "✓";
     private const string CrossMark = "✗";
     private const string WarningMark = "⚠";
+    
+    // Source-generated regex for extracting Go version (avoids repeated compilation)
+    [GeneratedRegex(@"go(\d+\.\d+\.?\d*)")]
+    private static partial Regex GoVersionRegex();
 
     public record DependencyStatus(
         string Name,
@@ -140,7 +145,7 @@ public sealed class DoctorTool
             {
                 // "go version go1.21.0 darwin/arm64" -> "1.21.0"
                 var version = output.Trim();
-                var match = System.Text.RegularExpressions.Regex.Match(version, @"go(\d+\.\d+\.?\d*)");
+                var match = GoVersionRegex().Match(version);
                 var versionStr = match.Success ? match.Groups[1].Value : version;
                 var path = await GetCommandPathAsync("go", ct);
 

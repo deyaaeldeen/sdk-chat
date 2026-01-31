@@ -3,10 +3,10 @@
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Sdk.Tools.Chat.Helpers;
+using Microsoft.SdkChat.Helpers;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Helpers;
+namespace Microsoft.SdkChat.Tests.Helpers;
 
 /// <summary>
 /// Tests for FileHelper large file handling - verifies long file size support.

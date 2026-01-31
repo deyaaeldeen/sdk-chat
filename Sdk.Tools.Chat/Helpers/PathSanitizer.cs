@@ -3,7 +3,7 @@
 
 using System.Buffers;
 
-namespace Sdk.Tools.Chat.Helpers;
+namespace Microsoft.SdkChat.Helpers;
 
 /// <summary>
 /// Utility for sanitizing file names and paths for cross-platform safety.
@@ -44,6 +44,7 @@ public static class PathSanitizer
     
     /// <summary>
     /// Sanitizes a relative file path, ensuring each path segment is safe.
+    /// Prevents path traversal attacks by blocking ".." sequences.
     /// </summary>
     public static string SanitizeFilePath(string? path, string expectedExtension)
     {
@@ -55,22 +56,34 @@ public static class PathSanitizer
         if (parts.Length == 0) return "Sample" + expectedExtension;
         
         var sanitizedParts = new string[parts.Length];
+        var validPartCount = 0;
+        
         for (var i = 0; i < parts.Length; i++)
         {
-            sanitizedParts[i] = SanitizeFileName(parts[i]);
+            var part = parts[i];
+            
+            // Explicitly block path traversal attempts - ".." could escape output directory
+            if (part == ".." || part == ".")
+                continue;
+            
+            sanitizedParts[validPartCount++] = SanitizeFileName(part);
         }
         
-        var result = string.Join(Path.DirectorySeparatorChar, sanitizedParts);
+        if (validPartCount == 0) return "Sample" + expectedExtension;
+        
+        // Create final array with only valid parts
+        var finalParts = sanitizedParts[..validPartCount];
+        var result = string.Join(Path.DirectorySeparatorChar, finalParts);
         
         // Ensure correct extension
         if (!result.EndsWith(expectedExtension, StringComparison.OrdinalIgnoreCase))
         {
-            var lastPart = sanitizedParts[^1];
+            var lastPart = finalParts[^1];
             var dotIndex = lastPart.LastIndexOf('.');
             if (dotIndex > 0)
             {
-                sanitizedParts[^1] = lastPart[..dotIndex] + expectedExtension;
-                result = string.Join(Path.DirectorySeparatorChar, sanitizedParts);
+                finalParts[^1] = lastPart[..dotIndex] + expectedExtension;
+                result = string.Join(Path.DirectorySeparatorChar, finalParts);
             }
             else
             {

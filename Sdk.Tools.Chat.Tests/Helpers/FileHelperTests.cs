@@ -2,10 +2,10 @@
 // Licensed under the MIT License.
 
 using System.Text;
-using Sdk.Tools.Chat.Helpers;
+using Microsoft.SdkChat.Helpers;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Helpers;
+namespace Microsoft.SdkChat.Tests.Helpers;
 
 public class FileHelperTests : IDisposable
 {

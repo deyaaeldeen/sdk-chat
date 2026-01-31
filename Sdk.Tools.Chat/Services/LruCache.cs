@@ -3,7 +3,7 @@
 
 using System.Collections.Concurrent;
 
-namespace Sdk.Tools.Chat.Services;
+namespace Microsoft.SdkChat.Services;
 
 /// <summary>
 /// Thread-safe LRU cache with configurable size limit.

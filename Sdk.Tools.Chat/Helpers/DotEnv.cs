@@ -3,7 +3,7 @@
 
 using System.Globalization;
 
-namespace Sdk.Tools.Chat.Helpers;
+namespace Microsoft.SdkChat.Helpers;
 
 internal static class DotEnv
 {

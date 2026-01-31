@@ -3,10 +3,10 @@
 
 using System.Runtime.CompilerServices;
 using Moq;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
 
-namespace Sdk.Tools.Chat.Tests.Mocks;
+namespace Microsoft.SdkChat.Tests.Mocks;
 
 /// <summary>
 /// Factory for creating mock AI services using Moq.

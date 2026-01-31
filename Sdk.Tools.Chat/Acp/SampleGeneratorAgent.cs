@@ -5,14 +5,14 @@ using AgentClientProtocol.Sdk;
 using AgentClientProtocol.Sdk.Schema;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Services.Languages;
-using Sdk.Tools.Chat.Services.Languages.Samples;
-using Sdk.Tools.Chat.Telemetry;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Services.Languages;
+using Microsoft.SdkChat.Services.Languages.Samples;
+using Microsoft.SdkChat.Telemetry;
 
-namespace Sdk.Tools.Chat.Acp;
+namespace Microsoft.SdkChat.Acp;
 
 /// <summary>
 /// ACP agent implementation for interactive sample generation.
@@ -22,11 +22,11 @@ public sealed class SampleGeneratorAgent(
     IServiceProvider services, 
     ILogger<SampleGeneratorAgent> logger) : IAgent
 {
-    // Thread-safe session storage
+    // Thread-safe session storage with cancellation support
     private readonly ConcurrentDictionary<string, AgentSessionState> _sessions = new();
     
-    // Store connection per session for interactive generation
-    private AgentSideConnection? _currentConnection;
+    // Store connection per session for interactive generation (volatile for thread-safe reads)
+    private volatile AgentSideConnection? _currentConnection;
     
     public void SetConnection(AgentSideConnection connection)
     {
@@ -83,13 +83,17 @@ public sealed class SampleGeneratorAgent(
             throw new InvalidOperationException($"Unknown session: {request.SessionId}");
         }
         
+        // Link the external cancellation token with session's cancellation token
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, sessionState.CancellationToken);
+        var effectiveCt = linkedCts.Token;
+        
         // Use workspace path from session's cwd
         var workspacePath = sessionState.WorkingDirectory ?? ".";
         
         // Stream status to client
         if (_currentConnection != null)
         {
-            await _currentConnection.SendTextAsync(request.SessionId, $"Analyzing SDK at {workspacePath}...\n", ct).ConfigureAwait(false);
+            await _currentConnection.SendTextAsync(request.SessionId, $"Analyzing SDK at {workspacePath}...\n", effectiveCt).ConfigureAwait(false);
         }
         
         // Get services
@@ -108,12 +112,12 @@ public sealed class SampleGeneratorAgent(
         try
         {
             // Auto-detect source, samples folders, and language (async to avoid blocking)
-            var sdkInfo = await SdkInfo.ScanAsync(workspacePath, ct).ConfigureAwait(false);
+            var sdkInfo = await SdkInfo.ScanAsync(workspacePath, effectiveCt).ConfigureAwait(false);
         if (sdkInfo.Language == null)
         {
             if (_currentConnection != null)
             {
-                await _currentConnection.SendTextAsync(request.SessionId, "Could not detect SDK language.\n", ct).ConfigureAwait(false);
+                await _currentConnection.SendTextAsync(request.SessionId, "Could not detect SDK language.\n", effectiveCt).ConfigureAwait(false);
             }
             return new PromptResponse { StopReason = StopReason.EndTurn };
         }
@@ -122,26 +126,26 @@ public sealed class SampleGeneratorAgent(
         
         if (_currentConnection != null)
         {
-            await _currentConnection.SendTextAsync(request.SessionId, $"Detected {sdkInfo.LanguageName} SDK\n", ct).ConfigureAwait(false);
+            await _currentConnection.SendTextAsync(request.SessionId, $"Detected {sdkInfo.LanguageName} SDK\n", effectiveCt).ConfigureAwait(false);
         }
         
         if (_currentConnection != null)
         {
-            await _currentConnection.SendTextAsync(request.SessionId, $"Source: {sdkInfo.SourceFolder}\n", ct).ConfigureAwait(false);
-            await _currentConnection.SendTextAsync(request.SessionId, $"Output: {sdkInfo.SuggestedSamplesFolder}\n\n", ct).ConfigureAwait(false);
-            await _currentConnection.SendTextAsync(request.SessionId, "Generating samples...\n", ct).ConfigureAwait(false);
+            await _currentConnection.SendTextAsync(request.SessionId, $"Source: {sdkInfo.SourceFolder}\n", effectiveCt).ConfigureAwait(false);
+            await _currentConnection.SendTextAsync(request.SessionId, $"Output: {sdkInfo.SuggestedSamplesFolder}\n\n", effectiveCt).ConfigureAwait(false);
+            await _currentConnection.SendTextAsync(request.SessionId, "Generating samples...\n", effectiveCt).ConfigureAwait(false);
         }
         
         // Create appropriate language context
         var context = CreateLanguageContext(sdkInfo.Language.Value, fileHelper);
         
         var systemPrompt = $"Generate runnable SDK samples. {context.GetInstructions()}";
-        var userPromptStream = StreamUserPromptAsync(sdkInfo.SourceFolder, context, ct);
+        var userPromptStream = StreamUserPromptAsync(sdkInfo.SourceFolder, context, effectiveCt);
         
         // Stream parsed samples as they complete
         List<GeneratedSample> samples = [];
         await foreach (var sample in aiService.StreamItemsAsync<GeneratedSample>(
-            systemPrompt, userPromptStream, null, null, ct))
+            systemPrompt, userPromptStream, null, null, effectiveCt))
         {
             if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
             {
@@ -167,11 +171,11 @@ public sealed class SampleGeneratorAgent(
                 Directory.CreateDirectory(fileDir);
             }
             
-            await File.WriteAllTextAsync(filePath, sample.Code, ct).ConfigureAwait(false);
+            await File.WriteAllTextAsync(filePath, sample.Code, effectiveCt).ConfigureAwait(false);
             
             if (_currentConnection != null)
             {
-                await _currentConnection.SendTextAsync(request.SessionId, $"✓ {relativePath}\n", ct).ConfigureAwait(false);
+                await _currentConnection.SendTextAsync(request.SessionId, $"✓ {relativePath}\n", effectiveCt).ConfigureAwait(false);
             }
         }
         
@@ -181,7 +185,7 @@ public sealed class SampleGeneratorAgent(
         
         if (_currentConnection != null)
         {
-            await _currentConnection.SendTextAsync(request.SessionId, $"\nDone! Generated {samples.Count} sample(s)\n", ct).ConfigureAwait(false);
+            await _currentConnection.SendTextAsync(request.SessionId, $"\nDone! Generated {samples.Count} sample(s)\n", effectiveCt).ConfigureAwait(false);
         }
         
         return new PromptResponse { StopReason = StopReason.EndTurn };
@@ -207,6 +211,18 @@ public sealed class SampleGeneratorAgent(
     public Task CancelAsync(CancelNotification notification, CancellationToken ct = default)
     {
         logger.LogDebug("Cancel requested for session {SessionId}", notification.SessionId);
+        
+        // Cancel the session's ongoing operations
+        if (_sessions.TryGetValue(notification.SessionId, out var sessionState))
+        {
+            sessionState.RequestCancellation();
+            logger.LogInformation("Cancelled session {SessionId}", notification.SessionId);
+        }
+        else
+        {
+            logger.LogWarning("Cancel requested for unknown session {SessionId}", notification.SessionId);
+        }
+        
         return Task.CompletedTask;
     }
     
@@ -224,10 +240,20 @@ public sealed class SampleGeneratorAgent(
         }
     }
     
-    /// <summary>Internal state for a session.</summary>
-    private sealed class AgentSessionState
+    /// <summary>Internal state for a session with cancellation support.</summary>
+    private sealed class AgentSessionState : IDisposable
     {
+        private readonly CancellationTokenSource _cts = new();
+        
         public required string SessionId { get; init; }
         public string? WorkingDirectory { get; init; }
+        
+        /// <summary>Token that will be cancelled when CancelAsync is called.</summary>
+        public CancellationToken CancellationToken => _cts.Token;
+        
+        /// <summary>Request cancellation of this session's operations.</summary>
+        public void RequestCancellation() => _cts.Cancel();
+        
+        public void Dispose() => _cts.Dispose();
     }
 }

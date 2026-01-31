@@ -1,8 +1,8 @@
-using Sdk.Tools.Chat.Helpers;
+using Microsoft.SdkChat.Helpers;
 using System.Text.Json;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Helpers;
+namespace Microsoft.SdkChat.Tests.Helpers;
 
 public class NdjsonStreamParserTests
 {

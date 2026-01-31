@@ -1,319 +1,244 @@
-# Contributing to SDK Chat
+# Contributing
 
-Welcome! This document provides guidelines for contributing to the SDK Chat project.
+## Quick Links
 
-## Table of Contents
+| I want to... | Go to |
+|--------------|-------|
+| Add a new language extractor | [Adding a Language](#adding-a-language) |
+| Understand the architecture | [Architecture](#architecture) |
+| Run tests | [Testing](#testing) |
+| Follow code style | [Standards](#coding-standards) |
 
-- [Architecture Overview](#architecture-overview)
-- [Project Structure](#project-structure)
-- [Adding a New Language Extractor](#adding-a-new-language-extractor)
-- [Coding Standards](#coding-standards)
-- [Testing](#testing)
-- [Building](#building)
+---
 
-## Architecture Overview
-
-The SDK Chat consists of three main components:
-
-### 1. API Extractors
-
-Language-specific tools that extract public API surfaces from source code, producing minimal JSON for AI consumption (~95% token reduction vs. full source).
+## Architecture
 
 ```
-                    ┌─────────────────────────────────────────┐
-                    │         IApiExtractor<TIndex>           │
-                    │                                         │
-                    │  • Language: string                     │
-                    │  • IsAvailable(): bool                  │
-                    │  • ExtractAsync(path): ExtractorResult  │
-                    │  • ToJson(index): string                │
-                    │  • ToStubs(index): string               │
-                    └─────────────────────────────────────────┘
-                                        △
-            ┌───────────────────────────┼───────────────────────────┐
-            │               │           │           │               │
-    ┌───────┴───────┐ ┌─────┴─────┐ ┌───┴───┐ ┌─────┴─────┐ ┌───────┴───────┐
-    │ C# (Roslyn)   │ │ Python    │ │ Java  │ │   Go      │ │  TypeScript   │
-    │ CSharpApi     │ │ PythonApi │ │ JavaApi│ │ GoApi     │ │ TypeScriptApi │
-    │ Extractor     │ │ Extractor │ │Extract│ │ Extractor │ │   Extractor   │
-    └───────────────┘ └───────────┘ └───────┘ └───────────┘ └───────────────┘
-           │                │           │           │               │
-           ▼                ▼           ▼           ▼               ▼
-       Roslyn           python3      jbang         go            node.js
-       (embedded)       (shell)      (shell)      (shell)        (shell)
+┌─────────────────────────────────────────────────────────────────┐
+│                        Microsoft.SdkChat                        │
+│                                                                 │
+│   ┌─────────┐     ┌─────────┐     ┌─────────────────────────┐  │
+│   │   CLI   │     │   MCP   │     │          ACP            │  │
+│   │  Mode   │     │ Server  │     │    Interactive Mode     │  │
+│   └────┬────┘     └────┬────┘     └────────────┬────────────┘  │
+│        │               │                       │               │
+│        └───────────────┴───────────┬───────────┘               │
+│                                    │                           │
+│                         ┌──────────▼──────────┐                │
+│                         │   Sample Generator   │                │
+│                         │   + AI Service       │                │
+│                         └──────────┬──────────┘                │
+└────────────────────────────────────┼───────────────────────────┘
+                                     │
+         ┌───────────┬───────────┬───┴───┬───────────┬───────────┐
+         ▼           ▼           ▼       ▼           ▼           ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────┐
+    │  .NET   │ │ Python  │ │  Java   │ │   Go    │ │ TypeScript  │
+    │ Roslyn  │ │   ast   │ │JavaParser│ │go/parser│ │  ts-morph   │
+    └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────────┘
 ```
 
-### 2. Main CLI (`Sdk.Tools.Chat`)
+### Components
 
-Orchestrates extractors and provides three modes:
-- **CLI Mode**: Direct command-line usage
-- **MCP Mode**: Model Context Protocol server for VS Code/Claude
-- **ACP Mode**: Agent Client Protocol for interactive AI workflows
+| Component | Purpose |
+|-----------|---------|
+| **Microsoft.SdkChat** | Main CLI with three modes (CLI, MCP, ACP) |
+| **AgentClientProtocol.Sdk** | Standalone ACP protocol implementation |
+| **ApiExtractor.\*** | Language-specific API extractors |
+| **ApiExtractor.Contracts** | Shared `IApiExtractor<T>` interface |
 
-### 3. Agent Client Protocol SDK
+---
 
-A standalone JSON-RPC implementation for agent communication.
+## Adding a Language
 
-## Project Structure
-
-```
-sdk-chat/
-├── ApiExtractor.Contracts/      # Shared interface (IApiExtractor<T>)
-│   ├── IApiExtractor.cs         # Core interface all extractors implement
-│   ├── CliOptions.cs            # Standardized CLI argument parsing
-│   └── ExtractorResult.cs       # Success/failure result wrapper
-│
-├── ApiExtractor.DotNet/         # C# extractor using Roslyn
-│   ├── CSharpApiExtractor.cs    # Extractor implementation
-│   ├── CSharpFormatter.cs       # Stub output formatter
-│   ├── Models.cs                # API data models (records)
-│   └── Program.cs               # Standalone CLI entry point
-│
-├── ApiExtractor.Python/         # Python extractor using ast module
-│   ├── PythonApiExtractor.cs    # Shells to python3
-│   ├── extract_api.py           # Python parser script
-│   ├── PythonFormatter.cs       # Stub output formatter
-│   ├── Models.cs                # API data models (records)
-│   └── Program.cs               # Standalone CLI entry point
-│
-├── ApiExtractor.Java/           # Java extractor using JBang + JavaParser
-│   ├── JavaApiExtractor.cs      # Shells to jbang
-│   ├── ExtractApi.java          # JBang parser script
-│   ├── JavaFormatter.cs         # Stub output formatter
-│   ├── Models.cs                # API data models (records)
-│   └── Program.cs               # Standalone CLI entry point
-│
-├── ApiExtractor.Go/             # Go extractor using go/parser
-│   ├── GoApiExtractor.cs        # Shells to go run
-│   ├── extract_api.go           # Go parser script
-│   ├── GoFormatter.cs           # Stub output formatter
-│   ├── Models.cs                # API data models (records)
-│   └── Program.cs               # Standalone CLI entry point
-│
-├── ApiExtractor.TypeScript/     # TypeScript extractor using ts-morph
-│   ├── TypeScriptApiExtractor.cs# Shells to node
-│   ├── src/extract_api.ts       # TypeScript parser using ts-morph
-│   ├── TypeScriptFormatter.cs   # Stub output formatter
-│   ├── Models.cs                # API data models (records)
-│   └── Program.cs               # Standalone CLI entry point
-│
-├── ApiExtractor.Tests/          # Test suite (xUnit)
-│   ├── DotNetApiExtractorTests.cs
-│   ├── PythonApiExtractorTests.cs
-│   ├── JavaApiExtractorTests.cs
-│   ├── GoApiExtractorTests.cs
-│   ├── TypeScriptApiExtractorTests.cs
-│   └── TestFixtures/            # Sample code for each language
-│
-├── Sdk.Tools.Chat/               # Main CLI application
-│   ├── Mcp/                     # MCP server implementation
-│   ├── Acp/                     # ACP agent host
-│   └── Program.cs               # CLI entry point
-│
-└── AgentClientProtocol.Sdk/     # Standalone ACP SDK
-```
-
-## Adding a New Language Extractor
-
-### Step 1: Create the Project
+### 1. Create Project
 
 ```bash
-cd tools/sdk-chat
 dotnet new classlib -n ApiExtractor.NewLang -o ApiExtractor.NewLang
+dotnet sln add ApiExtractor.NewLang
 ```
 
-Add project reference to the solution and add reference to `ApiExtractor.Contracts`.
+Add reference:
+```xml
+<ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
+```
 
-### Step 2: Implement `IApiExtractor<T>`
-
-Create your extractor implementing `IApiExtractor<TIndex>`:
+### 2. Implement Interface
 
 ```csharp
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
-using ApiExtractor.Contracts;
-
-namespace ApiExtractor.NewLang;
-
+// ApiExtractor.NewLang/NewLangApiExtractor.cs
 public class NewLangApiExtractor : IApiExtractor<ApiIndex>
 {
     public string Language => "newlang";
-
+    
     public bool IsAvailable()
     {
-        // Check if runtime is available (e.g., interpreter in PATH)
-        return true;
+        // Check if runtime exists (e.g., `newlang --version`)
+        return ProcessHelper.TryRun("newlang", "--version");
     }
-
+    
     public string? UnavailableReason { get; private set; }
-
-    public async Task<ExtractorResult<ApiIndex>> ExtractAsync(string rootPath, CancellationToken ct)
+    
+    public async Task<ExtractorResult<ApiIndex>> ExtractAsync(
+        string rootPath, 
+        CancellationToken ct)
     {
-        // Implement extraction logic
+        // Shell to language parser script or use embedded parser
     }
-
-    public string ToJson(ApiIndex index, bool pretty = false) { /* ... */ }
-    public string ToStubs(ApiIndex index) { /* ... */ }
+    
+    public string ToJson(ApiIndex index, bool pretty = false) => /* ... */;
+    public string ToStubs(ApiIndex index) => /* ... */;
 }
 ```
 
-### Step 3: Define Models
-
-Create `Models.cs` using **records with init-only properties**:
+### 3. Define Models
 
 ```csharp
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
-using System.Text.Json.Serialization;
-
-namespace ApiExtractor.NewLang;
-
+// ApiExtractor.NewLang/Models.cs
 public record ApiIndex
 {
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
-
+    
     [JsonPropertyName("modules")]
     public List<ModuleInfo> Modules { get; init; } = [];
 }
-
-// Add other model records...
-
-[JsonSourceGenerationOptions(
-    WriteIndented = false,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-[JsonSerializable(typeof(ApiIndex))]
-internal partial class SourceGenerationContext : JsonSerializerContext { }
 ```
 
-### Step 4: Create Formatter
+Use **records** with `{ get; init; }` properties.
 
-Create a `NewLangFormatter.cs` that outputs human-readable stubs:
+### 4. Create Formatter
 
 ```csharp
+// ApiExtractor.NewLang/NewLangFormatter.cs
 public static class NewLangFormatter
 {
-    public static string Format(ApiIndex index) { /* ... */ }
+    public static string Format(ApiIndex index)
+    {
+        // Return language-native stub syntax
+    }
 }
 ```
 
-### Step 5: Create CLI Entry Point
-
-Create `Program.cs` using the shared `CliOptions`:
+### 5. Add CLI Entry Point
 
 ```csharp
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
-using ApiExtractor.Contracts;
-using ApiExtractor.NewLang;
-
+// ApiExtractor.NewLang/Program.cs
 var options = CliOptions.Parse(args);
-
 if (options.ShowHelp || options.Path == null)
 {
     Console.WriteLine(CliOptions.GetHelpText("NewLang", "ApiExtractor.NewLang"));
     return options.ShowHelp ? 0 : 1;
 }
-
-// ... standard CLI implementation
+// Standard extraction flow...
 ```
 
-### Step 6: Add Tests
+### 6. Add Tests
 
-Create `NewLangApiExtractorTests.cs` in `ApiExtractor.Tests/`:
+Create `ApiExtractor.Tests/NewLangApiExtractorTests.cs`:
 
-- Add test fixtures in `TestFixtures/NewLang/`
-- Follow existing test patterns
-- Use `[SkippableFact]` for tests requiring runtime
+```csharp
+public class NewLangApiExtractorTests
+{
+    [SkippableFact]
+    public async Task ExtractsPublicApi()
+    {
+        Skip.IfNot(_extractor.IsAvailable(), "newlang not installed");
+        // Test extraction
+    }
+}
+```
+
+Add fixtures in `ApiExtractor.Tests/TestFixtures/NewLang/`.
+
+### 7. Register in Main Tool
+
+Update `Sdk.Tools.Chat/Services/Languages/LanguageDetector.cs` to detect the new language.
+
+---
 
 ## Coding Standards
 
-### C# Style
+### Required
 
-- **Target Framework**: .NET 10.0
-- **Records**: Use records with `{ get; init; }` for model classes
-- **Namespaces**: Use file-scoped namespaces (`namespace Foo;`)
-- **Nullable**: Nullable reference types enabled
-- **Collection expressions**: Use `[]` instead of `new List<T>()`
-- **Copyright header**: Required on all `.cs` files:
-
-```csharp
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-```
+| Rule | Example |
+|------|---------|
+| .NET 10 | `<TargetFramework>net10.0</TargetFramework>` |
+| File-scoped namespaces | `namespace Foo;` |
+| Records for models | `public record Foo { get; init; }` |
+| Collection expressions | `[]` not `new List<T>()` |
+| Nullable enabled | `<Nullable>enable</Nullable>` |
+| Copyright header | Every `.cs` file |
 
 ### JSON Serialization
 
-- Use `[JsonPropertyName]` attributes (camelCase)
-- Use `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]` for nullable fields
-- Add `JsonSerializerContext` for AOT compatibility
+```csharp
+[JsonPropertyName("camelCase")]
+public string Property { get; init; }
+
+[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+public string? OptionalProperty { get; init; }
+```
 
 ### CLI Interface
 
-All extractors must support these standardized options:
-
+All extractors must support:
 ```
-<extractor> <path> [options]
-
-Options:
-  --json      Output as JSON (default: outputs stubs)
-  --stub      Output as language-native stubs
-  --pretty    Pretty-print JSON with indentation
-  -o, --output <file>  Write output to file
-  -h, --help  Show help
+<extractor> <path> [--json] [--stub] [--pretty] [-o <file>] [-h]
 ```
 
-### Exit Codes
+Exit codes: `0` success, `1` error.
 
-- `0`: Success
-- `1`: Error (with message to stderr)
+---
 
 ## Testing
 
 ### Run All Tests
 
 ```bash
-cd tools/sdk-chat
-dotnet test ApiExtractor.Tests
+dotnet test
 ```
 
-### Run Specific Extractor Tests
+### Run Specific Tests
 
 ```bash
-dotnet test ApiExtractor.Tests --filter "FullyQualifiedName~DotNetApiExtractor"
+# By project
+dotnet test ApiExtractor.Tests
+
+# By filter
+dotnet test --filter "FullyQualifiedName~DotNetApiExtractor"
+
+# By category
+dotnet test --filter "Category=Integration"
 ```
 
 ### Test Fixtures
 
-Each language has test fixtures in `ApiExtractor.Tests/TestFixtures/<Language>/`:
-- Include representative code samples
-- Cover classes, interfaces, enums, functions
-- Include edge cases (generics, async, etc.)
+Located in `ApiExtractor.Tests/TestFixtures/<Language>/`:
+- Include classes, interfaces, enums
+- Cover generics, async, edge cases
+- Keep minimal but representative
+
+---
 
 ## Building
 
-### Build All Projects
-
 ```bash
-cd tools/sdk-chat
+# Build all
 dotnet build
-```
 
-### Build and Run a Single Extractor
+# Run single extractor
+dotnet run --project ApiExtractor.DotNet -- /path --json --pretty
 
-```bash
-dotnet run --project ApiExtractor.DotNet -- /path/to/code --json --pretty
-```
+# Pack as tool
+dotnet pack Sdk.Tools.Chat -o ./artifacts
 
-### Publish Self-Contained
-
-```bash
+# Publish self-contained
 dotnet publish Sdk.Tools.Chat -c Release -r linux-x64 --self-contained
 ```
 
+---
+
 ## Questions?
 
-Open an issue in the repository or reach out to the maintainers.
+Open an issue or check existing discussions.

@@ -2,12 +2,12 @@ using AgentClientProtocol.Sdk;
 using AgentClientProtocol.Sdk.Stream;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services;
-using Sdk.Tools.Chat.Services.Languages;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Services.Languages;
 
-namespace Sdk.Tools.Chat.Acp;
+namespace Microsoft.SdkChat.Acp;
 
 /// <summary>
 /// Entry point that hosts the SampleGeneratorAgent over stdio using ACP protocol.

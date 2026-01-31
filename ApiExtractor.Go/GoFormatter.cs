@@ -115,6 +115,9 @@ public static class GoFormatter
         var allStructs = index.GetAllStructs().ToList();
         var allTypeNames = allStructs.Select(s => s.Name).ToHashSet();
         
+        // Pre-build dictionary for O(1) lookups instead of O(n) FirstOrDefault
+        var structsByName = allStructs.ToDictionary(s => s.Name);
+        
         // Get client dependencies first
         var clients = allStructs.Where(s => s.IsClientType).ToList();
         var clientDeps = new HashSet<string>();
@@ -205,11 +208,9 @@ public static class GoFormatter
                 var deps = s.GetReferencedTypes(allTypeNames);
                 foreach (var depName in deps)
                 {
-                    if (!includedStructs.Contains(depName))
+                    if (!includedStructs.Contains(depName) && structsByName.TryGetValue(depName, out var depStruct))
                     {
-                        var depStruct = allStructs.FirstOrDefault(st => st.Name == depName);
-                        if (depStruct != null)
-                            structsToAdd.Add(depStruct);
+                        structsToAdd.Add(depStruct);
                     }
                 }
                 

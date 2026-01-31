@@ -5,9 +5,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Sdk.Tools.Chat.Models;
+using Microsoft.SdkChat.Models;
 
-namespace Sdk.Tools.Chat.Services;
+namespace Microsoft.SdkChat.Services;
 
 /// <summary>
 /// Debug logger for AI service interactions.

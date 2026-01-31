@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Sdk.Tools.Chat.Models;
+using Microsoft.SdkChat.Models;
 
-namespace Sdk.Tools.Chat.Services;
+namespace Microsoft.SdkChat.Services;
 
 /// <summary>
 /// Unified SDK detection: language, source folder, and samples folder in one scan.
@@ -67,7 +67,7 @@ public class SdkInfo
         // Python
         new(SdkLanguage.Python, "python", ".py",
             new[] { "setup.py", "pyproject.toml" },
-            new[] { "src", "azure", "sdk", "." }),
+            new[] { "src", "lib", "." }),
         
         // Java
         new(SdkLanguage.Java, "java", ".java",

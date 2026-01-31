@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Sdk.Tools.Chat.Helpers;
-using Sdk.Tools.Chat.Models;
-using Sdk.Tools.Chat.Services.Languages.Samples;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services.Languages.Samples;
 using Xunit;
 
-namespace Sdk.Tools.Chat.Tests.Languages;
+namespace Microsoft.SdkChat.Tests.Languages;
 
 /// <summary>
 /// Tests for all language-specific sample contexts.
