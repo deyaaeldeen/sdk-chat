@@ -15,7 +15,9 @@ if [ -z "$OPENAI_API_KEY" ]; then
 fi
 
 echo "Building demo recording container..."
-docker build -f "$SCRIPT_DIR/Dockerfile.demo" -t sdk-chat-demo "$REPO_ROOT"
+docker build -f "$SCRIPT_DIR/Dockerfile.demo" \
+    --build-arg CACHEBUST=$(date +%s) \
+    -t sdk-chat-demo "$REPO_ROOT"
 
 echo "Recording demo..."
 docker run --rm \

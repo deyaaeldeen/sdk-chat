@@ -38,14 +38,22 @@ RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_a
 RUN curl -fsSL https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Linux_x86_64.tar.gz \
     | tar -xz --strip-components=1 -C /usr/local/bin vhs_0.10.0_Linux_x86_64/vhs
 
+# Install GitHub Copilot CLI (required by SDK even for OpenAI mode)
+RUN curl -fsSL https://github.com/github/gh-copilot/releases/latest/download/linux-amd64 -o /usr/local/bin/copilot \
+    && chmod +x /usr/local/bin/copilot
+
 # Set up working directory
 WORKDIR /workspace
+
+# Cache buster - change this value to force re-clone
+ARG CACHEBUST=1
 
 # Clone the repo
 RUN git clone https://github.com/deyaaeldeen/sdk-chat .
 
 # Clone openai-dotnet SDK for demo (pre-done so it's not in recording)
-RUN git clone --depth 1 https://github.com/openai/openai-dotnet /root/openai-dotnet
+# Use retry logic for large repo
+RUN for i in 1 2 3; do git clone --depth 1 https://github.com/openai/openai-dotnet /root/openai-dotnet && break || sleep 5; done
 
 # Pre-build to speed up recording
 RUN dotnet build Microsoft.SdkChat -c Release
