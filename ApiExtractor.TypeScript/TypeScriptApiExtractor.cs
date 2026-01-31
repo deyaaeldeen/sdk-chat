@@ -14,6 +14,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 {
     private static readonly string[] NodeCandidates = { "node" };
     private static readonly SemaphoreSlim NpmInstallLock = new(1, 1);
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
 
     private string? _nodePath;
     private string? _unavailableReason;
@@ -78,7 +79,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             ?? throw new InvalidOperationException("Node.js not found");
 
         var scriptDir = GetScriptDir();
-        await EnsureDependenciesAsync(scriptDir, ct);
+        await EnsureDependenciesAsync(scriptDir, ct).ConfigureAwait(false);
 
         var scriptPath = Path.Combine(scriptDir, "dist", "extract_api.js");
         if (!File.Exists(scriptPath))
@@ -86,6 +87,11 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             // Fallback to mjs for backwards compatibility
             scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
         }
+
+        // Enforce default timeout if none provided
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(DefaultTimeout);
+        var effectiveCt = timeoutCts.Token;
 
         var psi = new ProcessStartInfo
         {
@@ -103,9 +109,9 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start node");
         
         // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-        var errorTask = process.StandardError.ReadToEndAsync(ct);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(ct));
+        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
+        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
         var output = await outputTask;
         var error = await errorTask;
 
@@ -131,7 +137,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             ?? throw new InvalidOperationException("Node.js not found");
 
         var scriptDir = GetScriptDir();
-        await EnsureDependenciesAsync(scriptDir, ct);
+        await EnsureDependenciesAsync(scriptDir, ct).ConfigureAwait(false);
 
         var scriptPath = Path.Combine(scriptDir, "dist", "extract_api.js");
         if (!File.Exists(scriptPath))
@@ -139,6 +145,11 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             // Fallback to mjs for backwards compatibility
             scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
         }
+
+        // Enforce default timeout if none provided
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(DefaultTimeout);
+        var effectiveCt = timeoutCts.Token;
 
         var psi = new ProcessStartInfo
         {
@@ -156,9 +167,9 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start node");
         
         // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-        var errorTask = process.StandardError.ReadToEndAsync(ct);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(ct));
+        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
+        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
         var output = await outputTask;
         var error = await errorTask;
 

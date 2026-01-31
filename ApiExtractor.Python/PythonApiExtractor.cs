@@ -18,6 +18,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         "extract_api.py");
 
     private static readonly string[] PythonCandidates = { "python3", "python" };
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
 
     private string? _pythonPath;
     private string? _unavailableReason;
@@ -81,6 +82,11 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         // Get script path - embedded in assembly directory
         var scriptPath = GetScriptPath();
 
+        // Enforce default timeout if none provided
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(DefaultTimeout);
+        var effectiveCt = timeoutCts.Token;
+
         var psi = new ProcessStartInfo
         {
             FileName = python,
@@ -96,9 +102,9 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start Python");
 
         // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-        var errorTask = process.StandardError.ReadToEndAsync(ct);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(ct));
+        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
+        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
         var output = await outputTask;
         var error = await errorTask;
 

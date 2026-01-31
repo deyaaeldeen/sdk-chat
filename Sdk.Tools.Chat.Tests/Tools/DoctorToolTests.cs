@@ -305,11 +305,19 @@ public class DoctorToolTests
             
             var output = sw.ToString();
             
-            // If any tool is missing, should show "NOT FOUND"
-            // (we can check for the pattern even if all tools happen to be installed)
-            if (output.Contains("✗"))
+            // If any tool is missing, the line should contain both "✗" and "NOT FOUND"
+            // We check each line individually to avoid false positives from other output
+            var lines = output.Split('\n');
+            foreach (var line in lines)
             {
-                Assert.Contains("NOT FOUND", output);
+                // If a line shows a missing tool (starts with ✗ and has a tool name pattern),
+                // it must also contain "NOT FOUND"
+                if (line.TrimStart().StartsWith("✗") && 
+                    (line.Contains(".NET") || line.Contains("Python") || line.Contains("Go") || 
+                     line.Contains("JBang") || line.Contains("Node")))
+                {
+                    Assert.Contains("NOT FOUND", line);
+                }
             }
         }
         finally

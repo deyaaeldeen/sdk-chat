@@ -13,6 +13,7 @@ namespace ApiExtractor.Java;
 public class JavaApiExtractor : IApiExtractor<ApiIndex>
 {
     private static readonly string[] JBangCandidates = { "jbang" };
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
 
     private string? _jbangPath;
     private string? _unavailableReason;
@@ -82,6 +83,11 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
             throw new FileNotFoundException($"ExtractApi.java not found at {scriptPath}");
         }
 
+        // Enforce default timeout if none provided
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(DefaultTimeout);
+        var effectiveCt = timeoutCts.Token;
+
         var psi = new ProcessStartInfo
         {
             FileName = jbangPath,
@@ -97,9 +103,9 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start jbang");
         
         // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-        var errorTask = process.StandardError.ReadToEndAsync(ct);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(ct));
+        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
+        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
         var output = await outputTask;
         var error = await errorTask;
 
@@ -125,6 +131,11 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
             ?? throw new InvalidOperationException("JBang not found");
 
         var scriptPath = GetScriptPath();
+
+        // Enforce default timeout if none provided
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(DefaultTimeout);
+        var effectiveCt = timeoutCts.Token;
         
         var psi = new ProcessStartInfo
         {
@@ -141,9 +152,9 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start jbang");
         
         // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-        var errorTask = process.StandardError.ReadToEndAsync(ct);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(ct));
+        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
+        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
         var output = await outputTask;
         var error = await errorTask;
 
