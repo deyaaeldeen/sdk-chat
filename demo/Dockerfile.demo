@@ -44,6 +44,9 @@ WORKDIR /workspace
 # Clone the repo
 RUN git clone https://github.com/deyaaeldeen/sdk-chat .
 
+# Clone openai-dotnet SDK for demo (pre-done so it's not in recording)
+RUN git clone --depth 1 https://github.com/openai/openai-dotnet /root/openai-dotnet
+
 # Pre-build to speed up recording
 RUN dotnet build Microsoft.SdkChat -c Release
 
@@ -56,12 +59,19 @@ RUN mkdir -p /out
 # Set Chrome flags for headless operation in container
 ENV VHS_NO_SANDBOX=true
 
-# Recording script
+# Recording script - uses OpenAI API key passed at runtime
 RUN echo '#!/bin/bash\n\
 set -e\n\
 export DOTNET_ROOT=/usr/share/dotnet\n\
 export PATH="$PATH:$HOME/.dotnet/tools"\n\
 export VHS_NO_SANDBOX=true\n\
+\n\
+# Verify OpenAI API key is provided\n\
+if [ -z "$OPENAI_API_KEY" ]; then\n\
+    echo "Error: OPENAI_API_KEY not provided"\n\
+    exit 1\n\
+fi\n\
+echo "Using OpenAI mode"\n\
 \n\
 # Uninstall any existing tool\n\
 dotnet tool uninstall -g microsoft.sdkchat 2>/dev/null || true\n\
@@ -70,31 +80,13 @@ dotnet tool uninstall -g microsoft.sdkchat 2>/dev/null || true\n\
 dotnet pack Microsoft.SdkChat -o ./nupkg -c Release\n\
 dotnet tool install -g --add-source ./nupkg Microsoft.SdkChat\n\
 \n\
-# Record the demo\n\
+# Record the demo using the copied tape file\n\
 cd /workspace\n\
-vhs demo/demo-container.tape\n\
+vhs demo/demo.tape\n\
 \n\
 # Copy output\n\
 cp demo/demo.gif /out/demo.gif\n\
 echo "Demo recorded to /out/demo.gif"\n\
 ' > /record.sh && chmod +x /record.sh
-
-# Simplified tape for container (no hidden setup needed - already installed)
-RUN echo '# VHS tape file for SDK Chat demo\n\
-Output demo/demo.gif\n\
-Set Shell "bash"\n\
-Set FontSize 14\n\
-Set Width 900\n\
-Set Height 500\n\
-Set Theme "Dracula"\n\
-Set Padding 20\n\
-Set TypingSpeed 40ms\n\
-\n\
-# Generate a sample\n\
-Type "sdk-chat package sample generate ~/openai-dotnet --count 1"\n\
-Sleep 300ms\n\
-Enter\n\
-Sleep 25s\n\
-' > /workspace/demo/demo-container.tape
 
 ENTRYPOINT ["/record.sh"]

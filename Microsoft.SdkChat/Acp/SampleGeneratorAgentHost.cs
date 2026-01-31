@@ -14,9 +14,9 @@ namespace Microsoft.SdkChat.Acp;
 /// </summary>
 public static class SampleGeneratorAgentHost
 {
-    public static async Task RunAsync(string logLevel)
+    public static async Task RunAsync(string logLevel, bool useOpenAi = false)
     {
-        var services = ConfigureServices(logLevel);
+        var services = ConfigureServices(logLevel, useOpenAi);
         var logger = services.GetRequiredService<ILogger<SampleGeneratorAgent>>();
         
         // Create the agent
@@ -38,7 +38,7 @@ public static class SampleGeneratorAgentHost
         logger.LogDebug("ACP agent exited");
     }
     
-    private static IServiceProvider ConfigureServices(string logLevel)
+    private static IServiceProvider ConfigureServices(string logLevel, bool useOpenAi)
     {
         var services = new ServiceCollection();
         
@@ -51,7 +51,9 @@ public static class SampleGeneratorAgentHost
         };
         
         services.AddLogging(b => b.AddConsole().SetMinimumLevel(level));
-        services.AddSingleton(AiProviderSettings.FromEnvironment());
+        var aiSettings = AiProviderSettings.FromEnvironment();
+        if (useOpenAi) aiSettings = aiSettings with { UseOpenAi = true };
+        services.AddSingleton(aiSettings);
         services.AddSingleton<AiDebugLogger>();
         services.AddSingleton<AiService>();
         services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());

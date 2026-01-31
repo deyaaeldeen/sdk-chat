@@ -15,7 +15,7 @@ namespace Microsoft.SdkChat.Mcp;
 /// </summary>
 public static class McpServer
 {
-    public static async Task RunAsync(string transport, int port, string logLevel)
+    public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false)
     {
         var builder = Host.CreateApplicationBuilder();
         
@@ -23,7 +23,9 @@ public static class McpServer
         builder.Logging.AddConsole().SetMinimumLevel(ParseLogLevel(logLevel));
         
         // Configure services
-        builder.Services.AddSingleton(AiProviderSettings.FromEnvironment());
+        var aiSettings = AiProviderSettings.FromEnvironment();
+        if (useOpenAi) aiSettings = aiSettings with { UseOpenAi = true };
+        builder.Services.AddSingleton(aiSettings);
         builder.Services.AddSingleton<AiDebugLogger>();
         builder.Services.AddSingleton<AiService>();
         builder.Services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());

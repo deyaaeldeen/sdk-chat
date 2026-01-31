@@ -17,18 +17,6 @@ namespace Microsoft.SdkChat;
 
 public static class Program
 {
-    // Global option for OpenAI mode
-    private static readonly Option<bool> UseOpenAiOption = new("--use-openai")
-    {
-        Description = "Use OpenAI-compatible API instead of GitHub Copilot. " +
-                      "Requires OPENAI_API_KEY environment variable."
-    };
-
-    private static readonly Option<bool> LoadDotEnvOption = new("--load-dotenv")
-    {
-        Description = "Load environment variables from .env in the current directory (best-effort; does not override existing variables)."
-    };
-
     public static async Task<int> Main(string[] args)
     {
         // Initialize OpenTelemetry tracing (controlled via OTEL_* environment variables)
@@ -38,8 +26,6 @@ public static class Program
         {
             var rootCommand = new RootCommand("SDK Chat - Sample generation and SDK utilities")
             {
-                UseOpenAiOption,
-                LoadDotEnvOption,
                 BuildMcpCommand(),
                 BuildAcpCommand(),
                 BuildPackageCommand(),
@@ -73,17 +59,28 @@ public static class Program
         var transportOption = new Option<string>("--transport") { Description = "Transport type (stdio, sse)", DefaultValueFactory = _ => "stdio" };
         var portOption = new Option<int>("--port") { Description = "Port for SSE transport", DefaultValueFactory = _ => 8080 };
         var logLevelOption = new Option<string>("--log-level") { Description = "Log level", DefaultValueFactory = _ => "info" };
+        var useOpenAiOption = new Option<bool>("--use-openai")
+        {
+            Description = "Use OpenAI-compatible API instead of GitHub Copilot. " +
+                          "Requires OPENAI_API_KEY environment variable."
+        };
+        var loadDotEnvOption = new Option<bool>("--load-dotenv")
+        {
+            Description = "Load environment variables from .env in the current directory."
+        };
 
         var command = new Command("mcp", "Start MCP server for AI agent integration (VS Code, Claude Desktop)")
         {
             transportOption,
             portOption,
-            logLevelOption
+            logLevelOption,
+            useOpenAiOption,
+            loadDotEnvOption
         };
         
         command.SetAction(async (parseResult, ct) =>
         {
-            if (parseResult.GetValue(LoadDotEnvOption))
+            if (parseResult.GetValue(loadDotEnvOption))
             {
                 DotEnv.TryLoadDefault();
             }
@@ -91,7 +88,8 @@ public static class Program
             var transport = parseResult.GetValue(transportOption)!;
             var port = parseResult.GetValue(portOption);
             var logLevel = parseResult.GetValue(logLevelOption)!;
-            await McpServer.RunAsync(transport, port, logLevel);
+            var useOpenAi = parseResult.GetValue(useOpenAiOption);
+            await McpServer.RunAsync(transport, port, logLevel, useOpenAi);
         });
         
         return command;
@@ -100,21 +98,33 @@ public static class Program
     private static Command BuildAcpCommand()
     {
         var logLevelOption = new Option<string>("--log-level") { Description = "Log level", DefaultValueFactory = _ => "info" };
+        var useOpenAiOption = new Option<bool>("--use-openai")
+        {
+            Description = "Use OpenAI-compatible API instead of GitHub Copilot. " +
+                          "Requires OPENAI_API_KEY environment variable."
+        };
+        var loadDotEnvOption = new Option<bool>("--load-dotenv")
+        {
+            Description = "Load environment variables from .env in the current directory."
+        };
 
         var command = new Command("acp", "Start ACP agent for interactive sample generation")
         {
-            logLevelOption
+            logLevelOption,
+            useOpenAiOption,
+            loadDotEnvOption
         };
         
         command.SetAction(async (parseResult, ct) =>
         {
-            if (parseResult.GetValue(LoadDotEnvOption))
+            if (parseResult.GetValue(loadDotEnvOption))
             {
                 DotEnv.TryLoadDefault();
             }
 
             var logLevel = parseResult.GetValue(logLevelOption)!;
-            await SampleGeneratorAgentHost.RunAsync(logLevel);
+            var useOpenAi = parseResult.GetValue(useOpenAiOption);
+            await SampleGeneratorAgentHost.RunAsync(logLevel, useOpenAi);
         });
         
         return command;
@@ -176,6 +186,15 @@ public static class Program
             Description = $"AI model (default: {AiProviderSettings.DefaultCopilotModel} for Copilot, {AiProviderSettings.DefaultOpenAiModel} for OpenAI)"
         };
         var dryRunOption = new Option<bool>("--dry-run") { Description = "Preview without writing files" };
+        var useOpenAiOption = new Option<bool>("--use-openai")
+        {
+            Description = "Use OpenAI-compatible API instead of GitHub Copilot. " +
+                          "Requires OPENAI_API_KEY environment variable."
+        };
+        var loadDotEnvOption = new Option<bool>("--load-dotenv")
+        {
+            Description = "Load environment variables from .env in the current directory."
+        };
 
         var command = new Command("generate", "Generate code samples for SDK package")
         {
@@ -186,12 +205,14 @@ public static class Program
             countOption,
             budgetOption,
             modelOption,
-            dryRunOption
+            dryRunOption,
+            useOpenAiOption,
+            loadDotEnvOption
         };
         
         command.SetAction(async (parseResult, ct) =>
         {
-            if (parseResult.GetValue(LoadDotEnvOption))
+            if (parseResult.GetValue(loadDotEnvOption))
             {
                 DotEnv.TryLoadDefault();
             }
@@ -204,7 +225,7 @@ public static class Program
             var budget = parseResult.GetValue(budgetOption);
             var model = parseResult.GetValue(modelOption);
             var dryRun = parseResult.GetValue(dryRunOption);
-            var useOpenAi = parseResult.GetValue(UseOpenAiOption);
+            var useOpenAi = parseResult.GetValue(useOpenAiOption);
             
             var services = ConfigureServices(useOpenAi);
             var tool = services.GetRequiredService<SampleGeneratorTool>();
