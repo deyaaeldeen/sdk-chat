@@ -10,8 +10,20 @@ Set Theme "Dracula"
 Set Padding 20
 Set TypingSpeed 40ms
 
-# Generate a sample
-Type "sdk-chat package sample generate ~/openai-dotnet --use-openai --count 1"
+# Show Copilot mode (default)
+Type "# Mode 1: GitHub Copilot (default)"
+Enter
+Sleep 500ms
+Type "sdk-chat package sample generate ~/openai-dotnet --count 1"
+Sleep 300ms
+Enter
+Sleep 25s
+
+# Clear and show OpenAI mode
+Type "# Mode 2: OpenAI (with --load-dotenv)"
+Enter
+Sleep 500ms
+Type "sdk-chat package sample generate ~/openai-dotnet --use-openai --load-dotenv --count 1"
 Sleep 300ms
 Enter
 Sleep 25s
