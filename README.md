@@ -5,87 +5,83 @@
 ![SDK Chat Demo](demo/demo.gif)
 
 ```bash
-# One command. Production samples.
 sdk-chat package sample generate ./your-sdk
 ```
 
-## What It Does
+## Installation
 
-Point it at any SDK. Get runnable samples with proper auth, error handling, and idiomatic patterns.
-
-| Before | After |
-|--------|-------|
-| 10MB of source code | 5 clean, documented samples |
-| Hours reading docs | 30 seconds |
-| "How do I use this?" | Copy-paste examples |
-
----
+```bash
+dotnet tool install --global Microsoft.SdkChat
+```
 
 ## Quick Start
 
 ```bash
-# Install
-dotnet tool install --global sdk-chat
+# Generate 5 samples (default)
+sdk-chat package sample generate ./openai-dotnet
 
-# Generate samples for any SDK
-sdk-chat package sample generate /path/to/sdk
+# Use OpenAI instead of GitHub Copilot
+sdk-chat package sample generate ./sdk --use-openai --load-dotenv
+
+# Custom count + prompt
+sdk-chat package sample generate ./sdk --count 10 --prompt "streaming examples"
+
+# Preview without writing
+sdk-chat package sample generate ./sdk --dry-run
 ```
-
-That's it. Auto-detects language, extracts API surface, generates samples.
-
----
 
 ## Supported Languages
 
-| Language | Extractor | Requirement |
+| Language | Detection | Requirement |
 |----------|-----------|-------------|
-| .NET/C# | Roslyn | Built-in |
-| Python | `ast` | `python3` |
-| TypeScript | ts-morph | `node` |
-| Java | JavaParser | `jbang` |
-| Go | go/parser | `go` |
+| .NET/C# | `.csproj`, `.sln` | Built-in |
+| Python | `pyproject.toml`, `setup.py` | `python3` |
+| TypeScript | `package.json` + `.ts` | `node` |
+| JavaScript | `package.json` | `node` |
+| Java | `pom.xml`, `build.gradle` | `jbang` |
+| Go | `go.mod` | `go` |
 
 ---
 
-## Usage
+## Commands
 
-### CLI Mode
+### `package sample generate`
+
+Generate code samples for an SDK.
 
 ```bash
-# Auto-detect language, generate 5 samples
-sdk-chat package sample generate ./openai-dotnet
-
-# Custom count + prompt
-sdk-chat package sample generate ./openai-python \
-  --count 10 \
-  --prompt "streaming examples"
-
-# Preview without writing files
-sdk-chat package sample generate ./sdk --dry-run
-
-# Use OpenAI instead of GitHub Copilot
-OPENAI_API_KEY=sk-... sdk-chat --use-openai package sample generate ./sdk
+sdk-chat package sample generate <path> [options]
 ```
-
-### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--output <dir>` | `samples/` | Output directory |
-| `--count <n>` | `5` | Number of samples |
-| `--language <lang>` | Auto | Force language detection |
+| `--output <dir>` | Auto | Output directory for samples |
+| `--language <lang>` | Auto | Force language: `dotnet`, `python`, `java`, `typescript`, `javascript`, `go` |
+| `--count <n>` | `5` | Number of samples to generate |
 | `--prompt <text>` | — | Custom generation prompt |
-| `--model <name>` | — | Override AI model |
+| `--model <name>` | `claude-sonnet-4.5` | AI model override |
 | `--budget <chars>` | `512K` | Max context size |
-| `--dry-run` | `false` | Preview only |
+| `--dry-run` | `false` | Preview without writing files |
+| `--use-openai` | `false` | Use OpenAI API instead of GitHub Copilot |
+| `--load-dotenv` | `false` | Load `.env` from current directory |
 
-### VS Code / Claude Desktop (MCP Mode)
+### `mcp`
+
+Start MCP server for AI agent integration.
 
 ```bash
-sdk-chat mcp
+sdk-chat mcp [options]
 ```
 
-**VS Code** — Add to `settings.json`:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--transport <type>` | `stdio` | Transport: `stdio` or `sse` |
+| `--port <n>` | `8080` | Port for SSE transport |
+| `--log-level <level>` | `info` | Logging verbosity |
+| `--use-openai` | `false` | Use OpenAI API |
+| `--load-dotenv` | `false` | Load `.env` file |
+
+**VS Code** (`settings.json`):
 ```json
 {
   "mcp.servers": {
@@ -94,7 +90,7 @@ sdk-chat mcp
 }
 ```
 
-**Claude Desktop** — Add to `claude_desktop_config.json`:
+**Claude Desktop** (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
@@ -103,47 +99,60 @@ sdk-chat mcp
 }
 ```
 
-### Interactive Mode (ACP)
+### `acp`
+
+Start interactive agent for guided sample generation.
 
 ```bash
-sdk-chat acp
+sdk-chat acp [options]
 ```
 
-Guided generation with real-time feedback, permission prompts, and plan visualization.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--log-level <level>` | `info` | Logging verbosity |
+| `--use-openai` | `false` | Use OpenAI API |
+| `--load-dotenv` | `false` | Load `.env` file |
+
+### `doctor`
+
+Validate external dependencies.
+
+```bash
+sdk-chat doctor
+```
 
 ---
 
-## How It Works
-
-```
-SDK Source → API Extractor → Minimal JSON → AI → Samples
-   10MB          ↓              ~100KB       ↓      5 files
-              Roslyn/ast/                 Claude/
-              ts-morph/etc               GPT/Copilot
-```
-
-1. **Detects** language from project files (`.csproj`, `pyproject.toml`, etc.)
-2. **Extracts** public API surface — ~95% smaller than full source
-3. **Generates** samples using AI with focused context
-4. **Writes** idiomatic, runnable code with proper patterns
-
----
-
-## Configuration
-
-### Environment Variables
+## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | API key (required with `--use-openai`) |
-| `OPENAI_ENDPOINT` | Custom endpoint (OpenAI-compatible, etc.) |
-| `SDK_CLI_MODEL` | Override default model |
-| `SDK_CLI_DEBUG` | `true` to log prompts/responses |
-| `SDK_CLI_DEBUG_DIR` | Directory for debug files |
+| `OPENAI_API_KEY` | OpenAI API key (required with `--use-openai`) |
+| `OPENAI_ENDPOINT` | Custom OpenAI-compatible endpoint |
+| `GH_TOKEN` | GitHub token for Copilot authentication |
+| `GITHUB_TOKEN` | Alternative GitHub token |
+| `SDK_CLI_MODEL` | Override default AI model |
+| `SDK_CLI_TIMEOUT` | Request timeout in seconds |
+| `SDK_CLI_DEBUG` | Set `true` to log prompts/responses |
+| `SDK_CLI_DEBUG_DIR` | Directory for debug output files |
+| `SDK_CLI_USE_OPENAI` | Set `true` to use OpenAI by default |
+| `COPILOT_CLI_PATH` | Custom path to Copilot CLI binary |
+| `NO_COLOR` | Disable colored output |
 
-### Project Config (Optional)
+**Telemetry (optional):**
+
+| Variable | Description |
+|----------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry collector endpoint |
+| `OTEL_TRACES_EXPORTER` | Trace exporter type |
+| `SDK_CLI_TELEMETRY_CONSOLE` | Print telemetry to console |
+
+---
+
+## Configuration File
 
 Create `.sdk-chat.json` in your SDK root:
+
 ```json
 {
   "defaultLanguage": "dotnet",
@@ -153,13 +162,29 @@ Create `.sdk-chat.json` in your SDK root:
 
 ---
 
+## How It Works
+
+```
+SDK Source → API Extractor → Minimal Context → AI → Samples
+   10MB           ↓              ~100KB        ↓     5 files
+             Roslyn/ast/                   Claude/
+             ts-morph/etc                 GPT/Copilot
+```
+
+1. **Detect** — Language from project files
+2. **Extract** — Public API surface (~95% smaller than source)
+3. **Generate** — AI creates samples with focused context
+4. **Write** — Idiomatic, runnable code with proper patterns
+
+---
+
 ## Build from Source
 
 ```bash
 git clone https://github.com/deyaaeldeen/sdk-chat
 cd sdk-chat
 dotnet build
-dotnet run --project Microsoft.SdkChat -- package sample generate /path/to/sdk
+dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/sdk
 ```
 
 Run tests:
@@ -173,27 +198,30 @@ dotnet test  # 480+ tests
 
 ```
 sdk-chat/
-├── Microsoft.SdkChat/           # Main CLI (Microsoft.SdkChat, MCP + ACP modes)
-├── AgentClientProtocol.Sdk/  # ACP protocol implementation
-├── ApiExtractor.DotNet/      # C# extractor (Roslyn)
-├── ApiExtractor.Python/      # Python extractor (ast)
-├── ApiExtractor.TypeScript/  # TS extractor (ts-morph)
-├── ApiExtractor.Java/        # Java extractor (JavaParser)
-├── ApiExtractor.Go/          # Go extractor (go/parser)
-└── ApiExtractor.Tests/       # 140+ extractor tests
+├── src/
+│   ├── Microsoft.SdkChat/              # Main CLI tool
+│   ├── AgentClientProtocol.Sdk/        # ACP protocol implementation
+│   ├── ApiExtractor.Contracts/         # Shared extractor interfaces
+│   ├── ApiExtractor.DotNet/            # C# extractor (Roslyn)
+│   ├── ApiExtractor.Python/            # Python extractor (ast)
+│   ├── ApiExtractor.TypeScript/        # TypeScript extractor (ts-morph)
+│   ├── ApiExtractor.Java/              # Java extractor (JavaParser)
+│   └── ApiExtractor.Go/                # Go extractor (go/parser)
+├── tests/
+│   ├── Microsoft.SdkChat.Tests/        # CLI tests
+│   ├── AgentClientProtocol.Sdk.Tests/  # Protocol tests
+│   └── ApiExtractor.Tests/             # Extractor tests
+├── demo/                               # Demo recording
+└── docs/                               # Documentation
 ```
+
+See individual project READMEs in `src/` for implementation details.
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Architecture overview
-- Adding new language extractors
-- Coding standards
-- Testing requirements
-
----
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
