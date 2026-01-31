@@ -4,10 +4,122 @@
 
 | I want to... | Go to |
 |--------------|-------|
+| Run tests | [Testing](#testing) |
 | Add a new language extractor | [Adding a Language](#adding-a-language) |
 | Understand the architecture | [Architecture](#architecture) |
-| Run tests | [Testing](#testing) |
-| Follow code style | [Standards](#coding-standards) |
+| Follow code style | [Coding Standards](#coding-standards) |
+| Build the project | [Building](#building) |
+
+---
+
+## Getting Started
+
+```bash
+git clone https://github.com/deyaaeldeen/sdk-chat
+cd sdk-chat
+dotnet build
+dotnet test
+```
+
+---
+
+## Project Structure
+
+```
+sdk-chat/
+├── src/
+│   ├── Microsoft.SdkChat/              # Main CLI tool
+│   ├── AgentClientProtocol.Sdk/        # ACP protocol implementation
+│   ├── AgentClientProtocol.Sdk.Generators/  # Source generator
+│   ├── ApiExtractor.Contracts/         # Shared interfaces
+│   ├── ApiExtractor.DotNet/            # C# extractor (Roslyn)
+│   ├── ApiExtractor.Python/            # Python extractor (ast)
+│   ├── ApiExtractor.TypeScript/        # TypeScript extractor (ts-morph)
+│   ├── ApiExtractor.Java/              # Java extractor (JavaParser)
+│   └── ApiExtractor.Go/                # Go extractor (go/parser)
+├── tests/
+│   ├── Microsoft.SdkChat.Tests/        # CLI + service tests (270+)
+│   ├── AgentClientProtocol.Sdk.Tests/  # Protocol tests (70+)
+│   └── ApiExtractor.Tests/             # Extractor tests (140+)
+├── demo/                               # Demo recording
+└── docs/                               # Documentation
+```
+
+---
+
+## Testing
+
+### Run All Tests
+
+```bash
+dotnet test  # 480+ tests
+```
+
+### Run by Project
+
+```bash
+# CLI and services
+dotnet test tests/Microsoft.SdkChat.Tests
+
+# Protocol
+dotnet test tests/AgentClientProtocol.Sdk.Tests
+
+# Extractors
+dotnet test tests/ApiExtractor.Tests
+```
+
+### Run by Filter
+
+```bash
+# By class name
+dotnet test --filter "FullyQualifiedName~DotNetApiExtractor"
+
+# By test name
+dotnet test --filter "DisplayName~streaming"
+
+# Multiple filters
+dotnet test --filter "FullyQualifiedName~Python|FullyQualifiedName~Java"
+```
+
+### Skippable Tests
+
+Some tests require external tools (python3, node, jbang, go). They auto-skip if unavailable:
+
+```csharp
+[SkippableFact]
+public async Task ExtractsApi()
+{
+    Skip.IfNot(_extractor.IsAvailable(), "python3 not installed");
+    // ...
+}
+```
+
+### Test Fixtures
+
+Located in `tests/ApiExtractor.Tests/TestFixtures/<Language>/`:
+- Minimal but representative code samples
+- Cover classes, interfaces, enums, generics
+- Used by all extractor tests
+
+### Writing Tests
+
+```csharp
+public class MyFeatureTests
+{
+    [Fact]
+    public async Task Feature_Condition_Expected()
+    {
+        // Arrange
+        var sut = new MyService();
+        
+        // Act
+        var result = await sut.DoThingAsync();
+        
+        // Assert
+        Assert.NotNull(result);
+    }
+}
+```
 
 ---
 
@@ -54,11 +166,11 @@
 ### 1. Create Project
 
 ```bash
-dotnet new classlib -n ApiExtractor.NewLang -o ApiExtractor.NewLang
-dotnet sln add ApiExtractor.NewLang
+dotnet new classlib -n ApiExtractor.NewLang -o src/ApiExtractor.NewLang
+dotnet sln add src/ApiExtractor.NewLang
 ```
 
-Add reference:
+Add reference to `src/ApiExtractor.NewLang/ApiExtractor.NewLang.csproj`:
 ```xml
 <ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
 ```
@@ -135,7 +247,7 @@ if (options.ShowHelp || options.Path == null)
 
 ### 6. Add Tests
 
-Create `ApiExtractor.Tests/NewLangApiExtractorTests.cs`:
+Create `tests/ApiExtractor.Tests/NewLangApiExtractorTests.cs`:
 
 ```csharp
 public class NewLangApiExtractorTests
@@ -149,11 +261,11 @@ public class NewLangApiExtractorTests
 }
 ```
 
-Add fixtures in `ApiExtractor.Tests/TestFixtures/NewLang/`.
+Add fixtures in `tests/ApiExtractor.Tests/TestFixtures/NewLang/`.
 
 ### 7. Register in Main Tool
 
-Update `Microsoft.SdkChat/Services/Languages/LanguageDetector.cs` to detect the new language.
+Update `src/Microsoft.SdkChat/Services/Languages/LanguageDetector.cs` to detect the new language.
 
 ---
 
@@ -191,51 +303,34 @@ Exit codes: `0` success, `1` error.
 
 ---
 
-## Testing
-
-### Run All Tests
-
-```bash
-dotnet test
-```
-
-### Run Specific Tests
-
-```bash
-# By project
-dotnet test ApiExtractor.Tests
-
-# By filter
-dotnet test --filter "FullyQualifiedName~DotNetApiExtractor"
-
-# By category
-dotnet test --filter "Category=Integration"
-```
-
-### Test Fixtures
-
-Located in `ApiExtractor.Tests/TestFixtures/<Language>/`:
-- Include classes, interfaces, enums
-- Cover generics, async, edge cases
-- Keep minimal but representative
-
----
-
 ## Building
 
 ```bash
 # Build all
 dotnet build
 
+# Run CLI directly
+dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/sdk
+
 # Run single extractor
-dotnet run --project ApiExtractor.DotNet -- /path --json --pretty
+dotnet run --project src/ApiExtractor.DotNet -- /path --json --pretty
 
 # Pack as tool
-dotnet pack Microsoft.SdkChat -o ./artifacts
+dotnet pack src/Microsoft.SdkChat -o ./artifacts
 
-# Publish self-contained
-dotnet publish Microsoft.SdkChat -c Release -r linux-x64 --self-contained
+# Install locally
+dotnet tool install --global --add-source ./artifacts Microsoft.SdkChat
 ```
+
+---
+
+## Pull Request Checklist
+
+- [ ] `dotnet build` passes
+- [ ] `dotnet test` passes (or new tests skip appropriately)
+- [ ] New code has tests
+- [ ] Follows coding standards below
+- [ ] Updated relevant README if adding features
 
 ---
 

@@ -187,11 +187,6 @@ dotnet build
 dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/sdk
 ```
 
-Run tests:
-```bash
-dotnet test  # 480+ tests
-```
-
 ---
 
 ## Project Structure
