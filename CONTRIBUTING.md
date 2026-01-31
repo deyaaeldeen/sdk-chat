@@ -37,6 +37,10 @@ docker run -it --rm -v "$(pwd):/workspace" sdk-chat-dev bash
 
 # Build only
 docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet build
+
+# Record demo GIF (requires gh CLI authenticated)
+docker run --rm -v "$(pwd):/workspace" -e GH_TOKEN="$(gh auth token)" \
+  --entrypoint /workspace/demo/entrypoint.sh sdk-chat-dev
 ```
 
 ### VS Code Dev Container
