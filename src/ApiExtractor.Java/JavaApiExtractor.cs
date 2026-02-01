@@ -170,19 +170,12 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 
     private static string GetScriptPath()
     {
-        // SECURITY: Only load scripts from assembly directory
+        // SECURITY: Only load scripts from assembly directory - no path traversal allowed
         var assemblyDir = Path.GetDirectoryName(typeof(JavaApiExtractor).Assembly.Location) ?? ".";
         var scriptPath = Path.Combine(assemblyDir, "ExtractApi.java");
         
         if (File.Exists(scriptPath))
             return scriptPath;
-
-#if DEBUG
-        // Dev mode only: check source directory relative to BaseDirectory
-        var devPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "ExtractApi.java"));
-        if (File.Exists(devPath))
-            return devPath;
-#endif
 
         throw new FileNotFoundException(
             $"Corrupt installation: ExtractApi.java not found at {scriptPath}. " +

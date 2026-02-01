@@ -8,7 +8,9 @@ namespace Microsoft.SdkChat.Tests.Tools;
 
 /// <summary>
 /// Tests for the DoctorTool dependency validation.
+/// These tests manipulate Console.Out so they must run sequentially.
 /// </summary>
+[Collection("ConsoleOutput")]
 public class DoctorToolTests
 {
     #region DependencyStatus Record Tests

@@ -10,6 +10,12 @@ namespace Microsoft.SdkChat.Helpers;
 /// </summary>
 public static class NdjsonStreamParser
 {
+    /// <summary>
+    /// Maximum size of a single JSON object in characters (1MB).
+    /// Prevents memory exhaustion from malformed AI responses or attacks.
+    /// </summary>
+    private const int MaxObjectSizeChars = 1024 * 1024;
+
     public static async IAsyncEnumerable<T> ParseAsync<T>(
         IAsyncEnumerable<string> chunks,
         JsonSerializerOptions jsonOptions,
@@ -61,6 +67,14 @@ public static class NdjsonStreamParser
                 }
 
                 objectBuilder.Append(ch);
+
+                // Guard against memory exhaustion from malformed responses
+                if (objectBuilder.Length > MaxObjectSizeChars)
+                {
+                    throw new InvalidOperationException(
+                        $"JSON object exceeded maximum size of {MaxObjectSizeChars / 1024}KB. " +
+                        "This may indicate a malformed AI response or malicious input.");
+                }
 
                 // Track brace depth and string state for proper JSON boundary detection
                 if (escapeNext)

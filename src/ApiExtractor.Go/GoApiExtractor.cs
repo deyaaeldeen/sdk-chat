@@ -78,14 +78,20 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     
     /// <summary>
     /// Extract API from a Go module directory.
-    /// Uses lazy compilation - binary is compiled once and cached for 10x+ performance.
+    /// Prefers pre-compiled binary from build, falls back to runtime compilation.
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
-        var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version") 
-            ?? throw new FileNotFoundException("Go executable not found");
+        var binaryPath = GetPrecompiledBinaryPath();
         
-        var binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
+        if (binaryPath == null)
+        {
+            // Fall back to runtime compilation if pre-compiled binary not available
+            var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version") 
+                ?? throw new FileNotFoundException("Go executable not found. Pre-compiled binary also not available.");
+            
+            binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
+        }
 
         // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -130,10 +136,16 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsGoAsync(string rootPath, CancellationToken ct = default)
     {
-        var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version") 
-            ?? throw new FileNotFoundException("Go executable not found");
+        var binaryPath = GetPrecompiledBinaryPath();
         
-        var binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
+        if (binaryPath == null)
+        {
+            // Fall back to runtime compilation if pre-compiled binary not available
+            var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version") 
+                ?? throw new FileNotFoundException("Go executable not found. Pre-compiled binary also not available.");
+            
+            binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
+        }
 
         // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -169,8 +181,29 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     }
 
     /// <summary>
+    /// Gets the path to the pre-compiled Go extractor binary if it exists.
+    /// The binary is compiled during build and placed in the assembly directory.
+    /// </summary>
+    /// <returns>Path to pre-compiled binary, or null if not available.</returns>
+    private static string? GetPrecompiledBinaryPath()
+    {
+        var assemblyDir = Path.GetDirectoryName(typeof(GoApiExtractor).Assembly.Location) ?? ".";
+        var binaryName = OperatingSystem.IsWindows() ? "go_extractor.exe" : "go_extractor";
+        var binaryPath = Path.Combine(assemblyDir, binaryName);
+        
+        if (File.Exists(binaryPath))
+        {
+            _cachedBinaryPath = binaryPath;
+            return binaryPath;
+        }
+        
+        return null;
+    }
+
+    /// <summary>
     /// Ensures the Go extractor is compiled and cached. Uses content-based hashing
     /// so recompilation only occurs when the source changes.
+    /// This is the fallback when pre-compiled binary is not available.
     /// </summary>
     private static async Task<string> EnsureCompiledAsync(string goPath, CancellationToken ct)
     {
@@ -250,19 +283,12 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
 
     private static string GetScriptPath()
     {
-        // SECURITY: Only load scripts from assembly directory
+        // SECURITY: Only load scripts from assembly directory - no path traversal allowed
         var assemblyDir = Path.GetDirectoryName(typeof(GoApiExtractor).Assembly.Location) ?? ".";
         var scriptPath = Path.Combine(assemblyDir, "extract_api.go");
         
         if (File.Exists(scriptPath))
             return scriptPath;
-
-#if DEBUG
-        // Dev mode only: check source directory relative to BaseDirectory
-        var devPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "extract_api.go"));
-        if (File.Exists(devPath))
-            return devPath;
-#endif
 
         throw new FileNotFoundException(
             $"Corrupt installation: extract_api.go not found at {scriptPath}. " +

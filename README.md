@@ -251,13 +251,32 @@ docker run --rm -u $(id -u):$(id -g) \
   sdk-chat:latest package sample generate /sdk --use-openai --load-dotenv
 ```
 
-**Run as MCP server:**
+**Run as MCP server (stdio):**
 
 ```bash
 docker run --rm -i \
   -v "$HOME/.copilot:/tmp/.copilot" \
   -e HOME=/tmp \
   sdk-chat:latest mcp
+```
+
+**Run as MCP server (SSE on port 8080):**
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$HOME/.copilot:/tmp/.copilot" \
+  -e HOME=/tmp \
+  sdk-chat:latest mcp --transport sse --port 8080
+```
+
+Connect to `http://localhost:8080/sse` from your MCP client.
+
+**SSE with OpenAI:**
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e OPENAI_API_KEY="sk-..." \
+  sdk-chat:latest mcp --transport sse --port 8080 --use-openai
 ```
 
 The container runs as non-root user `sdkchat` (UID 1001) by default. Use `-u $(id -u):$(id -g)` to match your host user for file permissions.

@@ -137,7 +137,12 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
         }
         finally
         {
-            try { _writeLock.Release(); } catch { }
+            // Release only if we successfully acquired it above (not already disposed)
+            // The WaitAsync above may have thrown ObjectDisposedException which we caught
+            if (_disposed == 1)
+            {
+                try { _writeLock.Release(); } catch (ObjectDisposedException) { /* Already disposed, safe to ignore */ }
+            }
             _writeLock.Dispose();
         }
     }

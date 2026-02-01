@@ -6,16 +6,68 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>ApiExtractor.Go</RootNamespace>
+    <!-- Pre-compile Go extractor during build (set to false to skip) -->
+    <PrecompileGoExtractor Condition="'$(PrecompileGoExtractor)' == ''">true</PrecompileGoExtractor>
   </PropertyGroup>
 
   <ItemGroup>
     <None Update="extract_api.go">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Include pre-compiled binary if it exists -->
+    <None Include="$(IntermediateOutputPath)go_extractor$(ExeSuffix)" 
+          Condition="Exists('$(IntermediateOutputPath)go_extractor$(ExeSuffix)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>go_extractor$(ExeSuffix)</Link>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
   </ItemGroup>
+
+  <!-- Determine executable suffix based on OS -->
+  <PropertyGroup>
+    <ExeSuffix Condition="$([MSBuild]::IsOSPlatform('Windows'))">.exe</ExeSuffix>
+    <ExeSuffix Condition="!$([MSBuild]::IsOSPlatform('Windows'))"></ExeSuffix>
+  </PropertyGroup>
+
+  <!-- Pre-compile Go extractor during build for faster cold starts -->
+  <Target Name="PrecompileGoExtractor" 
+          BeforeTargets="Build" 
+          Condition="'$(PrecompileGoExtractor)' == 'true'">
+    
+    <!-- Check if Go is available -->
+    <Exec Command="go version" 
+          IgnoreExitCode="true" 
+          StandardOutputImportance="low"
+          StandardErrorImportance="low"
+          ConsoleToMSBuild="true">
+      <Output TaskParameter="ExitCode" PropertyName="GoExitCode"/>
+    </Exec>
+
+    <!-- Compile if Go is available -->
+    <Message Importance="high" 
+             Text="Pre-compiling Go extractor..." 
+             Condition="'$(GoExitCode)' == '0'" />
+    
+    <Exec Command="go build -o &quot;$(IntermediateOutputPath)go_extractor$(ExeSuffix)&quot; extract_api.go"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          Condition="'$(GoExitCode)' == '0'" 
+          StandardOutputImportance="low" />
+
+    <!-- Copy to output directory -->
+    <Copy SourceFiles="$(IntermediateOutputPath)go_extractor$(ExeSuffix)"
+          DestinationFolder="$(OutputPath)"
+          Condition="'$(GoExitCode)' == '0' and Exists('$(IntermediateOutputPath)go_extractor$(ExeSuffix)')" />
+
+    <Message Importance="normal" 
+             Text="Go extractor pre-compiled successfully." 
+             Condition="'$(GoExitCode)' == '0'" />
+    
+    <Message Importance="normal" 
+             Text="Go not found - extractor will be compiled on first use." 
+             Condition="'$(GoExitCode)' != '0'" />
+  </Target>
 
 </Project>

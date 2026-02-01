@@ -137,16 +137,9 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
     private static string GetScriptPath()
     {
-        // SECURITY: Only load scripts from assembly directory - no directory walking
+        // SECURITY: Only load scripts from assembly directory - no path traversal allowed
         if (File.Exists(ScriptPath))
             return ScriptPath;
-
-#if DEBUG
-        // Dev mode only: check source directory relative to BaseDirectory
-        var devPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "extract_api.py"));
-        if (File.Exists(devPath))
-            return devPath;
-#endif
 
         throw new FileNotFoundException(
             $"Corrupt installation: extract_api.py not found at {ScriptPath}. " +

@@ -186,6 +186,8 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     private static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)
     {
         var nodeModules = Path.Combine(scriptDir, "node_modules");
+        
+        // Fast path: node_modules already exists (pre-installed during build or previous run)
         if (Directory.Exists(nodeModules)) return;
 
         // Use semaphore to prevent concurrent npm install on the same directory
@@ -206,8 +208,14 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
                 WorkingDirectory = scriptDir
             };
 
-            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start npm");
+            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start npm. Ensure Node.js is installed.");
             await process.WaitForExitAsync(ct);
+            
+            if (process.ExitCode != 0)
+            {
+                var error = await process.StandardError.ReadToEndAsync(ct);
+                throw new InvalidOperationException($"npm install failed: {error}");
+            }
         }
         finally
         {
@@ -217,7 +225,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 
     private static string GetScriptDir()
     {
-        // SECURITY: Only load scripts from assembly directory
+        // SECURITY: Only load scripts from assembly directory - no path traversal allowed
         var assemblyDir = Path.GetDirectoryName(typeof(TypeScriptApiExtractor).Assembly.Location) ?? ".";
         var scriptPath = Path.Combine(assemblyDir, "extract_api.mjs");
         
@@ -228,14 +236,6 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         var distPath = Path.Combine(assemblyDir, "dist", "extract_api.js");
         if (File.Exists(distPath))
             return assemblyDir;
-
-#if DEBUG
-        // Dev mode only: check source directory relative to BaseDirectory
-        var devDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
-        var devScript = Path.Combine(devDir, "extract_api.mjs");
-        if (File.Exists(devScript))
-            return devDir;
-#endif
 
         throw new FileNotFoundException(
             $"Corrupt installation: extract_api.mjs not found at {scriptPath}. " +

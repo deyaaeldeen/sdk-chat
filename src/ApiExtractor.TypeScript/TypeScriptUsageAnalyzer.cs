@@ -99,7 +99,9 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         }
         finally
         {
-            try { File.Delete(tempApiFile); } catch { }
+            // Best-effort cleanup: temp file deletion failure is non-critical
+            // (OS will clean up temp files, and we don't want to mask the real result)
+            try { File.Delete(tempApiFile); } catch { /* Intentionally ignored - temp file cleanup */ }
         }
     }
 

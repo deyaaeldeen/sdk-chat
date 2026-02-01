@@ -66,12 +66,13 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Using ConcurrentDictionary for thread-safe parallel processing
         var typeMap = new ConcurrentDictionary<string, MergedType>();
         
-        // Parallelize Roslyn parsing - use all available cores
+        // Parallelize Roslyn parsing - cap at 8 cores to prevent memory pressure
+        // Beyond 8 cores, memory bandwidth dominates and additional parallelism hurts
         await Parallel.ForEachAsync(
             files,
             new ParallelOptions 
             { 
-                MaxDegreeOfParallelism = Environment.ProcessorCount,
+                MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
                 CancellationToken = ct 
             },
             async (file, token) =>

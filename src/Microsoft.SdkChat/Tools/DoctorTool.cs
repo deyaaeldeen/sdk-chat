@@ -101,7 +101,7 @@ public sealed partial class DoctorTool
                 );
             }
         }
-        catch { }
+        catch { /* dotnet command not found or failed - report as unavailable */ }
 
         return new DependencyStatus(".NET Runtime", false, null, null, null, "dotnet not found in PATH");
     }
@@ -151,7 +151,7 @@ public sealed partial class DoctorTool
                     return new DependencyStatus("Python", true, version, path, warning, null);
                 }
             }
-            catch { }
+            catch { /* Command not found or failed - try next candidate */ }
         }
 
         return new DependencyStatus("Python", false, null, null, null, 
@@ -176,7 +176,7 @@ public sealed partial class DoctorTool
                 return new DependencyStatus("Go", true, versionStr, path, pathWarning, null);
             }
         }
-        catch { }
+        catch { /* go command not found or failed - report as unavailable */ }
 
         return new DependencyStatus("Go", false, null, null, null,
             "Go not found. Install Go (https://go.dev) and ensure it's in PATH.");
@@ -197,7 +197,7 @@ public sealed partial class DoctorTool
                 return new DependencyStatus("JBang (Java)", true, version, path, pathWarning, null);
             }
         }
-        catch { }
+        catch { /* jbang command not found or failed - report as unavailable */ }
 
         return new DependencyStatus("JBang (Java)", false, null, null, null,
             "JBang not found. Install JBang (https://jbang.dev) and ensure it's in PATH.");
@@ -226,7 +226,7 @@ public sealed partial class DoctorTool
                 return new DependencyStatus("Node.js", true, version, path, warning, null);
             }
         }
-        catch { }
+        catch { /* node command not found or failed - report as unavailable */ }
 
         return new DependencyStatus("Node.js", false, null, null, null,
             "Node.js not found. Install Node.js 18+ and ensure it's in PATH.");
@@ -266,7 +266,7 @@ public sealed partial class DoctorTool
                 return output.Trim().Split('\n')[0].Trim();
             }
         }
-        catch { }
+        catch { /* which/where command failed - path resolution not critical */ }
         return null;
     }
 
