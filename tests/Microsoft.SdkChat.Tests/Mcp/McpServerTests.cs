@@ -93,7 +93,7 @@ public class McpServerTests
         // Arrange
         var port = GetAvailablePort();
         using var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
 
         // Act - Start the SSE server with cancellation token
         var serverTask = Task.Run(async () =>
@@ -108,14 +108,40 @@ public class McpServerTests
             }
         });
 
-        // Wait for server to initialize
-        await Task.Delay(1500);
-
-        // Assert - Verify the server is accessible via HTTP and responds with success
+        // Wait for server to initialize with retry logic
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        HttpResponseMessage? response = null;
+        var attempts = 0;
+        var maxAttempts = 10;
         
-        var response = await httpClient.GetAsync($"http://localhost:{port}/sse", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        while (attempts < maxAttempts && !cts.Token.IsCancellationRequested)
+        {
+            attempts++;
+            try
+            {
+                await Task.Delay(200 * attempts, cts.Token); // Exponential backoff
+                response = await httpClient.GetAsync($"http://localhost:{port}/sse", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                if (response.IsSuccessStatusCode)
+                {
+                    break; // Server is ready
+                }
+            }
+            catch (HttpRequestException)
+            {
+                // Server not ready yet, retry
+                if (attempts == maxAttempts)
+                {
+                    throw;
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                // Timeout or cancellation
+                throw;
+            }
+        }
         
+        // Assert - Verify the server is accessible via HTTP and responds with success
         Assert.NotNull(response);
         Assert.True(response.IsSuccessStatusCode, $"SSE endpoint should return success status code, but got {response.StatusCode}");
         
@@ -139,8 +165,8 @@ public class McpServerTests
 
         using var cts1 = new CancellationTokenSource();
         using var cts2 = new CancellationTokenSource();
-        cts1.CancelAfter(TimeSpan.FromSeconds(5));
-        cts2.CancelAfter(TimeSpan.FromSeconds(5));
+        cts1.CancelAfter(TimeSpan.FromSeconds(10));
+        cts2.CancelAfter(TimeSpan.FromSeconds(10));
 
         // Start first server on port1
         var server1Task = Task.Run(async () =>
@@ -155,9 +181,7 @@ public class McpServerTests
             }
         });
 
-        await Task.Delay(1000);
-
-        // Start second server on port2
+        // Start second server on port2 immediately (no need to wait)
         var server2Task = Task.Run(async () =>
         {
             try
@@ -170,13 +194,42 @@ public class McpServerTests
             }
         });
 
-        await Task.Delay(1000);
-
-        // Verify both servers are accessible on their respective ports with success status codes
+        // Wait for both servers to initialize with retry logic
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         
-        var response1 = await httpClient.GetAsync($"http://localhost:{port1}/sse", HttpCompletionOption.ResponseHeadersRead, cts1.Token);
-        var response2 = await httpClient.GetAsync($"http://localhost:{port2}/sse", HttpCompletionOption.ResponseHeadersRead, cts2.Token);
+        // Helper function to wait for server
+        async Task<HttpResponseMessage> WaitForServerAsync(int port, CancellationToken cancellationToken)
+        {
+            var attempts = 0;
+            var maxAttempts = 10;
+            
+            while (attempts < maxAttempts && !cancellationToken.IsCancellationRequested)
+            {
+                attempts++;
+                try
+                {
+                    await Task.Delay(200 * attempts, cancellationToken);
+                    var response = await httpClient.GetAsync($"http://localhost:{port}/sse", HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        return response;
+                    }
+                }
+                catch (HttpRequestException)
+                {
+                    // Server not ready yet, retry
+                    if (attempts == maxAttempts)
+                    {
+                        throw;
+                    }
+                }
+            }
+            
+            throw new TimeoutException($"Server on port {port} did not become ready in time");
+        }
+        
+        var response1 = await WaitForServerAsync(port1, cts1.Token);
+        var response2 = await WaitForServerAsync(port2, cts2.Token);
 
         Assert.NotNull(response1);
         Assert.True(response1.IsSuccessStatusCode, $"Server 1 should return success status code, but got {response1.StatusCode}");
