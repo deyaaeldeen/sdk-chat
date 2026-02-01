@@ -16,7 +16,6 @@ namespace ApiExtractor.Go;
 public class GoApiExtractor : IApiExtractor<ApiIndex>
 {
     private static readonly string[] GoPaths = { "go", "/usr/local/go/bin/go", "/opt/go/bin/go" };
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
     private static readonly SemaphoreSlim CompileLock = new(1, 1);
     private static string? _cachedBinaryPath;
     
@@ -88,9 +87,9 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         
         var binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
 
-        // Enforce default timeout if none provided
+        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(DefaultTimeout);
+        timeoutCts.CancelAfter(ExtractorTimeout.Value);
         var effectiveCt = timeoutCts.Token;
 
         var psi = new ProcessStartInfo
@@ -136,9 +135,9 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         
         var binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
 
-        // Enforce default timeout if none provided
+        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(DefaultTimeout);
+        timeoutCts.CancelAfter(ExtractorTimeout.Value);
         var effectiveCt = timeoutCts.Token;
         
         var psi = new ProcessStartInfo

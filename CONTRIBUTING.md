@@ -26,22 +26,35 @@ dotnet test
 A unified development container includes all language runtimes and tools:
 
 ```bash
-# Build container
+# Build base image first (required, cached for subsequent builds)
+docker build -f Dockerfile.base -t sdk-chat-base .
+
+# Build dev container
 docker build -t sdk-chat-dev .
 
 # Run tests
-docker run --rm -v "$(pwd):/workspace" sdk-chat-dev
+docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev
 
 # Interactive shell
-docker run -it --rm -v "$(pwd):/workspace" sdk-chat-dev bash
+docker run -it --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev bash
 
 # Build only
-docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet build
+docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet build
 
-# Record demo GIF (requires gh CLI authenticated)
-docker run --rm -v "$(pwd):/workspace" -e GH_TOKEN="$(gh auth token)" \
-  --entrypoint /workspace/demo/entrypoint.sh sdk-chat-dev
+# Run specific test
+docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet test --filter "FullyQualifiedName~AiServiceTests"
 ```
+
+> **Note:** The `-u $(id -u):$(id -g)` flag maps your host user into the container, ensuring files created in `/workspace` have correct ownership.
+
+#### Docker Images
+
+| Image | Dockerfile | Purpose |
+|-------|------------|--------|
+| `sdk-chat-base` | `Dockerfile.base` | Shared dependencies (build first) |
+| `sdk-chat-dev` | `Dockerfile` | Development and testing |
+| `sdk-chat-demo` | `Dockerfile.demo` | VHS demo recording |
+| `sdk-chat:latest` | `Dockerfile.release` | Production (minimal) |
 
 ### VS Code Dev Container
 

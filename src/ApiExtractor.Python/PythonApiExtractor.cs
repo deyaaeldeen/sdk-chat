@@ -18,7 +18,6 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         "extract_api.py");
 
     private static readonly string[] PythonCandidates = { "python3", "python" };
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
 
     private string? _pythonPath;
     private string? _unavailableReason;
@@ -89,9 +88,9 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         // Get script path - embedded in assembly directory
         var scriptPath = GetScriptPath();
 
-        // Enforce default timeout if none provided
+        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(DefaultTimeout);
+        timeoutCts.CancelAfter(ExtractorTimeout.Value);
         var effectiveCt = timeoutCts.Token;
 
         using var processActivity = ExtractorTelemetry.StartProcess(python, Language);

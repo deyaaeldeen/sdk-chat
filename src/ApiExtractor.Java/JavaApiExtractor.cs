@@ -13,7 +13,6 @@ namespace ApiExtractor.Java;
 public class JavaApiExtractor : IApiExtractor<ApiIndex>
 {
     private static readonly string[] JBangCandidates = { "jbang" };
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
 
     private string? _jbangPath;
     private string? _unavailableReason;
@@ -86,9 +85,9 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
             throw new FileNotFoundException($"ExtractApi.java not found at {scriptPath}");
         }
 
-        // Enforce default timeout if none provided
+        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(DefaultTimeout);
+        timeoutCts.CancelAfter(ExtractorTimeout.Value);
         var effectiveCt = timeoutCts.Token;
 
         var psi = new ProcessStartInfo
@@ -135,9 +134,9 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 
         var scriptPath = GetScriptPath();
 
-        // Enforce default timeout if none provided
+        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(DefaultTimeout);
+        timeoutCts.CancelAfter(ExtractorTimeout.Value);
         var effectiveCt = timeoutCts.Token;
         
         var psi = new ProcessStartInfo

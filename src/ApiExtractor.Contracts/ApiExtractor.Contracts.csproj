@@ -7,4 +7,9 @@
     <RootNamespace>ApiExtractor.Contracts</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Allow test project to access internal members -->
+    <InternalsVisibleTo Include="ApiExtractor.Tests" />
+  </ItemGroup>
+
 </Project>

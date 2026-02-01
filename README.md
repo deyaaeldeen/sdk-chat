@@ -132,7 +132,8 @@ sdk-chat doctor
 | `GH_TOKEN` | GitHub token for Copilot authentication |
 | `GITHUB_TOKEN` | Alternative GitHub token |
 | `SDK_CLI_MODEL` | Override default AI model |
-| `SDK_CLI_TIMEOUT` | Request timeout in seconds |
+| `SDK_CLI_TIMEOUT` | AI request timeout in seconds (default: 300) |
+| `SDK_CHAT_EXTRACTOR_TIMEOUT` | API extractor timeout in seconds (default: 300) |
 | `SDK_CLI_DEBUG` | Set `true` to log prompts/responses |
 | `SDK_CLI_DEBUG_DIR` | Directory for debug output files |
 | `SDK_CLI_USE_OPENAI` | Set `true` to use OpenAI by default |
@@ -191,20 +192,34 @@ dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/s
 
 ## Docker
 
-Build the container:
+### Quick Start
 
 ```bash
+# Build production image
 docker build -f Dockerfile.release -t sdk-chat:latest .
-```
 
-**Basic usage:**
-
-```bash
 # Show help
 docker run --rm sdk-chat:latest --help
 
 # Check dependencies
 docker run --rm sdk-chat:latest doctor
+```
+
+### All Images
+
+| Image | Dockerfile | Size | Purpose |
+|-------|------------|------|--------|
+| `sdk-chat-base` | `Dockerfile.base` | ~1.5GB | Shared dependencies |
+| `sdk-chat-dev` | `Dockerfile` | ~1.5GB | Development/testing |
+| `sdk-chat-demo` | `Dockerfile.demo` | ~2GB | Demo recording (VHS) |
+| `sdk-chat:latest` | `Dockerfile.release` | ~800MB | Production |
+
+```bash
+# Build all images
+docker build -f Dockerfile.base -t sdk-chat-base .     # Base (required for dev/demo)
+docker build -t sdk-chat-dev .                          # Dev
+docker build -f Dockerfile.demo -t sdk-chat-demo .      # Demo
+docker build -f Dockerfile.release -t sdk-chat:latest . # Production
 ```
 
 **Generate samples with GitHub Copilot:**

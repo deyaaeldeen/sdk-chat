@@ -11,21 +11,35 @@ SDK Chat - CLI tool for generating SDK code samples using AI. .NET 10, C#.
 **Use the Docker container for all development and testing.** This ensures consistent environments with all dependencies (Python, Node.js, Go, JBang).
 
 ```bash
-# Build container (first time or after Dockerfile changes)
+# Build base image first (required, cached for subsequent builds)
+docker build -f Dockerfile.base -t sdk-chat-base .
+
+# Build dev container
 docker build -t sdk-chat-dev .
 
 # Run tests (recommended - ensures all extractors work)
-docker run --rm -v "$(pwd):/workspace" sdk-chat-dev
+docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev
 
 # Interactive development shell
-docker run -it --rm -v "$(pwd):/workspace" sdk-chat-dev bash
+docker run -it --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev bash
 
 # Build only
-docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet build
+docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet build
 
 # Run specific test
-docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet test --filter "FullyQualifiedName~AiServiceTests"
+docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet test --filter "FullyQualifiedName~AiServiceTests"
 ```
+
+> **Note:** The `-u $(id -u):$(id -g)` flag maps your host user into the container, ensuring files created in `/workspace` have correct ownership.
+
+### Docker Images
+
+| Image | Dockerfile | Purpose |
+|-------|------------|--------|
+| `sdk-chat-base` | `Dockerfile.base` | Shared dependencies (build first) |
+| `sdk-chat-dev` | `Dockerfile` | Development and testing |
+| `sdk-chat-demo` | `Dockerfile.demo` | VHS demo recording |
+| `sdk-chat:latest` | `Dockerfile.release` | Production (minimal) |
 
 ## Structure
 

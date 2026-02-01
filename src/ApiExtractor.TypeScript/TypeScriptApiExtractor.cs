@@ -14,7 +14,6 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 {
     private static readonly string[] NodeCandidates = { "node" };
     private static readonly SemaphoreSlim NpmInstallLock = new(1, 1);
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
 
     private string? _nodePath;
     private string? _unavailableReason;
@@ -91,9 +90,9 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
         }
 
-        // Enforce default timeout if none provided
+        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(DefaultTimeout);
+        timeoutCts.CancelAfter(ExtractorTimeout.Value);
         var effectiveCt = timeoutCts.Token;
 
         var psi = new ProcessStartInfo
@@ -149,9 +148,9 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
         }
 
-        // Enforce default timeout if none provided
+        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(DefaultTimeout);
+        timeoutCts.CancelAfter(ExtractorTimeout.Value);
         var effectiveCt = timeoutCts.Token;
 
         var psi = new ProcessStartInfo
