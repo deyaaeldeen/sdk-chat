@@ -153,7 +153,7 @@ public sealed class SampleGeneratorAgent(
             }
         }
         
-        var outputFolder = sdkInfo.SuggestedSamplesFolder;
+        var outputFolder = Path.GetFullPath(sdkInfo.SuggestedSamplesFolder);
         Directory.CreateDirectory(outputFolder);
         
         foreach (var sample in samples)
@@ -164,6 +164,13 @@ public sealed class SampleGeneratorAgent(
                 : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
             var filePath = Path.GetFullPath(Path.Combine(outputFolder, relativePath));
             
+            // SECURITY: Ensure path stays within output directory (defense-in-depth)
+            if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) 
+                && !filePath.Equals(outputFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                continue; // Skip files that would escape output directory
+            }
+
             // Create subdirectories if needed
             var fileDir = Path.GetDirectoryName(filePath);
             if (!string.IsNullOrEmpty(fileDir))

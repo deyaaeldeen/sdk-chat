@@ -189,6 +189,68 @@ dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/s
 
 ---
 
+## Docker
+
+Build the container:
+
+```bash
+docker build -f Dockerfile.release -t sdk-chat:latest .
+```
+
+**Basic usage:**
+
+```bash
+# Show help
+docker run --rm sdk-chat:latest --help
+
+# Check dependencies
+docker run --rm sdk-chat:latest doctor
+```
+
+**Generate samples with GitHub Copilot:**
+
+```bash
+docker run --rm -u $(id -u):$(id -g) \
+  -v "$HOME/.copilot:/tmp/.copilot" \
+  -v "/path/to/your-sdk:/sdk" \
+  -e HOME=/tmp \
+  sdk-chat:latest package sample generate /sdk --count 5
+```
+
+> **Note:** The `~/.copilot` directory must be mounted **read-write** because the Copilot CLI writes session state and cached packages.
+
+**Generate samples with OpenAI:**
+
+```bash
+docker run --rm -u $(id -u):$(id -g) \
+  -v "/path/to/your-sdk:/sdk" \
+  -e OPENAI_API_KEY="sk-..." \
+  sdk-chat:latest package sample generate /sdk --use-openai --count 5
+```
+
+**Using a `.env` file:**
+
+```bash
+docker run --rm -u $(id -u):$(id -g) \
+  -v "/path/to/your-sdk:/sdk" \
+  -v "$PWD/.env:/app/.env:ro" \
+  -e HOME=/tmp \
+  sdk-chat:latest package sample generate /sdk --use-openai --load-dotenv
+```
+
+**Run as MCP server:**
+
+```bash
+docker run --rm -i \
+  -v "$HOME/.copilot:/tmp/.copilot" \
+  -e HOME=/tmp \
+  sdk-chat:latest mcp
+```
+
+The container runs as non-root user `sdkchat` (UID 1001) by default. Use `-u $(id -u):$(id -g)` to match your host user for file permissions.
+
+---
+
 ## Project Structure
 
 ```

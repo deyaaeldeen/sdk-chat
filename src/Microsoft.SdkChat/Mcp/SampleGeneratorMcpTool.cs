@@ -90,7 +90,14 @@ public class SampleGeneratorMcpTool(
                     ? PathSanitizer.SanitizeFilePath(sample.FilePath, context.FileExtension)
                     : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
                 var filePath = Path.GetFullPath(Path.Combine(output, relativePath));
-                
+
+                // SECURITY: Ensure path stays within output directory (defense-in-depth)
+                if (!filePath.StartsWith(output + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) 
+                    && !filePath.Equals(output, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue; // Skip files that would escape output directory
+                }
+
                 // Create subdirectories if needed
                 var fileDir = Path.GetDirectoryName(filePath);
                 if (!string.IsNullOrEmpty(fileDir))

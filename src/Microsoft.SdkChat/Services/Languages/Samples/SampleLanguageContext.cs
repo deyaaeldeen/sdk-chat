@@ -173,7 +173,8 @@ public abstract class SampleLanguageContext
         // Stream existing samples if available (with usage analysis if supported)
         if (!string.IsNullOrEmpty(samplesPath) && Directory.Exists(samplesPath))
         {
-            var sampleFilesCount = Directory.EnumerateFiles(samplesPath, $"*{FileExtension}", SearchOption.AllDirectories).Count();
+            // SAFETY: Use safe enumeration to avoid scanning node_modules, .git, etc.
+            var sampleFilesCount = SdkInfo.CountFilesSafely(samplesPath, $"*{FileExtension}");
             if (sampleFilesCount > 0)
             {
                 // Try usage analysis first

@@ -59,8 +59,8 @@ public sealed partial class DoctorTool
         PrintSecurityAdvisory(results);
 
         // Return non-zero if any required dependency is missing
-        var requiredMissing = results.Any(r => !r.IsAvailable && r.Name == ".NET SDK");
-        var optionalMissing = results.Where(r => !r.IsAvailable && r.Name != ".NET SDK").ToList();
+        var requiredMissing = results.Any(r => !r.IsAvailable && r.Name == ".NET Runtime");
+        var optionalMissing = results.Where(r => !r.IsAvailable && r.Name != ".NET Runtime").ToList();
 
         Console.WriteLine();
         if (requiredMissing)
@@ -84,14 +84,17 @@ public sealed partial class DoctorTool
     {
         try
         {
-            var (exitCode, output, _) = await RunCommandAsync("dotnet", "--version", ct);
+            // Check for dotnet runtime (--info shows runtime info even without SDK)
+            var (exitCode, output, _) = await RunCommandAsync("dotnet", "--info", ct);
             if (exitCode == 0)
             {
+                // Extract runtime version from output
+                var version = ExtractDotNetRuntimeVersion(output);
                 var path = await GetCommandPathAsync("dotnet", ct);
                 return new DependencyStatus(
-                    ".NET SDK",
+                    ".NET Runtime",
                     true,
-                    output.Trim(),
+                    version ?? "installed",
                     path,
                     null,
                     null
@@ -100,7 +103,26 @@ public sealed partial class DoctorTool
         }
         catch { }
 
-        return new DependencyStatus(".NET SDK", false, null, null, null, "dotnet not found in PATH");
+        return new DependencyStatus(".NET Runtime", false, null, null, null, "dotnet not found in PATH");
+    }
+    
+    private static string? ExtractDotNetRuntimeVersion(string output)
+    {
+        // Look for ".NET runtimes installed:" section and extract version
+        // Example: "Microsoft.NETCore.App 10.0.0 [/usr/share/dotnet/shared/Microsoft.NETCore.App]"
+        foreach (var line in output.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("Microsoft.NETCore.App", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    return parts[1]; // Return version number
+                }
+            }
+        }
+        return null;
     }
 
     private static async Task<DependencyStatus> CheckPythonAsync(CancellationToken ct)
@@ -164,13 +186,15 @@ public sealed partial class DoctorTool
     {
         try
         {
-            var (exitCode, output, _) = await RunCommandAsync("jbang", "--version", ct);
+            // JBang outputs version to stderr, not stdout
+            var (exitCode, output, error) = await RunCommandAsync("jbang", "--version", ct);
             if (exitCode == 0)
             {
                 var path = await GetCommandPathAsync("jbang", ct);
                 var pathWarning = CheckPathSecurity(path, "jbang");
-
-                return new DependencyStatus("JBang (Java)", true, output.Trim(), path, pathWarning, null);
+                // Use stderr if stdout is empty (JBang behavior)
+                var version = !string.IsNullOrWhiteSpace(output) ? output.Trim() : error.Trim();
+                return new DependencyStatus("JBang (Java)", true, version, path, pathWarning, null);
             }
         }
         catch { }

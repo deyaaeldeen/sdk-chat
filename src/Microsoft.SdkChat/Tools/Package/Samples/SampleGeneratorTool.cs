@@ -67,8 +67,9 @@ public class SampleGeneratorTool
         // Existing samples are always read from the SDK's detected samples folder (for context)
         // Output is written to the user-specified path or the SDK's samples folder
         var existingSamplesPath = sdkInfo.SamplesFolder;
+        // SAFETY: Use safe enumeration to avoid scanning node_modules, .git, etc.
         var existingCount = existingSamplesPath is not null && Directory.Exists(existingSamplesPath)
-            ? Directory.EnumerateFiles(existingSamplesPath, "*" + (sdkInfo.FileExtension ?? ".*"), SearchOption.AllDirectories).Count() 
+            ? SdkInfo.CountFilesSafely(existingSamplesPath, "*" + (sdkInfo.FileExtension ?? ".*"))
             : 0;
         
         ConsoleUx.Info($"Detected {ConsoleUx.Bold(sdkInfo.LanguageName ?? "unknown")} SDK");
@@ -263,6 +264,7 @@ public class SampleGeneratorTool
         if (!dryRun)
         {
             Console.WriteLine();
+            var outputFolder = Path.GetFullPath(outputDir);
             for (var i = 0; i < samples.Count; i++)
             {
                 var sample = samples[i];
@@ -272,6 +274,15 @@ public class SampleGeneratorTool
                 var isLast = i == samples.Count - 1;
                 
                 var filePath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
+                
+                // SECURITY: Ensure path stays within output directory (defense-in-depth)
+                if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) 
+                    && !filePath.Equals(outputFolder, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"  {ConsoleUx.Yellow("⚠")} Skipping file that would escape output directory: {relativePath}");
+                    continue;
+                }
+                
                 var fileDir = Path.GetDirectoryName(filePath);
                 if (!string.IsNullOrEmpty(fileDir))
                 {
@@ -489,7 +500,8 @@ public class SampleGeneratorTool
         // Include an example existing sample with full content if available
         if (!string.IsNullOrEmpty(samplesFolder) && Directory.Exists(samplesFolder))
         {
-            var exampleFile = Directory.EnumerateFiles(samplesFolder, $"*{languageContext.FileExtension}", SearchOption.AllDirectories)
+            // SAFETY: Use safe enumeration to avoid scanning node_modules, .git, etc.
+            var exampleFile = SdkInfo.EnumerateFilesSafely(samplesFolder, $"*{languageContext.FileExtension}", maxFiles: 100)
                 .FirstOrDefault();
             if (exampleFile != null)
             {
@@ -526,6 +538,7 @@ public class SampleGeneratorTool
     
     /// <summary>
     /// Counts existing sample files in the samples folder.
+    /// Uses safe enumeration to avoid scanning dangerous folders like node_modules.
     /// </summary>
     private static async Task<int> CountExistingSamplesAsync(
         string? samplesFolder, 
@@ -535,8 +548,9 @@ public class SampleGeneratorTool
         
         if (string.IsNullOrEmpty(samplesFolder) || !Directory.Exists(samplesFolder))
             return 0;
-            
-        return Directory.EnumerateFiles(samplesFolder, $"*{languageContext.FileExtension}", SearchOption.AllDirectories).Count();
+        
+        // SAFETY: Use safe enumeration to avoid scanning node_modules, .git, etc.
+        return SdkInfo.CountFilesSafely(samplesFolder, $"*{languageContext.FileExtension}");
     }
     
     /// <summary>

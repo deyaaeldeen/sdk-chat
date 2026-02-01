@@ -4,14 +4,87 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services;
 
 /// <summary>
+/// Scrubs sensitive data (API keys, tokens, secrets) from text before logging.
+/// Defense-in-depth: prevents accidental credential exposure in debug logs.
+/// </summary>
+public static partial class SensitiveDataScrubber
+{
+    // Compiled regex patterns for common secret formats
+    // Using source generators for performance (Regex attribute)
+    
+    /// <summary>OpenAI API keys: sk-... or sk-proj-...</summary>
+    [GeneratedRegex(@"sk-(?:proj-)?[a-zA-Z0-9]{20,}", RegexOptions.Compiled)]
+    private static partial Regex OpenAiKeyPattern();
+    
+    /// <summary>GitHub tokens: ghp_, gho_, ghu_, ghs_, ghr_</summary>
+    [GeneratedRegex(@"gh[pousr]_[a-zA-Z0-9]{36,}", RegexOptions.Compiled)]
+    private static partial Regex GitHubTokenPattern();
+    
+    /// <summary>Azure API keys (32-char hex)</summary>
+    [GeneratedRegex(@"[a-fA-F0-9]{32}", RegexOptions.Compiled)]
+    private static partial Regex AzureKeyPattern();
+    
+    /// <summary>Generic Bearer tokens</summary>
+    [GeneratedRegex(@"Bearer\s+[a-zA-Z0-9\-_\.]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex BearerTokenPattern();
+    
+    /// <summary>AWS access keys: AKIA...</summary>
+    [GeneratedRegex(@"AKIA[0-9A-Z]{16}", RegexOptions.Compiled)]
+    private static partial Regex AwsAccessKeyPattern();
+    
+    /// <summary>AWS secret keys (40-char base64-ish)</summary>
+    [GeneratedRegex(@"(?<![a-zA-Z0-9/+])[a-zA-Z0-9/+]{40}(?![a-zA-Z0-9/+])", RegexOptions.Compiled)]
+    private static partial Regex AwsSecretKeyPattern();
+    
+    /// <summary>Generic API key patterns in key=value or "key": "value" format</summary>
+    [GeneratedRegex(@"(?i)(api[_-]?key|apikey|secret|password|token|credential|auth)([""']?\s*[:=]\s*[""']?)([a-zA-Z0-9\-_\.]{16,})", RegexOptions.Compiled)]
+    private static partial Regex GenericSecretPattern();
+    
+    private const string RedactedPlaceholder = "[REDACTED]";
+    
+    /// <summary>
+    /// Scrubs all recognized sensitive patterns from the input text.
+    /// </summary>
+    public static string Scrub(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text ?? string.Empty;
+        
+        var result = text;
+        
+        // Apply each pattern - order matters (more specific first)
+        result = OpenAiKeyPattern().Replace(result, RedactedPlaceholder);
+        result = GitHubTokenPattern().Replace(result, RedactedPlaceholder);
+        result = AwsAccessKeyPattern().Replace(result, RedactedPlaceholder);
+        result = BearerTokenPattern().Replace(result, $"Bearer {RedactedPlaceholder}");
+        
+        // Generic secret pattern preserves the key name for debugging
+        result = GenericSecretPattern().Replace(result, m => 
+            $"{m.Groups[1].Value}{m.Groups[2].Value}{RedactedPlaceholder}");
+        
+        // Azure keys are 32-char hex - only redact if looks like a standalone key
+        // (avoid false positives on hashes in URLs, commit SHAs, etc.)
+        result = Regex.Replace(result, 
+            @"(?i)(?:key|secret|password|token)([""']?\s*[:=]\s*[""']?)([a-fA-F0-9]{32})",
+            m => $"{m.Groups[0].Value.Split('=')[0].Split(':')[0]}{m.Groups[1].Value}{RedactedPlaceholder}");
+        
+        return result;
+    }
+}
+
+/// <summary>
 /// Debug logger for AI service interactions.
 /// Writes structured markdown files with full request/response details.
+/// 
+/// SECURITY: All prompts and responses are scrubbed for sensitive data
+/// (API keys, tokens, secrets) before writing to disk.
 /// 
 /// Enable via environment variable: SDK_CLI_DEBUG=true
 /// Set output directory via: SDK_CLI_DEBUG_DIR (defaults to ~/.sdk-chat/debug)
@@ -173,20 +246,23 @@ public class AiDebugLogger
         }
         
         // System Prompt
+        // SECURITY: Scrub sensitive data before writing
         await writer.WriteLineAsync("## System Prompt");
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("```");
-        await writer.WriteLineAsync(session.SystemPrompt);
+        await writer.WriteLineAsync(SensitiveDataScrubber.Scrub(session.SystemPrompt));
         await writer.WriteLineAsync("```");
         await writer.WriteLineAsync();
         
         // User Prompt - FULL content, no truncation
+        // SECURITY: Scrub sensitive data before writing
+        var scrubbedUserPrompt = SensitiveDataScrubber.Scrub(session.UserPrompt);
         await writer.WriteLineAsync("## User Prompt");
         await writer.WriteLineAsync();
         await writer.WriteLineAsync($"**Length:** {session.UserPrompt.Length:N0} characters (~{EstimateTokens(session.UserPrompt):N0} tokens)");
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("```");
-        await writer.WriteAsync(session.UserPrompt);  // Stream full content
+        await writer.WriteAsync(scrubbedUserPrompt);  // Stream scrubbed content
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("```");
         await writer.WriteLineAsync();
@@ -200,15 +276,18 @@ public class AiDebugLogger
             await writer.WriteLineAsync("### ❌ Error");
             await writer.WriteLineAsync();
             await writer.WriteLineAsync("```");
-            await writer.WriteLineAsync(session.Error.ToString());
+            // SECURITY: Scrub error messages too (may contain secrets in stack traces)
+            await writer.WriteLineAsync(SensitiveDataScrubber.Scrub(session.Error.ToString()));
             await writer.WriteLineAsync("```");
         }
         else
         {
+            // SECURITY: Scrub response before writing
+            var scrubbedResponse = SensitiveDataScrubber.Scrub(session.Response ?? "(empty)");
             await writer.WriteLineAsync($"**Length:** {session.Response?.Length ?? 0:N0} characters (~{EstimateTokens(session.Response ?? ""):N0} tokens)");
             await writer.WriteLineAsync();
             await writer.WriteLineAsync("```");
-            await writer.WriteAsync(session.Response ?? "(empty)");  // Stream full content
+            await writer.WriteAsync(scrubbedResponse);  // Stream scrubbed content
             await writer.WriteLineAsync();
             await writer.WriteLineAsync("```");
         }

@@ -15,8 +15,24 @@ namespace Microsoft.SdkChat.Mcp;
 /// </summary>
 public static class McpServer
 {
+    /// <summary>
+    /// Supported transport types for the MCP server.
+    /// </summary>
+    private static readonly HashSet<string> SupportedTransports = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "stdio"
+    };
+    
     public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false)
     {
+        // Validate transport type - fail fast if unsupported
+        if (!SupportedTransports.Contains(transport))
+        {
+            throw new NotSupportedException(
+                $"Transport '{transport}' is not supported. Supported transports: {string.Join(", ", SupportedTransports)}. " +
+                $"SSE transport is planned for a future release.");
+        }
+        
         var builder = Host.CreateApplicationBuilder();
         
         // Configure logging
@@ -32,12 +48,12 @@ public static class McpServer
         builder.Services.AddSingleton<FileHelper>();
         builder.Services.AddSingleton<ConfigurationHelper>();
         
-        // Configure MCP server
+        // Configure MCP server with validated transport
         builder.Services.AddMcpServer(options =>
         {
             options.ServerInfo = new() { Name = "sdk-chat", Version = "1.0.0" };
         })
-        .WithStdioServerTransport()
+        .WithStdioServerTransport()  // Currently only stdio is supported
         .WithToolsFromAssembly();
         
         var host = builder.Build();

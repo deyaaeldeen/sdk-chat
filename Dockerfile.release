@@ -1,0 +1,118 @@
+# SDK Chat Production Container
+# Multi-stage build for minimal production image
+#
+# Build:
+#   docker build -f Dockerfile.release -t sdk-chat:latest .
+#
+# Usage with GitHub Copilot (requires ~/.copilot auth):
+#   docker run --rm -u $(id -u):$(id -g) \
+#     -v "$HOME/.copilot:/tmp/.copilot" \
+#     -v "/path/to/sdk:/sdk" \
+#     -e HOME=/tmp \
+#     sdk-chat:latest package sample generate /sdk
+#
+# Usage with OpenAI:
+#   docker run --rm -u $(id -u):$(id -g) \
+#     -v "/path/to/sdk:/sdk" \
+#     -e OPENAI_API_KEY="sk-..." \
+#     sdk-chat:latest package sample generate /sdk --use-openai
+#
+# MCP server:
+#   docker run --rm -i -v "$HOME/.copilot:/tmp/.copilot" -e HOME=/tmp \
+#     sdk-chat:latest mcp
+#
+# Check dependencies:
+#   docker run --rm sdk-chat:latest doctor
+#
+# Image size: ~800MB (includes Python, Node, Go, JBang, Copilot CLI)
+# Runs as: non-root user 'sdkchat' (UID 1001)
+
+# ============================================================================
+# Stage 1: Build
+# ============================================================================
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+
+WORKDIR /src
+
+# Copy project files first for layer caching
+COPY sdk-chat.sln ./
+COPY src/Microsoft.SdkChat/Microsoft.SdkChat.csproj src/Microsoft.SdkChat/
+COPY src/AgentClientProtocol.Sdk/AgentClientProtocol.Sdk.csproj src/AgentClientProtocol.Sdk/
+COPY src/AgentClientProtocol.Sdk.Generators/AgentClientProtocol.Sdk.Generators.csproj src/AgentClientProtocol.Sdk.Generators/
+COPY src/ApiExtractor.Contracts/ApiExtractor.Contracts.csproj src/ApiExtractor.Contracts/
+COPY src/ApiExtractor.DotNet/ApiExtractor.DotNet.csproj src/ApiExtractor.DotNet/
+COPY src/ApiExtractor.Python/ApiExtractor.Python.csproj src/ApiExtractor.Python/
+COPY src/ApiExtractor.Java/ApiExtractor.Java.csproj src/ApiExtractor.Java/
+COPY src/ApiExtractor.Go/ApiExtractor.Go.csproj src/ApiExtractor.Go/
+COPY src/ApiExtractor.TypeScript/ApiExtractor.TypeScript.csproj src/ApiExtractor.TypeScript/
+
+# Copy full source for restore (generators need full source)
+COPY src/ src/
+
+# Restore dependencies (cached unless .csproj changes)
+RUN dotnet restore src/Microsoft.SdkChat/Microsoft.SdkChat.csproj
+
+# Build release
+RUN dotnet publish src/Microsoft.SdkChat/Microsoft.SdkChat.csproj \
+    -c Release \
+    -o /app \
+    -p:PublishSingleFile=false \
+    -p:PublishTrimmed=false
+
+# ============================================================================
+# Stage 2: Runtime
+# ============================================================================
+# Using Ubuntu-based image (default) because Copilot CLI requires glibc
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+
+LABEL org.opencontainers.image.source="https://github.com/deyaaeldeen/sdk-chat"
+LABEL org.opencontainers.image.description="SDK Chat - AI-powered SDK sample generation"
+LABEL org.opencontainers.image.version="0.1.0"
+
+# Install minimal language runtimes for API extractors
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python extractor
+    python3 \
+    # Node.js for TypeScript/JavaScript extractor  
+    nodejs \
+    # Go extractor
+    golang-go \
+    # For JBang and Copilot CLI
+    curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install JBang system-wide (lightweight Java runner - downloads JDK on first use)
+ENV JBANG_DIR=/opt/jbang
+RUN mkdir -p /opt/jbang \
+    && curl -Ls https://sh.jbang.dev | JBANG_DIR=/opt/jbang bash -s - app setup \
+    && chmod -R a+rx /opt/jbang \
+    && ln -s /opt/jbang/bin/jbang /usr/local/bin/jbang
+
+# Install GitHub Copilot CLI (required for Copilot SDK authentication)
+RUN curl -fsSL https://gh.io/copilot-install | bash
+
+# Copy published app
+WORKDIR /app
+COPY --from=build /app .
+
+# Copy language-specific extractor scripts
+COPY src/ApiExtractor.Python/extract_api.py /app/
+COPY src/ApiExtractor.TypeScript/extract_api.mjs /app/
+COPY src/ApiExtractor.Go/extract_api.go /app/
+COPY src/ApiExtractor.Java/ExtractApi.java /app/
+
+# Security: Run as non-root user
+RUN useradd -m -u 1001 sdkchat
+USER sdkchat
+
+# Environment
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_NOLOGO=1
+
+# Health check for container orchestrators
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["dotnet", "/app/Microsoft.SdkChat.dll", "--help"] || exit 1
+
+# Default entrypoint
+ENTRYPOINT ["dotnet", "/app/Microsoft.SdkChat.dll"]
+CMD ["--help"]

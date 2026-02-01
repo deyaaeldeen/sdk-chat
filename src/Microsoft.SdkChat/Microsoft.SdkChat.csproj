@@ -37,22 +37,25 @@
 
   <ItemGroup>
     <!-- GitHub Copilot SDK https://www.nuget.org/packages/GitHub.Copilot.SDK -->
-    <PackageReference Include="GitHub.Copilot.SDK" Version="0.1.20" />
+    <!-- PINNED: Exact version to prevent breaking changes -->
+    <PackageReference Include="GitHub.Copilot.SDK" Version="[0.1.20]" />
     
     <!-- MCP Server (for VS Code, Claude Desktop integration) -->
-    <PackageReference Include="ModelContextProtocol" Version="0.7.0-preview.1" />
+    <!-- WARNING: Preview package - monitor for breaking changes. Pin to exact version. -->
+    <!-- TODO: Upgrade to stable release when available -->
+    <PackageReference Include="ModelContextProtocol" Version="[0.7.0-preview.1]" />
     
-    <!-- Infrastructure -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.2" />
-    <PackageReference Include="System.CommandLine" Version="2.0.2" />
-    <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.2" />
+    <!-- Infrastructure - PINNED to exact versions -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="[10.0.2]" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="[10.0.2]" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="[10.0.2]" />
+    <PackageReference Include="System.CommandLine" Version="[2.0.2]" />
+    <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="[10.0.2]" />
     
-    <!-- OpenTelemetry for observability -->
-    <PackageReference Include="OpenTelemetry" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.0" />
+    <!-- OpenTelemetry for observability - PINNED to exact versions -->
+    <PackageReference Include="OpenTelemetry" Version="[1.15.0]" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="[1.15.0]" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="[1.15.0]" />
   </ItemGroup>
 
   <ItemGroup>

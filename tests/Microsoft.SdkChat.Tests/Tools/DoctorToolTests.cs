@@ -93,7 +93,7 @@ public class DoctorToolTests
             Assert.True(exitCode == 0, "Expected exit code 0 when .NET is available");
             
             var output = sw.ToString();
-            Assert.Contains(".NET SDK", output);
+            Assert.Contains(".NET Runtime", output);
             Assert.Contains("✓", output); // At least .NET should have checkmark
         }
         finally
@@ -191,7 +191,7 @@ public class DoctorToolTests
             var output = sw.ToString();
             
             // Should check all language dependencies
-            Assert.Contains(".NET SDK", output);
+            Assert.Contains(".NET Runtime", output);
             Assert.Contains("Python", output);
             Assert.Contains("Go", output);
             Assert.Contains("JBang", output);
@@ -280,9 +280,9 @@ public class DoctorToolTests
             
             var output = sw.ToString();
             
-            // .NET SDK version should be shown (we know it's available)
-            // Format is "✓ .NET SDK        v{version}"
-            Assert.Matches(@"✓\s+\.NET SDK\s+v\d+", output);
+            // .NET Runtime version should be shown (we know it's available)
+            // Format is "✓ .NET Runtime        v{version}"
+            Assert.Matches(@"✓\s+\.NET Runtime\s+v\d+", output);
         }
         finally
         {
@@ -348,7 +348,7 @@ public class DoctorToolTests
             var exitCode = await tool.ExecuteAsync(verbose: false);
             
             // Exit code should always be 0 when running as a .NET app
-            // because .NET SDK is always available
+            // because .NET Runtime is always available
             Assert.Equal(0, exitCode);
         }
         finally
