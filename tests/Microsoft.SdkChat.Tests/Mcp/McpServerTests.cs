@@ -288,14 +288,14 @@ public class McpServerTests
     }
 
     [Theory]
-    [InlineData("stdio")]
     [InlineData("sse")]
     public async Task RunAsync_TransportNames_AreCaseInsensitive(string transport)
     {
-        // Test that transport names are case-insensitive by verifying both lower and upper case work
+        // Test that transport names are case-insensitive for SSE transport
+        // (stdio transport is tested separately due to stdin dependency)
         
         using var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(300));
+        cts.CancelAfter(TimeSpan.FromMilliseconds(500));
         
         var port = GetAvailablePort();
 
@@ -312,9 +312,9 @@ public class McpServerTests
             }
         });
 
-        await Task.Delay(100);
+        await Task.Delay(200);
         
-        // Assert - Verify lowercase transport name is accepted
+        // Assert - Verify lowercase transport name is accepted and server keeps running
         Assert.False(taskLower.IsCompleted, $"Transport '{transport.ToLower()}' should be accepted");
         
         // Ensure cleanup
@@ -329,7 +329,7 @@ public class McpServerTests
         
         // Test uppercase with new cancellation token and port
         using var cts2 = new CancellationTokenSource();
-        cts2.CancelAfter(TimeSpan.FromMilliseconds(300));
+        cts2.CancelAfter(TimeSpan.FromMilliseconds(500));
         var port2 = GetAvailablePort();
         
         var taskUpper = Task.Run(async () =>
@@ -344,9 +344,9 @@ public class McpServerTests
             }
         });
 
-        await Task.Delay(100);
+        await Task.Delay(200);
         
-        // Assert - Verify uppercase transport name is accepted
+        // Assert - Verify uppercase transport name is accepted and server keeps running
         Assert.False(taskUpper.IsCompleted, $"Transport '{transport.ToUpper()}' should be accepted");
         
         // Ensure cleanup
@@ -358,5 +358,40 @@ public class McpServerTests
         {
             // Server didn't shut down cleanly, but test already passed
         }
+    }
+
+    [Theory]
+    [InlineData("stdio")]
+    [InlineData("STDIO")]
+    [InlineData("Stdio")]
+    public async Task RunAsync_StdioTransportNames_AreCaseInsensitive(string transport)
+    {
+        // Verify that stdio transport accepts case-insensitive names
+        // Note: stdio may exit immediately when stdin is unavailable (expected in tests)
+        
+        var port = GetAvailablePort();
+        Exception? caughtException = null;
+        
+        var serverTask = Task.Run(async () =>
+        {
+            try
+            {
+                await McpServer.RunAsync(transport, port, "error", useOpenAi: false);
+            }
+            catch (NotSupportedException ex)
+            {
+                // This would indicate the transport name wasn't recognized
+                caughtException = ex;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected
+            }
+        });
+
+        await Task.WhenAny(serverTask, Task.Delay(TimeSpan.FromMilliseconds(500)));
+
+        // Assert - Should not throw NotSupportedException (transport name was accepted)
+        Assert.Null(caughtException);
     }
 }
