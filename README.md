@@ -209,14 +209,12 @@ docker run --rm sdk-chat:latest doctor
 
 | Image | Dockerfile | Size | Purpose |
 |-------|------------|------|--------|
-| `sdk-chat-base` | `Dockerfile.base` | ~1.5GB | Shared dependencies |
 | `sdk-chat-dev` | `Dockerfile` | ~1.5GB | Development/testing |
 | `sdk-chat-demo` | `Dockerfile.demo` | ~2GB | Demo recording (VHS) |
 | `sdk-chat:latest` | `Dockerfile.release` | ~800MB | Production |
 
 ```bash
-# Build all images
-docker build -f Dockerfile.base -t sdk-chat-base .     # Base (required for dev/demo)
+# Build images
 docker build -t sdk-chat-dev .                          # Dev
 docker build -f Dockerfile.demo -t sdk-chat-demo .      # Demo
 docker build -f Dockerfile.release -t sdk-chat:latest . # Production

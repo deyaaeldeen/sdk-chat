@@ -2,7 +2,6 @@
 # Multi-stage build for minimal production image
 #
 # Build:
-#   docker build -f Dockerfile.base -t sdk-chat-base .  # if not cached
 #   docker build -f Dockerfile.release -t sdk-chat:latest .
 #
 # Usage with GitHub Copilot (requires ~/.copilot auth):
@@ -29,9 +28,9 @@
 # Runs as: non-root user 'sdkchat' (UID 1001)
 
 # ============================================================================
-# Stage 1: Build (uses base for consistent tooling)
+# Stage 1: Build
 # ============================================================================
-FROM sdk-chat-base AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
 WORKDIR /src
 

@@ -26,9 +26,6 @@ dotnet test
 A unified development container includes all language runtimes and tools:
 
 ```bash
-# Build base image first (required, cached for subsequent builds)
-docker build -f Dockerfile.base -t sdk-chat-base .
-
 # Build dev container
 docker build -t sdk-chat-dev .
 
@@ -51,7 +48,6 @@ docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet 
 
 | Image | Dockerfile | Purpose |
 |-------|------------|--------|
-| `sdk-chat-base` | `Dockerfile.base` | Shared dependencies (build first) |
 | `sdk-chat-dev` | `Dockerfile` | Development and testing |
 | `sdk-chat-demo` | `Dockerfile.demo` | VHS demo recording |
 | `sdk-chat:latest` | `Dockerfile.release` | Production (minimal) |

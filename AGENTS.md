@@ -11,9 +11,6 @@ SDK Chat - CLI tool for generating SDK code samples using AI. .NET 10, C#.
 **Use the Docker container for all development and testing.** This ensures consistent environments with all dependencies (Python, Node.js, Go, JBang).
 
 ```bash
-# Build base image first (required, cached for subsequent builds)
-docker build -f Dockerfile.base -t sdk-chat-base .
-
 # Build dev container
 docker build -t sdk-chat-dev .
 
@@ -36,7 +33,6 @@ docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet 
 
 | Image | Dockerfile | Purpose |
 |-------|------------|--------|
-| `sdk-chat-base` | `Dockerfile.base` | Shared dependencies (build first) |
 | `sdk-chat-dev` | `Dockerfile` | Development and testing |
 | `sdk-chat-demo` | `Dockerfile.demo` | VHS demo recording |
 | `sdk-chat:latest` | `Dockerfile.release` | Production (minimal) |
