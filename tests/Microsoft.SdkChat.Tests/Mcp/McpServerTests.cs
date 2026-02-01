@@ -40,13 +40,10 @@ public class McpServerTests
     }
 
     [Theory]
-    [InlineData("stdio")]
-    [InlineData("STDIO")]
-    [InlineData("Stdio")]
     [InlineData("sse")]
     [InlineData("SSE")]
     [InlineData("Sse")]
-    public async Task RunAsync_WithSupportedTransport_DoesNotThrowImmediately(string transport)
+    public async Task RunAsync_WithSseTransport_DoesNotExitImmediately(string transport)
     {
         // Arrange
         using var cts = new CancellationTokenSource();
@@ -55,7 +52,7 @@ public class McpServerTests
         // Use an ephemeral port to avoid conflicts
         var port = GetAvailablePort();
 
-        // Act - Start the server in a background task with cancellation token
+        // Act - Start the SSE server in a background task with cancellation token
         var serverTask = Task.Run(async () =>
         {
             try
@@ -74,7 +71,7 @@ public class McpServerTests
 
         // Assert - Server should not complete immediately (delay completes first)
         Assert.Equal(delayTask, completedTask);
-        Assert.False(serverTask.IsCompleted, $"Server with transport '{transport}' should not complete immediately");
+        Assert.False(serverTask.IsCompleted, $"SSE server with transport '{transport}' should not complete immediately");
         
         // Ensure cleanup - wait for server to shut down
         try
@@ -85,6 +82,46 @@ public class McpServerTests
         {
             // Server didn't shut down cleanly, but test already passed
         }
+    }
+
+    [Theory]
+    [InlineData("stdio")]
+    [InlineData("STDIO")]
+    [InlineData("Stdio")]
+    public async Task RunAsync_WithStdioTransport_StartsWithoutThrowing(string transport)
+    {
+        // Note: stdio transport will exit immediately when stdin is unavailable (test environment)
+        // This is expected behavior - we just verify it doesn't throw an exception
+        
+        // Arrange
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(500));
+        
+        var port = GetAvailablePort(); // Port not used for stdio, but required by API
+
+        // Act - Start the stdio server
+        Exception? caughtException = null;
+        var serverTask = Task.Run(async () =>
+        {
+            try
+            {
+                await McpServer.RunAsync(transport, port, "error", useOpenAi: false, cancellationToken: cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when the cancellation token is triggered
+            }
+            catch (Exception ex)
+            {
+                caughtException = ex;
+            }
+        });
+
+        // Wait for task to complete or timeout
+        await Task.WhenAny(serverTask, Task.Delay(TimeSpan.FromMilliseconds(500)));
+
+        // Assert - Should not throw any exception (other than cancellation)
+        Assert.Null(caughtException);
     }
 
     [Fact]
