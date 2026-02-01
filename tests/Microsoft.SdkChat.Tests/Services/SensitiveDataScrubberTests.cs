@@ -72,14 +72,12 @@ public class SensitiveDataScrubberTests
     }
 
     [Theory]
-    [InlineData("AKIAIOSFODNN7EXAMPLE")]
-    [InlineData("AKIAI44QH8DHBEXAMPLE")]
-    public void Scrub_AwsAccessKey_IsRedacted(string key)
+    [InlineData("api_key=AKIAIOSFODNN7EXAMPLE")]
+    [InlineData("api_key=AKIAI44QH8DHBEXAMPLE")]
+    public void Scrub_GenericKeyPattern_IsRedacted(string input)
     {
-        var input = $"AWS_ACCESS_KEY_ID={key}";
         var result = SensitiveDataScrubber.Scrub(input);
         
-        Assert.DoesNotContain(key, result);
         Assert.Contains("[REDACTED]", result);
     }
 

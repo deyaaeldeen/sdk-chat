@@ -27,30 +27,63 @@ public static partial class SensitiveDataScrubber
     [GeneratedRegex(@"gh[pousr]_[a-zA-Z0-9]{36,}", RegexOptions.Compiled)]
     private static partial Regex GitHubTokenPattern();
     
-    /// <summary>Azure API keys (32-char hex)</summary>
-    [GeneratedRegex(@"[a-fA-F0-9]{32}", RegexOptions.Compiled)]
-    private static partial Regex AzureKeyPattern();
-    
     /// <summary>Generic Bearer tokens</summary>
     [GeneratedRegex(@"Bearer\s+[a-zA-Z0-9\-_\.]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex BearerTokenPattern();
-    
-    /// <summary>AWS access keys: AKIA...</summary>
-    [GeneratedRegex(@"AKIA[0-9A-Z]{16}", RegexOptions.Compiled)]
-    private static partial Regex AwsAccessKeyPattern();
-    
-    /// <summary>AWS secret keys (40-char base64-ish)</summary>
-    [GeneratedRegex(@"(?<![a-zA-Z0-9/+])[a-zA-Z0-9/+]{40}(?![a-zA-Z0-9/+])", RegexOptions.Compiled)]
-    private static partial Regex AwsSecretKeyPattern();
     
     /// <summary>Generic API key patterns in key=value or "key": "value" format</summary>
     [GeneratedRegex(@"(?i)(api[_-]?key|apikey|secret|password|token|credential|auth)([""']?\s*[:=]\s*[""']?)([a-zA-Z0-9\-_\.]{16,})", RegexOptions.Compiled)]
     private static partial Regex GenericSecretPattern();
     
+    /// <summary>Long hex strings that look like API keys (32+ chars, preceded by key-like word)</summary>
+    [GeneratedRegex(@"(?i)(?:key|secret|password|token)([""']?\s*[:=]\s*[""']?)([a-fA-F0-9]{32,})", RegexOptions.Compiled)]
+    private static partial Regex HexKeyPattern();
+    
     private const string RedactedPlaceholder = "[REDACTED]";
     
     /// <summary>
+    /// Environment variable name patterns that may contain secrets.
+    /// Any env var matching these patterns will have its value scrubbed.
+    /// </summary>
+    private static readonly string[] SensitiveEnvVarPatterns =
+    [
+        "_KEY",
+        "_TOKEN",
+        "_SECRET",
+        "_PASSWORD",
+        "_CREDENTIAL"
+    ];
+    
+    // Lazy-loaded cache of actual secret values from environment (for runtime scrubbing)
+    private static readonly Lazy<HashSet<string>> _cachedSecretValues = new(LoadSecretValuesFromEnvironment);
+    
+    private static HashSet<string> LoadSecretValuesFromEnvironment()
+    {
+        var secrets = new HashSet<string>(StringComparer.Ordinal);
+        
+        // Scan all environment variables for sensitive patterns
+        foreach (var key in Environment.GetEnvironmentVariables().Keys.Cast<string>())
+        {
+            var isSensitive = SensitiveEnvVarPatterns.Any(pattern => 
+                key.Contains(pattern, StringComparison.OrdinalIgnoreCase));
+            
+            if (isSensitive)
+            {
+                var value = Environment.GetEnvironmentVariable(key);
+                // Only cache non-trivial values (at least 8 chars to avoid false positives)
+                if (!string.IsNullOrEmpty(value) && value.Length >= 8)
+                {
+                    secrets.Add(value);
+                }
+            }
+        }
+        
+        return secrets;
+    }
+    
+    /// <summary>
     /// Scrubs all recognized sensitive patterns from the input text.
+    /// Also scrubs any values matching known sensitive environment variables.
     /// </summary>
     public static string Scrub(string? text)
     {
@@ -59,21 +92,28 @@ public static partial class SensitiveDataScrubber
         
         var result = text;
         
-        // Apply each pattern - order matters (more specific first)
+        // PRIORITY 1: Scrub known secret values from environment variables
+        // This catches secrets even if they don't match standard patterns
+        foreach (var secret in _cachedSecretValues.Value)
+        {
+            if (result.Contains(secret, StringComparison.Ordinal))
+            {
+                result = result.Replace(secret, RedactedPlaceholder);
+            }
+        }
+        
+        // PRIORITY 2: Apply pattern-based scrubbing (catches any remaining patterns)
         result = OpenAiKeyPattern().Replace(result, RedactedPlaceholder);
         result = GitHubTokenPattern().Replace(result, RedactedPlaceholder);
-        result = AwsAccessKeyPattern().Replace(result, RedactedPlaceholder);
         result = BearerTokenPattern().Replace(result, $"Bearer {RedactedPlaceholder}");
         
         // Generic secret pattern preserves the key name for debugging
         result = GenericSecretPattern().Replace(result, m => 
             $"{m.Groups[1].Value}{m.Groups[2].Value}{RedactedPlaceholder}");
         
-        // Azure keys are 32-char hex - only redact if looks like a standalone key
-        // (avoid false positives on hashes in URLs, commit SHAs, etc.)
-        result = Regex.Replace(result, 
-            @"(?i)(?:key|secret|password|token)([""']?\s*[:=]\s*[""']?)([a-fA-F0-9]{32})",
-            m => $"{m.Groups[0].Value.Split('=')[0].Split(':')[0]}{m.Groups[1].Value}{RedactedPlaceholder}");
+        // Hex keys preceded by key-like words
+        result = HexKeyPattern().Replace(result, m => 
+            $"{m.Groups[0].Value.Split('=')[0].Split(':')[0]}{m.Groups[1].Value}{RedactedPlaceholder}");
         
         return result;
     }

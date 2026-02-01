@@ -215,8 +215,8 @@ public class SampleGeneratorMcpToolTests : IDisposable
         // Act
         await _tool.GenerateSamplesAsync(_testRoot);
         
-        // Assert
-        Assert.Contains("Generate samples", _mockAiService.LastUserPrompt);
+        // Assert - default prompt includes count (5 samples)
+        Assert.Contains("Generate 5 samples", _mockAiService.LastUserPrompt);
     }
     
     #endregion

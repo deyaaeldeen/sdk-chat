@@ -18,4 +18,36 @@
     <ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
   </ItemGroup>
 
+  <!-- Pre-warm JBang dependencies during build (similar to Go/TypeScript extractors) -->
+  <Target Name="PreWarmJBang" AfterTargets="Build" Condition="'$(SkipJBangWarmup)' != 'true'">
+    <!-- Check if JBang is available -->
+    <Exec Command="jbang --version" 
+          IgnoreExitCode="true" 
+          StandardOutputImportance="low"
+          StandardErrorImportance="low"
+          ConsoleToMSBuild="true">
+      <Output TaskParameter="ExitCode" PropertyName="JBangExitCode"/>
+    </Exec>
+
+    <!-- Pre-warm JBang by running the script to download JavaParser dependencies -->
+    <Message Importance="high" 
+             Text="Pre-warming JBang dependencies for Java extractor..." 
+             Condition="'$(JBangExitCode)' == '0'" />
+    
+    <Exec Command="jbang --quiet &quot;$(OutputPath)ExtractApi.java&quot; --help"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          Condition="'$(JBangExitCode)' == '0' and Exists('$(OutputPath)ExtractApi.java')" 
+          StandardOutputImportance="low"
+          StandardErrorImportance="low"
+          IgnoreExitCode="true" />
+
+    <Message Importance="normal" 
+             Text="JBang dependencies cached successfully." 
+             Condition="'$(JBangExitCode)' == '0'" />
+    
+    <Message Importance="normal" 
+             Text="JBang not found - dependencies will be downloaded on first use." 
+             Condition="'$(JBangExitCode)' != '0'" />
+  </Target>
+
 </Project>

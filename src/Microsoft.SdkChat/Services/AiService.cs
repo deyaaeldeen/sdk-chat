@@ -203,28 +203,89 @@ public class AiService : IAiService
     {
         return SchemaCache.GetOrAdd(typeof(T), static type =>
         {
-            var properties = type.GetProperties()
-                .Where(p => p.CanRead)
-                .Select(p => $"  \"{ToCamelCase(p.Name)}\": {GetJsonType(p.PropertyType)}")
-                .ToList();
-            
-            return "{\n" + string.Join(",\n", properties) + "\n}";
+            return GenerateObjectSchema(type, 0, new HashSet<Type>());
         });
+    }
+    
+    private static string GenerateObjectSchema(Type type, int indentLevel, HashSet<Type> visitedTypes)
+    {
+        const int MaxRecursionDepth = 10;
+        if (indentLevel > MaxRecursionDepth)
+            throw new NotSupportedException($"Schema generation exceeded max depth of {MaxRecursionDepth} for type '{type.FullName}'.");
+        
+        // Prevent infinite recursion on circular references
+        if (visitedTypes.Contains(type))
+            return "\"object (circular reference)\"";
+        
+        var indent = new string(' ', indentLevel * 2);
+        var propIndent = new string(' ', (indentLevel + 1) * 2);
+        var properties = type.GetProperties()
+            .Where(p => p.CanRead)
+            .Select(p => $"{propIndent}\"{ToCamelCase(p.Name)}\": {GetJsonType(p.PropertyType, indentLevel + 1, visitedTypes)}")
+            .ToList();
+        
+        return "{\n" + string.Join(",\n", properties) + $"\n{indent}}}";
     }
     
     private static string ToCamelCase(string name) =>
         string.IsNullOrEmpty(name) ? name : char.ToLowerInvariant(name[0]) + name[1..];
     
-    private static string GetJsonType(Type type)
+    private static string GetJsonType(Type type, int indentLevel, HashSet<Type> visitedTypes)
     {
         var underlying = Nullable.GetUnderlyingType(type) ?? type;
         
+        // Primitive types
         if (underlying == typeof(string)) return "\"string\"";
-        if (underlying == typeof(int) || underlying == typeof(long) || underlying == typeof(double) || underlying == typeof(float) || underlying == typeof(decimal)) return "number";
-        if (underlying == typeof(bool)) return "boolean";
-        if (underlying.IsArray || (underlying.IsGenericType && underlying.GetGenericTypeDefinition() == typeof(List<>))) return "array";
+        if (underlying == typeof(int) || underlying == typeof(long) || underlying == typeof(short) || underlying == typeof(byte))
+            return "\"integer\"";
+        if (underlying == typeof(double) || underlying == typeof(float) || underlying == typeof(decimal)) 
+            return "\"number\"";
+        if (underlying == typeof(bool)) return "\"boolean\"";
+        if (underlying == typeof(DateTime) || underlying == typeof(DateTimeOffset) || underlying == typeof(DateOnly))
+            return "\"string (ISO 8601 date-time)\"";
+        if (underlying == typeof(Guid)) return "\"string (UUID)\"";
+        if (underlying == typeof(Uri)) return "\"string (URI)\"";
         
-        return "\"string\""; // Default fallback
+        // Enum types - list valid values
+        if (underlying.IsEnum)
+        {
+            var values = Enum.GetNames(underlying);
+            return $"\"string (enum: {string.Join(", ", values)})\"";
+        }
+        
+        // Array and List<T>
+        if (underlying.IsArray)
+        {
+            var elementType = underlying.GetElementType()!;
+            return $"[{GetJsonType(elementType, indentLevel, visitedTypes)}]";
+        }
+        if (underlying.IsGenericType && underlying.GetGenericTypeDefinition() == typeof(List<>))
+        {
+            var elementType = underlying.GetGenericArguments()[0];
+            return $"[{GetJsonType(elementType, indentLevel, visitedTypes)}]";
+        }
+        
+        // Dictionary<string, T>
+        if (underlying.IsGenericType && underlying.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+        {
+            var keyType = underlying.GetGenericArguments()[0];
+            var valueType = underlying.GetGenericArguments()[1];
+            if (keyType != typeof(string))
+                throw new NotSupportedException($"Dictionary key type '{keyType.Name}' is not supported. Only string keys are allowed.");
+            return $"{{\"<key>\": {GetJsonType(valueType, indentLevel, visitedTypes)}}}";
+        }
+        
+        // Nested object types (records, classes with public properties)
+        if (underlying.IsClass && underlying != typeof(object))
+        {
+            var trackedTypes = new HashSet<Type>(visitedTypes) { underlying };
+            return GenerateObjectSchema(underlying, indentLevel, trackedTypes);
+        }
+        
+        // Unknown type - fail explicitly rather than silently returning wrong schema
+        throw new NotSupportedException(
+            $"Type '{underlying.FullName}' is not supported for JSON schema generation. " +
+            "Supported types: primitives, string, bool, DateTime, Guid, Uri, enums, arrays, List<T>, Dictionary<string,T>, and nested objects.");
     }
     #region Copilot Implementation
     

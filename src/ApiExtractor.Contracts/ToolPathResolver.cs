@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
 namespace ApiExtractor.Contracts;
 
@@ -10,13 +11,51 @@ namespace ApiExtractor.Contracts;
 /// Provides secure resolution of external tool paths with support for
 /// environment variable overrides and path validation.
 /// </summary>
-public static class ToolPathResolver
+public static partial class ToolPathResolver
 {
     /// <summary>
     /// Environment variable prefix for tool path overrides.
     /// Example: SDK_CHAT_PYTHON_PATH=/usr/local/bin/python3
     /// </summary>
     private const string EnvVarPrefix = "SDK_CHAT_";
+    
+    /// <summary>
+    /// Regex pattern for validating tool names. Only alphanumeric, hyphen, underscore, and dot allowed.
+    /// This prevents command injection attacks when the tool name is used in process arguments.
+    /// </summary>
+    [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")]
+    private static partial Regex SafeToolNamePattern();
+    
+    /// <summary>
+    /// Regex pattern for validating command paths. Allows path separators in addition to safe chars.
+    /// Permits paths starting with /, ~, or drive letters (C:\).
+    /// Rejects shell metacharacters: $, `, &amp;, |, ;, (, ), {, }, &lt;, &gt;, !, *, ?, [, ], #, ', "
+    /// </summary>
+    [GeneratedRegex(@"^[a-zA-Z0-9/~.][a-zA-Z0-9._\-/\\:~]*$")]
+    private static partial Regex SafePathPattern();
+    
+    /// <summary>
+    /// Validates that a tool name or command contains only safe characters.
+    /// Throws ArgumentException if validation fails.
+    /// </summary>
+    /// <param name="value">The tool name or path to validate.</param>
+    /// <param name="paramName">Parameter name for error messages.</param>
+    /// <param name="allowPath">If true, allows path separators; if false, only allows simple names.</param>
+    /// <exception cref="ArgumentException">Thrown if the value contains unsafe characters.</exception>
+    public static void ValidateSafeInput(string value, string paramName, bool allowPath = false)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Value cannot be null or whitespace.", paramName);
+        
+        var pattern = allowPath ? SafePathPattern() : SafeToolNamePattern();
+        if (!pattern.IsMatch(value))
+        {
+            throw new ArgumentException(
+                $"Value '{value}' contains invalid characters. Only alphanumeric, hyphen, underscore, and dot are allowed" +
+                (allowPath ? " (plus path separators for paths)." : "."),
+                paramName);
+        }
+    }
 
     /// <summary>
     /// Resolves the path to an external tool, checking environment overrides first.
@@ -27,23 +66,36 @@ public static class ToolPathResolver
     /// <returns>The resolved path, or null if not found</returns>
     public static string? Resolve(string toolName, string[] defaultCandidates, string versionArgs = "--version")
     {
+        // SECURITY: Validate tool name to prevent command injection
+        ValidateSafeInput(toolName, nameof(toolName), allowPath: false);
+        
         // 1. Check environment variable override first
         var envVar = $"{EnvVarPrefix}{toolName.ToUpperInvariant()}_PATH";
         var envPath = Environment.GetEnvironmentVariable(envVar);
         
         if (!string.IsNullOrEmpty(envPath))
         {
-            if (ValidateExecutable(envPath, versionArgs))
+            // SECURITY: Validate environment path before use
+            if (!SafePathPattern().IsMatch(envPath))
+            {
+                // Unsafe path in env var - skip silently and fall through to default candidates
+                // (callers can use ResolveWithDetails for warnings)
+            }
+            else if (ValidateExecutable(envPath, versionArgs))
             {
                 return envPath;
             }
-            // Environment variable set but invalid - return null and let caller handle
+            // Environment variable set but invalid - fall through to default candidates
             // Do NOT log to Console.Error - callers should use ResolveWithDetails for warnings
         }
 
         // 2. Try default candidates
         foreach (var candidate in defaultCandidates)
         {
+            // SECURITY: Skip candidates with unsafe characters
+            if (!SafePathPattern().IsMatch(candidate))
+                continue;
+                
             if (ValidateExecutable(candidate, versionArgs))
             {
                 return candidate;
@@ -62,12 +114,22 @@ public static class ToolPathResolver
         string[] defaultCandidates, 
         string versionArgs = "--version")
     {
+        // SECURITY: Validate tool name to prevent command injection
+        ValidateSafeInput(toolName, nameof(toolName), allowPath: false);
+        
         // 1. Check environment variable override first
         var envVar = $"{EnvVarPrefix}{toolName.ToUpperInvariant()}_PATH";
         var envPath = Environment.GetEnvironmentVariable(envVar);
         
         if (!string.IsNullOrEmpty(envPath))
         {
+            // SECURITY: Validate environment path before use
+            if (!SafePathPattern().IsMatch(envPath))
+            {
+                return new ToolResolutionResult(null, null, false, 
+                    $"{envVar}={envPath} contains invalid characters and was rejected for security");
+            }
+            
             if (ValidateExecutable(envPath, versionArgs))
             {
                 var absPath = GetAbsolutePath(envPath);
@@ -82,6 +144,10 @@ public static class ToolPathResolver
         // 2. Try default candidates
         foreach (var candidate in defaultCandidates)
         {
+            // SECURITY: Skip candidates with unsafe characters
+            if (!SafePathPattern().IsMatch(candidate))
+                continue;
+                
             if (ValidateExecutable(candidate, versionArgs))
             {
                 var absolutePath = GetAbsolutePath(candidate);
@@ -127,6 +193,12 @@ public static class ToolPathResolver
     /// </summary>
     private static string? GetAbsolutePath(string command)
     {
+        // SECURITY: Validate command before passing to shell
+        // This is defense-in-depth since callers should already validate,
+        // but we verify here as well since this method uses shell commands
+        if (string.IsNullOrWhiteSpace(command) || !SafePathPattern().IsMatch(command))
+            return null;
+        
         try
         {
             var whichCmd = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "where" : "which";

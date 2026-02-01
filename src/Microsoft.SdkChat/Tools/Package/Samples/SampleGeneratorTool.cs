@@ -477,6 +477,7 @@ public class SampleGeneratorTool
     
     /// <summary>
     /// Streams the complete user prompt including prefix, context, and suffix.
+    /// Uses budget tracking to enforce limits and prevent overflow.
     /// </summary>
     private async IAsyncEnumerable<string> StreamUserPromptAsync(
         string? customPrompt,
@@ -490,15 +491,26 @@ public class SampleGeneratorTool
         int contextBudget,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // Yield the prompt prefix
-        yield return GetUserPromptPrefix(customPrompt, count, hasExistingSamples);
+        // Create budget tracker - reserve space for essential overhead
+        // Overhead includes: prefix (~200), output folder (~100), example sample XML tags (~200)
+        const int OverheadReserve = 500;
+        var budgetTracker = new PromptBudgetTracker(contextBudget, OverheadReserve);
+        
+        // Yield the prompt prefix (always included, counted against budget)
+        var prefix = GetUserPromptPrefix(customPrompt, count, hasExistingSamples);
+        budgetTracker.TryConsume(prefix.Length);
+        yield return prefix;
         
         // Add samples folder context so AI knows where files go
-        yield return $"<output-folder>{Path.GetFileName(outputFolder)}</output-folder>\n";
-        yield return "Generate filePath relative to the output folder above (e.g., 'Chat/CreateCompletion.cs' not 'src/...').\n\n";
+        var outputFolderTag = $"<output-folder>{Path.GetFileName(outputFolder)}</output-folder>\n";
+        var outputInstruction = "Generate filePath relative to the output folder above (e.g., 'Chat/CreateCompletion.cs' not 'src/...').\n\n";
+        budgetTracker.TryConsume(outputFolderTag.Length + outputInstruction.Length);
+        yield return outputFolderTag;
+        yield return outputInstruction;
         
         // Include an example existing sample with full content if available
-        if (!string.IsNullOrEmpty(samplesFolder) && Directory.Exists(samplesFolder))
+        // Budget-aware: truncate example to fit, skip if no room
+        if (!string.IsNullOrEmpty(samplesFolder) && Directory.Exists(samplesFolder) && !budgetTracker.IsExhausted)
         {
             // SAFETY: Use safe enumeration to avoid scanning node_modules, .git, etc.
             var exampleFile = SdkInfo.EnumerateFilesSafely(samplesFolder, $"*{languageContext.FileExtension}", maxFiles: 100)
@@ -508,24 +520,52 @@ public class SampleGeneratorTool
                 var relativePath = Path.GetRelativePath(samplesFolder, exampleFile);
                 var content = await File.ReadAllTextAsync(exampleFile, cancellationToken);
                 
-                // Truncate if too long (keep first ~5K chars)
-                if (content.Length > 5000)
-                {
-                    content = content[..5000] + "\n// ... (truncated)";
-                }
+                // Calculate how much budget remains for example sample
+                // Reserve at least 50% of remaining budget for actual source context
+                var exampleBudget = Math.Min(5000, budgetTracker.Remaining / 2);
                 
-                yield return "<example-sample>\n";
-                yield return $"<filePath>{relativePath}</filePath>\n";
-                yield return $"<code>\n{content}\n</code>\n";
-                yield return "</example-sample>\n";
-                yield return "Follow this exact structure and style for new samples.\n\n";
+                if (exampleBudget > 500) // Only include if meaningful space available
+                {
+                    // Truncate content to fit within example budget (leaving room for XML tags)
+                    var maxContentLength = exampleBudget - 200; // 200 chars for XML overhead
+                    if (content.Length > maxContentLength)
+                    {
+                        content = content[..maxContentLength] + "\n// ... (truncated)";
+                    }
+                    
+                    var exampleHeader = "<example-sample>\n";
+                    var filePathTag = $"<filePath>{relativePath}</filePath>\n";
+                    var codeOpen = $"<code>\n";
+                    var codeClose = "</code>\n";
+                    var exampleFooter = "</example-sample>\n";
+                    var followInstruction = "Follow this exact structure and style for new samples.\n\n";
+                    
+                    var totalExample = exampleHeader.Length + filePathTag.Length + codeOpen.Length + 
+                                       content.Length + codeClose.Length + exampleFooter.Length + 
+                                       followInstruction.Length;
+                    
+                    budgetTracker.TryConsume(totalExample);
+                    
+                    yield return exampleHeader;
+                    yield return filePathTag;
+                    yield return codeOpen;
+                    yield return content;
+                    yield return "\n";
+                    yield return codeClose;
+                    yield return exampleFooter;
+                    yield return followInstruction;
+                }
             }
         }
         
-        // Stream context (source code and samples)
-        await foreach (var chunk in StreamContextAsync(sourceFolder, samplesFolder, languageContext, config, contextBudget, cancellationToken))
+        // Stream context (source code and samples) with remaining budget
+        var remainingBudget = budgetTracker.Remaining;
+        if (remainingBudget > 0)
         {
-            yield return chunk;
+            await foreach (var chunk in StreamContextAsync(sourceFolder, samplesFolder, languageContext, config, remainingBudget, cancellationToken))
+            {
+                yield return chunk;
+            }
         }
         
         // Yield the suffix (currently empty but kept for flexibility)

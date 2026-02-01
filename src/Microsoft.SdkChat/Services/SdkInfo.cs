@@ -244,13 +244,87 @@ public class SdkInfo
         SuggestedSamplesFolder = samplesFolder ?? Path.Combine(rootPath, "examples");
         AllSamplesCandidates = allSamplesCandidates.AsReadOnly();
     }
+    
+    /// <summary>
+    /// Minimum allowed path length to prevent scanning root-level directories.
+    /// On Windows: C:\ = 3 chars; on Unix: / = 1 char.
+    /// We require at least 4 chars to ensure we're not at filesystem root.
+    /// </summary>
+    private const int MinPathLength = 4;
+    
+    /// <summary>
+    /// Paths that should never be scanned directly (but subdirectories may be allowed).
+    /// These are system directories that could cause performance issues or security risks.
+    /// </summary>
+    private static readonly HashSet<string> BlockedRootPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/",
+        "/bin",
+        "/boot",
+        "/dev",
+        "/etc",
+        "/lib",
+        "/lib64",
+        "/proc",
+        "/root",
+        "/sbin",
+        "/sys",
+        "/usr",
+        "/var",
+        "C:\\",
+        "C:\\Windows",
+        "C:\\Program Files",
+        "C:\\Program Files (x86)",
+        "C:\\ProgramData"
+    };
+    
+    /// <summary>
+    /// Validates that a path is safe to scan.
+    /// Throws ArgumentException if the path is invalid or dangerous.
+    /// </summary>
+    /// <param name="path">The path to validate.</param>
+    /// <exception cref="ArgumentException">Thrown if the path is unsafe to scan.</exception>
+    private static void ValidateScanPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("SDK path cannot be null or empty.", nameof(path));
+        
+        // Canonicalize the path
+        var fullPath = Path.GetFullPath(path);
+        
+        // Check minimum length to prevent root scanning
+        if (fullPath.Length < MinPathLength)
+            throw new ArgumentException(
+                $"Path '{fullPath}' is too short. SDK path must be at least {MinPathLength} characters to prevent root-level scanning.",
+                nameof(path));
+        
+        // Check for blocked root paths (only exact match, not subdirectories)
+        // This blocks scanning "/" or "/usr" directly, but allows "/tmp/myproject" or "/home/user/sdk"
+        var normalizedPath = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (BlockedRootPaths.Contains(normalizedPath))
+        {
+            throw new ArgumentException(
+                $"Scanning system directory '{fullPath}' is not allowed for security and performance reasons.",
+                nameof(path));
+        }
+        
+        // Check for path traversal attempts (.. after normalization shouldn't exist, but verify)
+        if (fullPath.Contains(".."))
+            throw new ArgumentException(
+                $"Path '{path}' contains path traversal sequences which are not allowed.",
+                nameof(path));
+    }
 
     /// <summary>
     /// Scans the SDK root and returns detection results.
     /// Results are cached by path.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown if the path is invalid or unsafe to scan.</exception>
     public static SdkInfo Scan(string sdkRoot)
     {
+        // SECURITY: Validate path before scanning
+        ValidateScanPath(sdkRoot);
+        
         sdkRoot = Path.GetFullPath(sdkRoot);
         return _cache.GetOrAdd(sdkRoot, path => new Lazy<SdkInfo>(() => ScanInternal(path))).Value;
     }
@@ -260,8 +334,12 @@ public class SdkInfo
     /// Uses Task.Run to offload I/O-bound work from the calling thread.
     /// Results are cached by path.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown if the path is invalid or unsafe to scan.</exception>
     public static async ValueTask<SdkInfo> ScanAsync(string sdkRoot, CancellationToken ct = default)
     {
+        // SECURITY: Validate path before scanning
+        ValidateScanPath(sdkRoot);
+        
         sdkRoot = Path.GetFullPath(sdkRoot);
         var lazy = _cache.GetOrAdd(sdkRoot, path => new Lazy<SdkInfo>(() => ScanInternal(path)));
         

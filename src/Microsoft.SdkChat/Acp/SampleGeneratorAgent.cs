@@ -139,8 +139,11 @@ public sealed class SampleGeneratorAgent(
         // Create appropriate language context
         var context = CreateLanguageContext(sdkInfo.Language.Value, fileHelper);
         
+        // Use default budget for ACP (could be made configurable via request params)
+        var contextBudget = SampleConstants.DefaultContextCharacters;
+        
         var systemPrompt = $"Generate runnable SDK samples. {context.GetInstructions()}";
-        var userPromptStream = StreamUserPromptAsync(sdkInfo.SourceFolder, context, effectiveCt);
+        var userPromptStream = StreamUserPromptAsync(sdkInfo.SourceFolder, context, contextBudget, effectiveCt);
         
         // Stream parsed samples as they complete
         List<GeneratedSample> samples = [];
@@ -236,14 +239,26 @@ public sealed class SampleGeneratorAgent(
     private static async IAsyncEnumerable<string> StreamUserPromptAsync(
         string sourceFolder,
         SampleLanguageContext context,
+        int contextBudget,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        yield return "Generate samples for this SDK:\n";
+        // Create budget tracker - reserve space for prefix overhead
+        const int OverheadReserve = 100;
+        var budgetTracker = new PromptBudgetTracker(contextBudget, OverheadReserve);
         
-        await foreach (var chunk in context.StreamContextAsync(
-            [sourceFolder], null, ct: cancellationToken).ConfigureAwait(false))
+        var prefix = "Generate samples for this SDK:\n";
+        budgetTracker.TryConsume(prefix.Length);
+        yield return prefix;
+        
+        // Stream context with remaining budget
+        var remainingBudget = budgetTracker.Remaining;
+        if (remainingBudget > 0)
         {
-            yield return chunk;
+            await foreach (var chunk in context.StreamContextAsync(
+                [sourceFolder], null, totalBudget: remainingBudget, ct: cancellationToken).ConfigureAwait(false))
+            {
+                yield return chunk;
+            }
         }
     }
     
