@@ -243,7 +243,7 @@ public class NdjsonStreamParserTests
             Chunks(json), Options));
 
         Assert.Single(items);
-        Assert.Equal([1, 2, 3], items[0].Items);
+        Assert.Equal([1, 2, 3], items[0].Items ?? []);
     }
     
     #endregion

@@ -5,10 +5,7 @@ using System.Buffers;
 
 namespace Microsoft.SdkChat.Helpers;
 
-/// <summary>
-/// Utility for sanitizing file names and paths for cross-platform safety.
-/// Uses Span-based operations for allocation-efficient string manipulation.
-/// </summary>
+/// <summary>Span-based path sanitization for cross-platform safety.</summary>
 public static class PathSanitizer
 {
     // Pre-computed lookup table for invalid filename characters
@@ -19,10 +16,6 @@ public static class PathSanitizer
     private static readonly SearchValues<char> AdditionalInvalidChars = 
         SearchValues.Create([':', ' ']);
     
-    /// <summary>
-    /// Sanitizes a file name by replacing invalid characters with underscores.
-    /// Uses allocation-efficient Span operations.
-    /// </summary>
     public static string SanitizeFileName(string? name)
     {
         if (string.IsNullOrEmpty(name)) return "Sample";
@@ -42,10 +35,7 @@ public static class PathSanitizer
         });
     }
     
-    /// <summary>
-    /// Sanitizes a relative file path, ensuring each path segment is safe.
-    /// Prevents path traversal attacks by blocking ".." sequences.
-    /// </summary>
+    /// <summary>Sanitizes a relative path, blocking traversal attacks.</summary>
     public static string SanitizeFilePath(string? path, string expectedExtension)
     {
         if (string.IsNullOrEmpty(path)) return "Sample" + expectedExtension;
@@ -94,17 +84,11 @@ public static class PathSanitizer
         return result;
     }
     
-    /// <summary>
-    /// Checks if a span contains any invalid filename characters.
-    /// </summary>
     private static bool ContainsInvalidChar(ReadOnlySpan<char> span)
     {
         return span.ContainsAny(InvalidFileNameChars) || span.ContainsAny(AdditionalInvalidChars);
     }
     
-    /// <summary>
-    /// Checks if a character is invalid for filenames.
-    /// </summary>
     private static bool IsInvalidFileNameChar(char c)
     {
         return InvalidFileNameChars.Contains(c) || c == ':' || c == ' ';

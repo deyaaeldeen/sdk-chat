@@ -3,10 +3,7 @@
 
 namespace Microsoft.SdkChat.Helpers;
 
-/// <summary>
-/// Console UX helpers for streaming output and animations.
-/// Provides spinners, progress indicators, and styled output.
-/// </summary>
+/// <summary>Console UX: spinners, colors, progress.</summary>
 public static class ConsoleUx
 {
     private static readonly string[] SpinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -23,9 +20,6 @@ public static class ConsoleUx
     public static string Bold(string text) => _supportsAnsi ? $"\x1b[1m{text}\x1b[0m" : text;
     public static string Red(string text) => _supportsAnsi ? $"\x1b[31m{text}\x1b[0m" : text;
     
-    /// <summary>
-    /// Runs an action with a spinner animation.
-    /// </summary>
     public static async Task<T> SpinnerAsync<T>(string message, Func<Task<T>> action, CancellationToken ct = default)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -72,45 +66,24 @@ public static class ConsoleUx
         }
     }
     
-    /// <summary>
-    /// Runs an action with a spinner, no return value.
-    /// </summary>
     public static async Task SpinnerAsync(string message, Func<Task> action, CancellationToken ct = default)
     {
         await SpinnerAsync(message, async () => { await action(); return 0; }, ct);
     }
     
-    /// <summary>
-    /// Creates a live progress context for streaming operations.
-    /// </summary>
     public static StreamingProgress StartStreaming(string message)
     {
         return new StreamingProgress(message, _supportsAnsi);
     }
     
-    /// <summary>
-    /// Writes a success line.
-    /// </summary>
     public static void Success(string message) => Console.WriteLine($"  {Green("✓")} {message}");
     
-    /// <summary>
-    /// Writes an error line.
-    /// </summary>
     public static void Error(string message) => Console.WriteLine($"  {Red("✗")} {message}");
     
-    /// <summary>
-    /// Writes an info line (dimmed).
-    /// </summary>
     public static void Info(string message) => Console.WriteLine($"  {Dim(message)}");
     
-    /// <summary>
-    /// Writes a header line.
-    /// </summary>
     public static void Header(string message) => Console.WriteLine($"\n{Bold(message)}");
     
-    /// <summary>
-    /// Writes a tree item (for streaming samples).
-    /// </summary>
     public static void TreeItem(string text, bool isLast = false)
     {
         var prefix = isLast ? "└" : "├";
@@ -158,23 +131,11 @@ public static class ConsoleUx
 
     private static string FormatDuration(TimeSpan duration)
     {
-        if (duration < TimeSpan.Zero)
-        {
-            return "0ms";
-        }
-
-        if (duration < TimeSpan.FromSeconds(1))
-        {
-            return $"{duration.TotalMilliseconds:F0}ms";
-        }
-
-        // Keep it stable and compact for CLI output.
+        if (duration < TimeSpan.Zero) return "0ms";
+        if (duration < TimeSpan.FromSeconds(1)) return $"{duration.TotalMilliseconds:F0}ms";
         return $"{duration.TotalSeconds:F1}s";
     }
     
-    /// <summary>
-    /// Progress tracker for streaming operations.
-    /// </summary>
     public class StreamingProgress : IDisposable
     {
         private readonly string _message;

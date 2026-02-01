@@ -8,9 +8,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Microsoft.SdkChat.Helpers;
 
-/// <summary>
-/// Represents a streamed file chunk with metadata.
-/// </summary>
 public readonly record struct FileChunk(
     string Content,
     string RelativePath,
@@ -19,24 +16,14 @@ public readonly record struct FileChunk(
     bool IsTruncated
 );
 
-/// <summary>
-/// Represents an input specification with its own filtering rules.
-/// </summary>
 public record SourceInputSpec(
     string Path,
     string[]? IncludeExtensions = null,
     string[]? ExcludeGlobPatterns = null
 );
 
-/// <summary>
-/// Represents a group of source inputs that will be wrapped in an XML section.
-/// Each group has its own budget and prioritization.
-/// </summary>
-/// <param name="SectionName">The XML tag name for this section (e.g., "existing-samples", "source-code").</param>
-/// <param name="Inputs">The source inputs to include in this section.</param>
-/// <param name="Budget">Character budget for this group. Files are loaded until budget is exhausted.</param>
-/// <param name="PerFileLimit">Maximum characters per file in this group.</param>
-/// <param name="PriorityFunc">Optional function to compute priority for files in this group (lower = higher priority).</param>
+/// <param name="SectionName">XML tag name for this section.</param>
+/// <param name="Budget">Character budget for this group.</param>
 public record SourceInputGroup(
     string SectionName,
     IEnumerable<SourceInputSpec> Inputs,
@@ -45,9 +32,6 @@ public record SourceInputGroup(
     Func<FileMetadata, int>? PriorityFunc = null
 );
 
-/// <summary>
-/// Represents metadata about a discovered file.
-/// </summary>
 public record FileMetadata(
     string FilePath,
     string RelativePath,
@@ -56,9 +40,6 @@ public record FileMetadata(
     string? GroupName = null
 );
 
-/// <summary>
-/// Represents an individual file in a loading plan.
-/// </summary>
 public record FileLoadingItem(
     string FilePath,
     string RelativePath,
@@ -69,9 +50,6 @@ public record FileLoadingItem(
     string? GroupName = null
 );
 
-/// <summary>
-/// Represents a plan for loading files with budget allocation.
-/// </summary>
 public record FileLoadingPlan(
     List<FileLoadingItem> Items,
     int TotalFilesFound,
@@ -81,10 +59,7 @@ public record FileLoadingPlan(
     int TotalBudget
 );
 
-/// <summary>
-/// Production-grade file helper with priority-based loading and budget management.
-/// Uses streaming API to avoid buffering large amounts of content in memory.
-/// </summary>
+/// <summary>Streaming file loader with priority-based budget management.</summary>
 public class FileHelper
 {
     private readonly ILogger<FileHelper>? _logger;
@@ -174,9 +149,6 @@ public class FileHelper
         }
     }
 
-    /// <summary>
-    /// Discovers files matching criteria, sorted by priority then size.
-    /// </summary>
     public List<FileMetadata> DiscoverFiles(
         string directory,
         string[] includeExtensions,
@@ -255,9 +227,6 @@ public class FileHelper
         return files;
     }
 
-    /// <summary>
-    /// Creates a loading plan with budget allocation.
-    /// </summary>
     public FileLoadingPlan CreateLoadingPlan(
         List<FileMetadata> files,
         int totalBudget,
@@ -308,11 +277,6 @@ public class FileHelper
         );
     }
 
-    /// <summary>
-    /// Stream file content chunks without materializing the full content in memory.
-    /// Each file is yielded as header → content chunks → footer.
-    /// Internal streaming implementation used by <see cref="StreamFilesAsync(IEnumerable{SourceInputGroup}, string, CancellationToken)"/>.
-    /// </summary>
     private async IAsyncEnumerable<FileChunk> StreamFilesAsync(
         FileLoadingPlan plan,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -354,9 +318,6 @@ public class FileHelper
         }
     }
     
-    /// <summary>
-    /// Stream a single file's content in chunks.
-    /// </summary>
     private async IAsyncEnumerable<FileChunk> StreamFileContentAsync(
         FileLoadingItem item,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -406,9 +367,6 @@ public class FileHelper
         }
     }
 
-    /// <summary>
-    /// Validates that a directory exists and is empty.
-    /// </summary>
     public string? ValidateEmptyDirectory(string dir)
     {
         if (string.IsNullOrWhiteSpace(dir))

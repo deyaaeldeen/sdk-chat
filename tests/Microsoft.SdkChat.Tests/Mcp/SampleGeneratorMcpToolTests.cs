@@ -680,8 +680,10 @@ public class SampleGeneratorMcpToolTests : IDisposable
         public DelaySamplesMockAiService(TimeSpan delay) => _delay = delay;
         
         public bool IsUsingOpenAi => false;
+#pragma warning disable CS0067
         public event EventHandler<AiPromptReadyEventArgs>? PromptReady;
         public event EventHandler<AiStreamCompleteEventArgs>? StreamComplete;
+#pragma warning restore CS0067
         public string GetEffectiveModel(string? modelOverride = null) => "mock";
         
         public async IAsyncEnumerable<T> StreamItemsAsync<T>(

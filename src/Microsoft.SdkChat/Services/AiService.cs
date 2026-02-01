@@ -13,21 +13,7 @@ using Microsoft.SdkChat.Models;
 namespace Microsoft.SdkChat.Services;
 
 /// <summary>
-/// Unified AI service that streams responses via GitHub Copilot CLI.
-///
-/// When <c>SDK_CLI_USE_OPENAI=true</c>, the Copilot session is configured with BYOK
-/// (<see cref="ProviderConfig"/>) to call an OpenAI-compatible API endpoint using
-/// <c>OPENAI_ENDPOINT</c> and <c>OPENAI_API_KEY</c>.
-/// 
-/// Environment variables:
-/// - SDK_CLI_USE_OPENAI: Set to "true" to use OpenAI-compatible API (via Copilot BYOK)
-/// - OPENAI_ENDPOINT: Custom endpoint URL (defaults to https://api.openai.com/v1)
-/// - OPENAI_API_KEY: API key for the endpoint (required when SDK_CLI_USE_OPENAI=true)
-/// - SDK_CLI_MODEL: Override the default model
-/// - SDK_CLI_DEBUG: Set to "true" to enable debug logging
-/// - SDK_CLI_DEBUG_DIR: Directory for debug log files
-/// - SDK_CLI_TIMEOUT: Request timeout in seconds (default: 300)
-/// - COPILOT_CLI_PATH: Path to Copilot CLI executable (default: "copilot")
+/// Unified AI service supporting Copilot and OpenAI-compatible endpoints via BYOK.
 /// </summary>
 public class AiService : IAiService
 {
@@ -37,19 +23,10 @@ public class AiService : IAiService
     private readonly SemaphoreSlim _clientLock = new(1, 1);
     private readonly TimeSpan _requestTimeout;
     
-    // Cached JSON options for deserialization (avoids repeated allocation)
-    private static readonly JsonSerializerOptions CachedJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
-    
-    // Cached JSON schema per type (reflection is expensive)
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, string> SchemaCache = new();
     
-    // Thread-safe disposal tracking
     private int _disposed;
-    
-    // Copilot SDK client (lazy initialized)
     private CopilotClient? _copilotClient;
     
     public AiService(ILogger<AiService> logger, AiProviderSettings? settings = null, AiDebugLogger? debugLogger = null)
@@ -57,43 +34,23 @@ public class AiService : IAiService
         _logger = logger;
         _settings = settings ?? AiProviderSettings.FromEnvironment();
         _debugLogger = debugLogger ?? new AiDebugLogger(
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<AiDebugLogger>.Instance, 
+            NullLogger<AiDebugLogger>.Instance, 
             _settings);
         
-        // Parse timeout from environment (default 5 minutes)
         var timeoutStr = Environment.GetEnvironmentVariable("SDK_CLI_TIMEOUT");
-        _requestTimeout = int.TryParse(timeoutStr, out var timeoutSec) 
-            ? TimeSpan.FromSeconds(timeoutSec) 
-            : TimeSpan.FromMinutes(5);
+        _requestTimeout = int.TryParse(timeoutStr, out var sec) ? TimeSpan.FromSeconds(sec) : TimeSpan.FromMinutes(5);
         
         _logger.LogDebug("AiService initialized with {Provider} provider, timeout {Timeout}s",
             _settings.UseOpenAi ? "OpenAI" : "Copilot",
             _requestTimeout.TotalSeconds);
     }
     
-    /// <summary>
-    /// Whether using OpenAI-compatible API instead of Copilot.
-    /// </summary>
     public bool IsUsingOpenAi => _settings.UseOpenAi;
-
     public string GetEffectiveModel(string? modelOverride = null) => _settings.GetModel(modelOverride);
     
-    /// <summary>
-    /// Raised when the prompt is ready to send (after materialization).
-    /// </summary>
     public event EventHandler<AiPromptReadyEventArgs>? PromptReady;
-    
-    /// <summary>
-    /// Raised when streaming completes with usage statistics.
-    /// </summary>
     public event EventHandler<AiStreamCompleteEventArgs>? StreamComplete;
     
-    /// <summary>
-    /// Stream AI response and yield parsed items as they complete.
-    /// Automatically appends the JSON schema for type T to the system prompt.
-    /// Each complete JSON object is deserialized and yielded as it streams in.
-    /// Subscribe to <see cref="PromptReady"/> and <see cref="StreamComplete"/> for usage stats.
-    /// </summary>
     public async IAsyncEnumerable<T> StreamItemsAsync<T>(
         string systemPrompt,
         IAsyncEnumerable<string> userPromptStream,
@@ -146,11 +103,9 @@ public class AiService : IAiService
         var startTime = DateTime.UtcNow;
         
         IAsyncEnumerable<string> stream = StreamCopilotAsync(enhancedSystemPrompt, userPrompt, effectiveModel, cancellationToken);
-        
-        var jsonOptions = CachedJsonOptions;
 
         await using var enumerator = NdjsonStreamParser
-            .ParseAsync<T>(TapStream(stream, responseBuilder, cancellationToken), jsonOptions, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
+            .ParseAsync<T>(TapStream(stream, responseBuilder, cancellationToken), JsonOptions, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
             .GetAsyncEnumerator(cancellationToken);
 
         while (true)

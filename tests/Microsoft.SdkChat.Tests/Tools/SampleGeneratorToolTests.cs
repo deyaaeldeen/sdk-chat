@@ -46,7 +46,6 @@ public class SampleGeneratorToolTests : IDisposable
     
     public void Dispose()
     {
-        _services?.Dispose();
         SdkInfo.ClearCache();
         try
         {
@@ -56,8 +55,6 @@ public class SampleGeneratorToolTests : IDisposable
         catch { }
         GC.SuppressFinalize(this);
     }
-    
-    private IDisposable? _services;
     
     private SampleGeneratorTool CreateTool(IAiService? aiService = null)
     {

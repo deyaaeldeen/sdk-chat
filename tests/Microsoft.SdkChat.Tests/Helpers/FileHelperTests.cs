@@ -445,9 +445,9 @@ public class FileHelperTests : IDisposable
         }
 
         // Assert
-        Assert.True(chunks.Count >= 3); // Section header, file header/content/footer, section footer
-        Assert.True(chunks.Any(c => c.IsHeader));
-        Assert.True(chunks.Any(c => c.IsFooter));
+        Assert.True(chunks.Count >= 3);
+        Assert.Contains(chunks, c => c.IsHeader);
+        Assert.Contains(chunks, c => c.IsFooter);
     }
 
     [Fact]
@@ -554,7 +554,7 @@ public class FileHelperTests : IDisposable
 
         // Assert
         var contentChunks = chunks.Where(c => !c.IsHeader && !c.IsFooter).ToList();
-        Assert.True(contentChunks.Any(c => c.RelativePath.Contains("nested")));
+        Assert.Contains(contentChunks, c => c.RelativePath.Contains("nested"));
     }
 
     [Fact]

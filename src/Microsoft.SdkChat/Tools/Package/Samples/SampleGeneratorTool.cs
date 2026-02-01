@@ -201,8 +201,8 @@ public class SampleGeneratorTool
                     samples.Add(sample);
                     // Use FilePath if provided, otherwise generate from Name
                     var relativePath = !string.IsNullOrEmpty(sample.FilePath)
-                        ? SanitizeFilePath(sample.FilePath, context.FileExtension)
-                        : SanitizeFileName(sample.Name) + context.FileExtension;
+                        ? SanitizePath(sample.FilePath, context.FileExtension)
+                        : SanitizeName(sample.Name) + context.FileExtension;
                     var fullPath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
                     progress?.Update(fullPath);
                 }
@@ -269,8 +269,8 @@ public class SampleGeneratorTool
             {
                 var sample = samples[i];
                 var relativePath = !string.IsNullOrEmpty(sample.FilePath) 
-                    ? SanitizeFilePath(sample.FilePath, context.FileExtension)
-                    : SanitizeFileName(sample.Name) + context.FileExtension;
+                    ? SanitizePath(sample.FilePath, context.FileExtension)
+                    : SanitizeName(sample.Name) + context.FileExtension;
                 var isLast = i == samples.Count - 1;
                 
                 var filePath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
@@ -364,76 +364,10 @@ public class SampleGeneratorTool
         return $"~{tokens / 1000}K tokens";
     }
     
-    private static string SanitizeFileName(string name)
-    {
-        // Replace invalid file name characters (includes : on Windows)
-        var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = new System.Text.StringBuilder(name);
-        foreach (var c in invalid)
-        {
-            sanitized.Replace(c, '_');
-        }
-        // Also replace : and other problematic characters for cross-platform compatibility
-        sanitized.Replace(':', '_');
-        sanitized.Replace('/', '_');
-        sanitized.Replace('\\', '_');
-        // Replace spaces with underscores for cleaner filenames
-        sanitized.Replace(' ', '_');
-        return sanitized.ToString();
-    }
+    private static string SanitizeName(string name) => PathSanitizer.SanitizeFileName(name);
     
-    private static string SanitizeFilePath(string path, string expectedExtension)
-    {
-        // Normalize path separators
-        var normalized = path.Replace('\\', '/');
-        
-        // Split into directory and filename parts
-        var parts = normalized.Split('/');
-        var sanitizedParts = new List<string>();
-        
-        for (var i = 0; i < parts.Length; i++)
-        {
-            var part = parts[i];
-            if (string.IsNullOrWhiteSpace(part)) continue;
-            
-            // Sanitize each path segment
-            var invalid = Path.GetInvalidFileNameChars();
-            var sanitized = new System.Text.StringBuilder(part);
-            foreach (var c in invalid)
-            {
-                sanitized.Replace(c, '_');
-            }
-            sanitized.Replace(':', '_');
-            sanitized.Replace(' ', '_');
-            sanitizedParts.Add(sanitized.ToString());
-        }
-        
-        if (sanitizedParts.Count == 0)
-            return "Sample" + expectedExtension;
-        
-        var result = string.Join(Path.DirectorySeparatorChar.ToString(), sanitizedParts);
-        
-        // Ensure correct extension
-        if (!result.EndsWith(expectedExtension, StringComparison.OrdinalIgnoreCase))
-        {
-            // Remove any existing extension and add the correct one
-            var lastPart = sanitizedParts[^1];
-            var dotIndex = lastPart.LastIndexOf('.');
-            if (dotIndex > 0)
-            {
-                sanitizedParts[^1] = lastPart[..dotIndex] + expectedExtension;
-                result = string.Join(Path.DirectorySeparatorChar.ToString(), sanitizedParts);
-            }
-            else
-            {
-                result += expectedExtension;
-            }
-        }
-        
-        return result;
-    }
-    
-    // Language context factory for all supported languages
+    private static string SanitizePath(string path, string ext) => PathSanitizer.SanitizeFilePath(path, ext);
+
     private SampleLanguageContext CreateLanguageContext(SdkLanguage language) => language switch
     {
         SdkLanguage.DotNet => new DotNetSampleLanguageContext(_fileHelper),

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -5,8 +8,7 @@ using System.Text.Json;
 namespace Microsoft.SdkChat.Helpers;
 
 /// <summary>
-/// Parses NDJSON (newline-delimited JSON) from streaming chunks.
-/// Handles multi-line JSON objects by tracking brace depth.
+/// NDJSON stream parser with brace-depth tracking.
 /// </summary>
 public static class NdjsonStreamParser
 {
@@ -136,9 +138,9 @@ public static class NdjsonStreamParser
         }
     }
 
-    private static bool TryParseObject<T>(string jsonText, JsonSerializerOptions jsonOptions, out T item)
+    private static bool TryParseObject<T>(string json, JsonSerializerOptions options, out T item)
     {
-        if (string.IsNullOrWhiteSpace(jsonText))
+        if (string.IsNullOrWhiteSpace(json))
         {
             item = default!;
             return false;
@@ -146,7 +148,7 @@ public static class NdjsonStreamParser
 
         try
         {
-            var parsed = JsonSerializer.Deserialize<T>(jsonText, jsonOptions);
+            var parsed = JsonSerializer.Deserialize<T>(json, options);
             if (parsed is not null)
             {
                 item = parsed;
@@ -160,15 +162,5 @@ public static class NdjsonStreamParser
 
         item = default!;
         return false;
-    }
-
-    private static string Truncate(string value, int maxChars = 200)
-    {
-        if (value.Length <= maxChars)
-        {
-            return value;
-        }
-
-        return value[..maxChars] + "…";
     }
 }

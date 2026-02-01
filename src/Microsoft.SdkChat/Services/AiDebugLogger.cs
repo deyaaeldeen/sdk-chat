@@ -120,14 +120,8 @@ public static partial class SensitiveDataScrubber
 }
 
 /// <summary>
-/// Debug logger for AI service interactions.
-/// Writes structured markdown files with full request/response details.
-/// 
-/// SECURITY: All prompts and responses are scrubbed for sensitive data
-/// (API keys, tokens, secrets) before writing to disk.
-/// 
-/// Enable via environment variable: SDK_CLI_DEBUG=true
-/// Set output directory via: SDK_CLI_DEBUG_DIR (defaults to ~/.sdk-chat/debug)
+/// Debug logger for AI requests. Enable via SDK_CLI_DEBUG=true.
+/// All output is scrubbed for secrets before writing.
 /// </summary>
 public class AiDebugLogger
 {
@@ -187,10 +181,6 @@ public class AiDebugLogger
         return session;
     }
     
-    /// <summary>
-    /// Log the response and finalize the debug file.
-    /// Streams content directly to file to handle large prompts.
-    /// </summary>
     public async Task CompleteSessionAsync(
         AiDebugSession session,
         string response,
