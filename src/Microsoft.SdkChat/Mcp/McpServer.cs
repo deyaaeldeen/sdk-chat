@@ -1,4 +1,6 @@
 using ModelContextProtocol.Server;
+using ModelContextProtocol.AspNetCore;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,23 +23,64 @@ public static class McpServer
     /// </summary>
     private static readonly HashSet<string> SupportedTransports = new(StringComparer.OrdinalIgnoreCase)
     {
-        "stdio"
+        "stdio",
+        "sse"
     };
     
-    public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false)
+    public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false, CancellationToken cancellationToken = default)
     {
         // Validate transport type - fail fast if unsupported
         if (!SupportedTransports.Contains(transport))
         {
             throw new NotSupportedException(
-                $"Transport '{transport}' is not supported. Supported transports: {string.Join(", ", SupportedTransports)}. " +
-                $"SSE transport is planned for a future release.");
+                $"Transport '{transport}' is not supported. Supported transports: {string.Join(", ", SupportedTransports)}.");
         }
         
-        var builder = Host.CreateApplicationBuilder();
-        
+        // For SSE transport, use WebApplication for HTTP/SSE support
+        if (transport.Equals("sse", StringComparison.OrdinalIgnoreCase))
+        {
+            var builder = WebApplication.CreateBuilder();
+            ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
+            
+            // Configure MCP server with SSE transport
+            builder.Services.AddMcpServer(options =>
+            {
+                options.ServerInfo = new() { Name = "sdk-chat", Version = "1.0.0" };
+            })
+            .WithHttpTransport()
+            .WithToolsFromAssembly();
+            
+            var app = builder.Build();
+            
+            // Configure endpoint - clear default URLs and set only the requested port
+            app.Urls.Clear();
+            app.Urls.Add($"http://localhost:{port}");
+            
+            app.MapMcp();
+            await app.RunAsync(cancellationToken);
+        }
+        else // stdio transport
+        {
+            var builder = Host.CreateApplicationBuilder();
+            ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
+            
+            // Configure MCP server with stdio transport
+            builder.Services.AddMcpServer(options =>
+            {
+                options.ServerInfo = new() { Name = "sdk-chat", Version = "1.0.0" };
+            })
+            .WithStdioServerTransport()
+            .WithToolsFromAssembly();
+            
+            var host = builder.Build();
+            await host.RunAsync(cancellationToken);
+        }
+    }
+    
+    private static void ConfigureLoggingAndServices(ILoggingBuilder logging, IServiceCollection services, string logLevel, bool useOpenAi)
+    {
         // Configure logging
-        builder.Logging.AddConsole().SetMinimumLevel(ParseLogLevel(logLevel));
+        logging.AddConsole().SetMinimumLevel(ParseLogLevel(logLevel));
         
         // Configure centralized options - fail fast on validation errors
         var options = SdkChatOptions.FromEnvironment();
@@ -52,7 +95,7 @@ public static class McpServer
                 $"Configuration validation failed: {string.Join("; ", errors.Select(e => e.ErrorMessage))}");
         }
         
-        builder.Services.AddSingleton(options);
+        services.AddSingleton(options);
         
         // Legacy compatibility - create AiProviderSettings from SdkChatOptions
         var aiSettings = new AiProviderSettings
@@ -64,26 +107,15 @@ public static class McpServer
             DebugEnabled = options.DebugEnabled,
             DebugDirectory = options.DebugDirectory
         };
-        builder.Services.AddSingleton(aiSettings);
+        services.AddSingleton(aiSettings);
         
         // Register services
-        builder.Services.AddSingleton<ProcessSandboxService>();
-        builder.Services.AddSingleton<AiDebugLogger>();
-        builder.Services.AddSingleton<AiService>();
-        builder.Services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
-        builder.Services.AddSingleton<FileHelper>();
-        builder.Services.AddSingleton<ConfigurationHelper>();
-        
-        // Configure MCP server with validated transport
-        builder.Services.AddMcpServer(options =>
-        {
-            options.ServerInfo = new() { Name = "sdk-chat", Version = "1.0.0" };
-        })
-        .WithStdioServerTransport()  // Currently only stdio is supported
-        .WithToolsFromAssembly();
-        
-        var host = builder.Build();
-        await host.RunAsync();
+        services.AddSingleton<ProcessSandboxService>();
+        services.AddSingleton<AiDebugLogger>();
+        services.AddSingleton<AiService>();
+        services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
+        services.AddSingleton<FileHelper>();
+        services.AddSingleton<ConfigurationHelper>();
     }
     
     private static LogLevel ParseLogLevel(string level) => level.ToLowerInvariant() switch

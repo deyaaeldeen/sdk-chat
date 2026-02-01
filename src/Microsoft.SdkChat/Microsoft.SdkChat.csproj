@@ -20,6 +20,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Required for ASP.NET Core types (WebApplication, etc.) used by SSE transport -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
@@ -44,6 +49,7 @@
     <!-- WARNING: Preview package - monitor for breaking changes. Pin to exact version. -->
     <!-- TODO: Upgrade to stable release when available -->
     <PackageReference Include="ModelContextProtocol" Version="[0.7.0-preview.1]" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="[0.7.0-preview.1]" />
     
     <!-- Infrastructure - PINNED to exact versions -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="[10.0.2]" />
