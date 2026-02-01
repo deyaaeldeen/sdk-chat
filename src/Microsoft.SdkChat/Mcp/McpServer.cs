@@ -2,6 +2,7 @@ using ModelContextProtocol.Server;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.SdkChat.Configuration;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
@@ -38,10 +39,35 @@ public static class McpServer
         // Configure logging
         builder.Logging.AddConsole().SetMinimumLevel(ParseLogLevel(logLevel));
         
-        // Configure services
-        var aiSettings = AiProviderSettings.FromEnvironment();
-        if (useOpenAi) aiSettings = aiSettings with { UseOpenAi = true };
+        // Configure centralized options - fail fast on validation errors
+        var options = SdkChatOptions.FromEnvironment();
+        if (useOpenAi) options.UseOpenAi = true;
+        
+        // Validate configuration at startup
+        var validationResults = options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options));
+        var errors = validationResults.ToList();
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Configuration validation failed: {string.Join("; ", errors.Select(e => e.ErrorMessage))}");
+        }
+        
+        builder.Services.AddSingleton(options);
+        
+        // Legacy compatibility - create AiProviderSettings from SdkChatOptions
+        var aiSettings = new AiProviderSettings
+        {
+            UseOpenAi = options.UseOpenAi,
+            Endpoint = options.Endpoint,
+            ApiKey = options.ApiKey,
+            Model = options.Model,
+            DebugEnabled = options.DebugEnabled,
+            DebugDirectory = options.DebugDirectory
+        };
         builder.Services.AddSingleton(aiSettings);
+        
+        // Register services
+        builder.Services.AddSingleton<ProcessSandboxService>();
         builder.Services.AddSingleton<AiDebugLogger>();
         builder.Services.AddSingleton<AiService>();
         builder.Services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());

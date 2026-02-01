@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -19,9 +22,15 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     
     private string? _goPath;
     private string? _unavailableReason;
+    private string? _warning;
 
     /// <inheritdoc />
     public string Language => "go";
+
+    /// <summary>
+    /// Warning message from tool resolution (if any).
+    /// </summary>
+    public string? Warning => _warning;
 
     /// <inheritdoc />
     public bool IsAvailable()
@@ -33,10 +42,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             return false;
         }
         _goPath = result.Path;
-        if (result.WarningOrError != null)
-        {
-            Console.Error.WriteLine($"Warning: {result.WarningOrError}");
-        }
+        _warning = result.WarningOrError; // Store warning for structured logging by caller
         return true;
     }
 
@@ -245,16 +251,22 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
 
     private static string GetScriptPath()
     {
-        // Look relative to the executing assembly
+        // SECURITY: Only load scripts from assembly directory
         var assemblyDir = Path.GetDirectoryName(typeof(GoApiExtractor).Assembly.Location) ?? ".";
         var scriptPath = Path.Combine(assemblyDir, "extract_api.go");
         
-        if (!File.Exists(scriptPath))
-        {
-            // Dev mode: look in source directory
-            scriptPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "extract_api.go");
-        }
-        
-        return Path.GetFullPath(scriptPath);
+        if (File.Exists(scriptPath))
+            return scriptPath;
+
+#if DEBUG
+        // Dev mode only: check source directory relative to BaseDirectory
+        var devPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "extract_api.go"));
+        if (File.Exists(devPath))
+            return devPath;
+#endif
+
+        throw new FileNotFoundException(
+            $"Corrupt installation: extract_api.go not found at {scriptPath}. " +
+            "Reinstall the application to resolve this issue.");
     }
 }

@@ -134,11 +134,6 @@ public class ToolPathResolverTests
         const string envVar = "SDK_CHAT_TESTFALLBACK_PATH";
         var originalValue = Environment.GetEnvironmentVariable(envVar);
         
-        // Capture stderr to verify warning is printed
-        var originalErr = Console.Error;
-        using var sw = new StringWriter();
-        Console.SetError(sw);
-        
         try
         {
             // Set environment variable to invalid path
@@ -153,15 +148,40 @@ public class ToolPathResolverTests
             // Should fall back to dotnet
             Assert.Equal("dotnet", result);
             
-            // Should have printed a warning
-            var errorOutput = sw.ToString();
-            Assert.Contains("Warning:", errorOutput);
-            Assert.Contains("SDK_CHAT_TESTFALLBACK_PATH", errorOutput);
+            // Note: Resolve() no longer prints warnings - use ResolveWithDetails() for that
         }
         finally
         {
             Environment.SetEnvironmentVariable(envVar, originalValue);
-            Console.SetError(originalErr);
+        }
+    }
+
+    [Fact]
+    public void ResolveWithDetails_ReturnsWarning_WhenEnvVarInvalid()
+    {
+        const string envVar = "SDK_CHAT_TESTFALLBACK2_PATH";
+        var originalValue = Environment.GetEnvironmentVariable(envVar);
+        
+        try
+        {
+            // Set environment variable to invalid path
+            Environment.SetEnvironmentVariable(envVar, "/nonexistent/invalid/path");
+            
+            var result = ToolPathResolver.ResolveWithDetails(
+                "testfallback2", 
+                ["dotnet"],  // Valid fallback
+                "--version"
+            );
+            
+            // Should indicate not available due to invalid env var
+            Assert.False(result.IsAvailable);
+            Assert.NotNull(result.WarningOrError);
+            Assert.Contains("SDK_CHAT_TESTFALLBACK2_PATH", result.WarningOrError);
+            Assert.Contains("not a valid", result.WarningOrError);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envVar, originalValue);
         }
     }
 

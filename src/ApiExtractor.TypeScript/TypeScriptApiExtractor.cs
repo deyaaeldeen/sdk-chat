@@ -18,9 +18,15 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 
     private string? _nodePath;
     private string? _unavailableReason;
+    private string? _warning;
 
     /// <inheritdoc />
     public string Language => "typescript";
+
+    /// <summary>
+    /// Warning message from tool resolution (if any).
+    /// </summary>
+    public string? Warning => _warning;
 
     /// <inheritdoc />
     public bool IsAvailable()
@@ -32,10 +38,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             return false;
         }
         _nodePath = result.Path;
-        if (result.WarningOrError != null)
-        {
-            Console.Error.WriteLine($"Warning: {result.WarningOrError}");
-        }
+        _warning = result.WarningOrError; // Store warning for structured logging by caller
         return true;
     }
 
@@ -215,17 +218,28 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 
     private static string GetScriptDir()
     {
-        // Look relative to the executing assembly
+        // SECURITY: Only load scripts from assembly directory
         var assemblyDir = Path.GetDirectoryName(typeof(TypeScriptApiExtractor).Assembly.Location) ?? ".";
         var scriptPath = Path.Combine(assemblyDir, "extract_api.mjs");
         
         if (File.Exists(scriptPath))
-        {
             return assemblyDir;
-        }
 
-        // Dev mode: look in source directory
-        var devDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..");
-        return Path.GetFullPath(devDir);
+        // Also check for compiled dist version
+        var distPath = Path.Combine(assemblyDir, "dist", "extract_api.js");
+        if (File.Exists(distPath))
+            return assemblyDir;
+
+#if DEBUG
+        // Dev mode only: check source directory relative to BaseDirectory
+        var devDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
+        var devScript = Path.Combine(devDir, "extract_api.mjs");
+        if (File.Exists(devScript))
+            return devDir;
+#endif
+
+        throw new FileNotFoundException(
+            $"Corrupt installation: extract_api.mjs not found at {scriptPath}. " +
+            "Reinstall the application to resolve this issue.");
     }
 }

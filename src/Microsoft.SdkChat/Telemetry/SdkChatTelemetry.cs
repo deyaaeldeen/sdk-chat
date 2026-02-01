@@ -116,4 +116,24 @@ public static class SdkChatTelemetry
         activity.SetTag("ai.tokens.response", responseTokens);
         activity.SetTag("ai.tokens.total", promptTokens + responseTokens);
     }
+
+    /// <summary>
+    /// Starts a generic activity with the given name.
+    /// </summary>
+    public static Activity? StartActivity(string name, ActivityKind kind = ActivityKind.Internal)
+    {
+        return Source.StartActivity(name, kind);
+    }
+
+    /// <summary>
+    /// Starts an activity for external process execution.
+    /// </summary>
+    public static Activity? StartProcessExecution(string executable, string? language = null)
+    {
+        var activity = Source.StartActivity("process.execute", ActivityKind.Client);
+        activity?.SetTag("process.executable", executable);
+        if (language != null)
+            activity?.SetTag("language", language);
+        return activity;
+    }
 }

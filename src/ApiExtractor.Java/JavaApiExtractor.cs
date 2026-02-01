@@ -17,9 +17,15 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 
     private string? _jbangPath;
     private string? _unavailableReason;
+    private string? _warning;
 
     /// <inheritdoc />
     public string Language => "java";
+
+    /// <summary>
+    /// Warning message from tool resolution (if any).
+    /// </summary>
+    public string? Warning => _warning;
 
     /// <inheritdoc />
     public bool IsAvailable()
@@ -31,10 +37,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
             return false;
         }
         _jbangPath = result.Path;
-        if (result.WarningOrError != null)
-        {
-            Console.Error.WriteLine($"Warning: {result.WarningOrError}");
-        }
+        _warning = result.WarningOrError; // Store warning for structured logging by caller
         return true;
     }
 
@@ -168,16 +171,22 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 
     private static string GetScriptPath()
     {
-        // Look relative to the executing assembly
+        // SECURITY: Only load scripts from assembly directory
         var assemblyDir = Path.GetDirectoryName(typeof(JavaApiExtractor).Assembly.Location) ?? ".";
         var scriptPath = Path.Combine(assemblyDir, "ExtractApi.java");
         
-        if (!File.Exists(scriptPath))
-        {
-            // Dev mode: look in source directory
-            scriptPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "ExtractApi.java");
-        }
-        
-        return Path.GetFullPath(scriptPath);
+        if (File.Exists(scriptPath))
+            return scriptPath;
+
+#if DEBUG
+        // Dev mode only: check source directory relative to BaseDirectory
+        var devPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "ExtractApi.java"));
+        if (File.Exists(devPath))
+            return devPath;
+#endif
+
+        throw new FileNotFoundException(
+            $"Corrupt installation: ExtractApi.java not found at {scriptPath}. " +
+            "Reinstall the application to resolve this issue.");
     }
 }

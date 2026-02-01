@@ -37,8 +37,8 @@ public static class ToolPathResolver
             {
                 return envPath;
             }
-            // Environment variable set but invalid - warn but continue searching
-            Console.Error.WriteLine($"Warning: {envVar}={envPath} is not a valid {toolName} executable");
+            // Environment variable set but invalid - return null and let caller handle
+            // Do NOT log to Console.Error - callers should use ResolveWithDetails for warnings
         }
 
         // 2. Try default candidates
@@ -55,22 +55,42 @@ public static class ToolPathResolver
 
     /// <summary>
     /// Resolves the path with detailed result including security warnings.
+    /// Use this method instead of Resolve() when you need warning information.
     /// </summary>
     public static ToolResolutionResult ResolveWithDetails(
         string toolName, 
         string[] defaultCandidates, 
         string versionArgs = "--version")
     {
-        var path = Resolve(toolName, defaultCandidates, versionArgs);
-        if (path == null)
+        // 1. Check environment variable override first
+        var envVar = $"{EnvVarPrefix}{toolName.ToUpperInvariant()}_PATH";
+        var envPath = Environment.GetEnvironmentVariable(envVar);
+        
+        if (!string.IsNullOrEmpty(envPath))
         {
-            return new ToolResolutionResult(null, null, false, $"{toolName} not found");
+            if (ValidateExecutable(envPath, versionArgs))
+            {
+                var absPath = GetAbsolutePath(envPath);
+                var warning = CheckPathSecurity(absPath, toolName);
+                return new ToolResolutionResult(envPath, absPath, true, warning);
+            }
+            // Return detailed error for invalid env override
+            return new ToolResolutionResult(null, null, false, 
+                $"{envVar}={envPath} is not a valid {toolName} executable");
         }
 
-        var absolutePath = GetAbsolutePath(path);
-        var warning = CheckPathSecurity(absolutePath, toolName);
-        
-        return new ToolResolutionResult(path, absolutePath, true, warning);
+        // 2. Try default candidates
+        foreach (var candidate in defaultCandidates)
+        {
+            if (ValidateExecutable(candidate, versionArgs))
+            {
+                var absolutePath = GetAbsolutePath(candidate);
+                var warning = CheckPathSecurity(absolutePath, toolName);
+                return new ToolResolutionResult(candidate, absolutePath, true, warning);
+            }
+        }
+
+        return new ToolResolutionResult(null, null, false, $"{toolName} not found");
     }
 
     /// <summary>

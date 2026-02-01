@@ -22,9 +22,16 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
     private string? _pythonPath;
     private string? _unavailableReason;
+    private string? _warning;
 
     /// <inheritdoc />
     public string Language => "python";
+
+    /// <summary>
+    /// Warning message from tool resolution (if any).
+    /// Check this after calling IsAvailable() for non-fatal issues.
+    /// </summary>
+    public string? Warning => _warning;
 
     /// <inheritdoc />
     public bool IsAvailable()
@@ -36,10 +43,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
             return false;
         }
         _pythonPath = result.Path;
-        if (result.WarningOrError != null)
-        {
-            Console.Error.WriteLine($"Warning: {result.WarningOrError}");
-        }
+        _warning = result.WarningOrError; // Store warning for structured logging by caller
         return true;
     }
 
@@ -74,6 +78,9 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
     public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
+        var startTime = System.Diagnostics.Stopwatch.GetTimestamp();
+
         // Find python executable
         var python = _pythonPath ?? ToolPathResolver.Resolve("python", PythonCandidates);
         if (python == null)
@@ -86,6 +93,8 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(DefaultTimeout);
         var effectiveCt = timeoutCts.Token;
+
+        using var processActivity = ExtractorTelemetry.StartProcess(python, Language);
 
         var psi = new ProcessStartInfo
         {
@@ -108,39 +117,41 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         var output = await outputTask;
         var error = await errorTask;
 
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTime);
+        ExtractorTelemetry.RecordProcessResult(processActivity, process.ExitCode, elapsed);
+
         if (process.ExitCode != 0)
+        {
+            ExtractorTelemetry.RecordResult(activity, false, error: $"Python extractor failed: {error}");
             throw new InvalidOperationException($"Python extractor failed: {error}");
+        }
 
         // Parse JSON output
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         var raw = JsonSerializer.Deserialize<RawApiIndex>(output, options)
             ?? throw new InvalidOperationException("Failed to parse Python extractor output");
 
-        return ConvertToApiIndex(raw);
+        var result = ConvertToApiIndex(raw);
+        ExtractorTelemetry.RecordResult(activity, true, result.Modules.Count);
+        return result;
     }
 
     private static string GetScriptPath()
     {
-        // Check assembly directory first
+        // SECURITY: Only load scripts from assembly directory - no directory walking
         if (File.Exists(ScriptPath))
             return ScriptPath;
 
-        // Check relative to current directory
-        var local = Path.Combine(Directory.GetCurrentDirectory(), "extract_api.py");
-        if (File.Exists(local))
-            return local;
+#if DEBUG
+        // Dev mode only: check source directory relative to BaseDirectory
+        var devPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "extract_api.py"));
+        if (File.Exists(devPath))
+            return devPath;
+#endif
 
-        // Try to find in source tree (for development)
-        var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (dir != null)
-        {
-            var candidate = Path.Combine(dir.FullName, "tools", "sdk-chat", "ApiExtractor.Python", "extract_api.py");
-            if (File.Exists(candidate))
-                return candidate;
-            dir = dir.Parent;
-        }
-
-        throw new FileNotFoundException("extract_api.py not found");
+        throw new FileNotFoundException(
+            $"Corrupt installation: extract_api.py not found at {ScriptPath}. " +
+            "Reinstall the application to resolve this issue.");
     }
 
     private static ApiIndex ConvertToApiIndex(RawApiIndex raw)
