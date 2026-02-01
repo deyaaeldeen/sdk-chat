@@ -3,6 +3,7 @@
 
 using Microsoft.SdkChat.Mcp;
 using Xunit;
+using System.Net.Sockets;
 
 namespace Microsoft.SdkChat.Tests.Mcp;
 
@@ -11,6 +12,18 @@ namespace Microsoft.SdkChat.Tests.Mcp;
 /// </summary>
 public class McpServerTests
 {
+    /// <summary>
+    /// Gets an available ephemeral port to avoid port conflicts in tests.
+    /// </summary>
+    private static int GetAvailablePort()
+    {
+        using var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
     [Theory]
     [InlineData("http")]
     [InlineData("websocket")]
@@ -39,21 +52,21 @@ public class McpServerTests
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMilliseconds(500));
         
-        // Use a unique port for each test to avoid conflicts
-        var port = 9800 + Math.Abs(transport.GetHashCode()) % 100;
+        // Use an ephemeral port to avoid conflicts
+        var port = GetAvailablePort();
 
-        // Act - Start the server in a background task
+        // Act - Start the server in a background task with cancellation token
         var serverTask = Task.Run(async () =>
         {
             try
             {
-                await McpServer.RunAsync(transport, port, "error", useOpenAi: false);
+                await McpServer.RunAsync(transport, port, "error", useOpenAi: false, cancellationToken: cts.Token);
             }
             catch (OperationCanceledException)
             {
-                // Expected when the process is killed
+                // Expected when the cancellation token is triggered
             }
-        }, cts.Token);
+        });
 
         // Wait briefly to see if it throws immediately
         var delayTask = Task.Delay(TimeSpan.FromMilliseconds(200));
@@ -68,55 +81,41 @@ public class McpServerTests
     public async Task RunAsync_WithSseTransport_StartsHttpServerOnSpecifiedPort()
     {
         // Arrange
-        var port = 9901; // Use a specific high port to avoid conflicts
+        var port = GetAvailablePort();
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromSeconds(5));
 
-        // Act - Start the SSE server
-        var serverTask = Task.Run(async () =>
+        // Act - Start the SSE server with cancellation token
+        _ = Task.Run(async () =>
         {
             try
             {
-                await McpServer.RunAsync("sse", port, "error", useOpenAi: false);
+                await McpServer.RunAsync("sse", port, "error", useOpenAi: false, cancellationToken: cts.Token);
             }
             catch (OperationCanceledException)
             {
-                // Expected
+                // Expected: server shutdown via cancellation token
             }
-        }, cts.Token);
+        });
 
         // Wait for server to initialize
         await Task.Delay(1500);
 
-        // Assert - Verify the server is accessible via HTTP
-        bool serverResponded = false;
+        // Assert - Verify the server is accessible via HTTP and responds with success
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         
-        try
-        {
-            // Try to connect to the SSE endpoint
-            var response = await httpClient.GetAsync($"http://localhost:{port}/sse", HttpCompletionOption.ResponseHeadersRead, cts.Token);
-            serverResponded = true;
-            Assert.NotNull(response);
-        }
-        catch (TaskCanceledException)
-        {
-            // Timeout - server didn't respond
-        }
-        catch (HttpRequestException)
-        {
-            // Connection refused - server not listening
-        }
-
-        Assert.True(serverResponded, $"SSE server should be accessible on port {port}");
+        var response = await httpClient.GetAsync($"http://localhost:{port}/sse", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        
+        Assert.NotNull(response);
+        Assert.True(response.IsSuccessStatusCode, $"SSE endpoint should return success status code, but got {response.StatusCode}");
     }
 
     [Fact]
     public async Task RunAsync_WithDifferentPorts_EachSseServerUsesCorrectPort()
     {
         // Test that multiple SSE servers can be configured with different ports
-        var port1 = 9902;
-        var port2 = 9903;
+        var port1 = GetAvailablePort();
+        var port2 = GetAvailablePort();
 
         using var cts1 = new CancellationTokenSource();
         using var cts2 = new CancellationTokenSource();
@@ -124,69 +123,101 @@ public class McpServerTests
         cts2.CancelAfter(TimeSpan.FromSeconds(5));
 
         // Start first server on port1
-        var server1Task = Task.Run(async () =>
+        _ = Task.Run(async () =>
         {
             try
             {
-                await McpServer.RunAsync("sse", port1, "error", useOpenAi: false);
+                await McpServer.RunAsync("sse", port1, "error", useOpenAi: false, cancellationToken: cts1.Token);
             }
-            catch (OperationCanceledException) { }
-        }, cts1.Token);
+            catch (OperationCanceledException)
+            {
+                // Expected: server shutdown via cancellation token
+            }
+        });
 
         await Task.Delay(1000);
 
         // Start second server on port2
-        var server2Task = Task.Run(async () =>
+        _ = Task.Run(async () =>
         {
             try
             {
-                await McpServer.RunAsync("sse", port2, "error", useOpenAi: false);
+                await McpServer.RunAsync("sse", port2, "error", useOpenAi: false, cancellationToken: cts2.Token);
             }
-            catch (OperationCanceledException) { }
-        }, cts2.Token);
+            catch (OperationCanceledException)
+            {
+                // Expected: server shutdown via cancellation token
+            }
+        });
 
         await Task.Delay(1000);
 
-        // Verify both servers are accessible on their respective ports
+        // Verify both servers are accessible on their respective ports with success status codes
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         
         var response1 = await httpClient.GetAsync($"http://localhost:{port1}/sse", HttpCompletionOption.ResponseHeadersRead, cts1.Token);
         var response2 = await httpClient.GetAsync($"http://localhost:{port2}/sse", HttpCompletionOption.ResponseHeadersRead, cts2.Token);
 
         Assert.NotNull(response1);
+        Assert.True(response1.IsSuccessStatusCode, $"Server 1 should return success status code, but got {response1.StatusCode}");
         Assert.NotNull(response2);
+        Assert.True(response2.IsSuccessStatusCode, $"Server 2 should return success status code, but got {response2.StatusCode}");
     }
 
     [Theory]
-    [InlineData("stdio", "STDIO")]
-    [InlineData("sse", "SSE")]
-    [InlineData("Stdio", "stdio")]
-    [InlineData("Sse", "sse")]
-    public async Task RunAsync_TransportNames_AreCaseInsensitive(string transport1, string transport2)
+    [InlineData("stdio")]
+    [InlineData("sse")]
+    public async Task RunAsync_TransportNames_AreCaseInsensitive(string transport)
     {
-        // Both transport names should be treated the same (case-insensitive)
-        // We test this by verifying both start without throwing immediately
+        // Test that transport names are case-insensitive by verifying both lower and upper case work
         
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMilliseconds(300));
         
-        var port = 9910 + Math.Abs(transport1.GetHashCode()) % 10;
+        var port = GetAvailablePort();
 
-        var task1 = Task.Run(async () =>
+        // Test lowercase
+        var taskLower = Task.Run(async () =>
         {
             try
             {
-                await McpServer.RunAsync(transport1, port, "error", useOpenAi: false);
+                await McpServer.RunAsync(transport.ToLower(), port, "error", useOpenAi: false, cancellationToken: cts.Token);
             }
-            catch (OperationCanceledException) { }
-        }, cts.Token);
+            catch (OperationCanceledException)
+            {
+                // Expected: server shutdown via cancellation token
+            }
+        });
 
         await Task.Delay(100);
         
-        // Verify neither throws NotSupportedException
-        Assert.False(task1.IsCompleted, $"Transport '{transport1}' should be accepted");
+        // Assert - Verify lowercase transport name is accepted
+        Assert.False(taskLower.IsCompleted, $"Transport '{transport.ToLower()}' should be accepted");
         
-        // Both should be treated identically (both supported or both not)
-        // Since we're testing with supported transports, both should work
+        // Cancel and wait
+        cts.Cancel();
+        await Task.WhenAny(taskLower, Task.Delay(1000));
+        
+        // Test uppercase with new cancellation token and port
+        using var cts2 = new CancellationTokenSource();
+        cts2.CancelAfter(TimeSpan.FromMilliseconds(300));
+        var port2 = GetAvailablePort();
+        
+        var taskUpper = Task.Run(async () =>
+        {
+            try
+            {
+                await McpServer.RunAsync(transport.ToUpper(), port2, "error", useOpenAi: false, cancellationToken: cts2.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected: server shutdown via cancellation token
+            }
+        });
+
+        await Task.Delay(100);
+        
+        // Assert - Verify uppercase transport name is accepted
+        Assert.False(taskUpper.IsCompleted, $"Transport '{transport.ToUpper()}' should be accepted");
     }
 }

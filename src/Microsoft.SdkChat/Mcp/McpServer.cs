@@ -27,7 +27,7 @@ public static class McpServer
         "sse"
     };
     
-    public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false)
+    public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false, CancellationToken cancellationToken = default)
     {
         // Validate transport type - fail fast if unsupported
         if (!SupportedTransports.Contains(transport))
@@ -52,11 +52,12 @@ public static class McpServer
             
             var app = builder.Build();
             
-            // Configure endpoint
+            // Configure endpoint - clear default URLs and set only the requested port
+            app.Urls.Clear();
             app.Urls.Add($"http://localhost:{port}");
             
             app.MapMcp();
-            await app.RunAsync();
+            await app.RunAsync(cancellationToken);
         }
         else // stdio transport
         {
@@ -72,7 +73,7 @@ public static class McpServer
             .WithToolsFromAssembly();
             
             var host = builder.Build();
-            await host.RunAsync();
+            await host.RunAsync(cancellationToken);
         }
     }
     
