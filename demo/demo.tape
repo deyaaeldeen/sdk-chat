@@ -1,7 +1,7 @@
 # VHS tape file for SDK Chat demo
 # https://github.com/charmbracelet/vhs
 
-Output demo/demo.gif
+Output demo.gif
 Set Shell "bash"
 Set FontSize 14
 Set Width 900
@@ -10,20 +10,23 @@ Set Theme "Dracula"
 Set Padding 20
 Set TypingSpeed 40ms
 
-# Show Copilot mode (default)
-Type "# Mode 1: GitHub Copilot (default)"
+# Show Docker usage (official method)
+Type "# SDK Chat - Generate SDK samples with AI"
 Enter
 Sleep 500ms
-Type "sdk-chat package sample generate ~/openai-dotnet --count 1"
+Type "# Using Docker (official installation method)"
+Enter
+Sleep 500ms
+Type "./scripts/sdk-chat.sh package sample generate ~/openai-dotnet --count 1"
 Sleep 300ms
 Enter
-Sleep 25s
+Sleep 30s
 
-# Clear and show OpenAI mode
-Type "# Mode 2: OpenAI (load OPENAI_API_KEY from .env)"
+# Show OpenAI mode with --load-dotenv
+Type "# With OpenAI instead of GitHub Copilot"
 Enter
 Sleep 500ms
-Type "sdk-chat package sample generate ~/openai-dotnet --use-openai --load-dotenv --count 1"
+Type "./scripts/sdk-chat.sh package sample generate ~/openai-dotnet --use-openai --load-dotenv --count 1"
 Sleep 300ms
 Enter
-Sleep 25s
+Sleep 30s
