@@ -14,25 +14,19 @@
 
 ## Getting Started
 
+Use the Docker development container for all development and testing. This ensures a consistent environment with all language runtimes (Python, Node.js, Go, JBang) pre-installed.
+
 ```bash
 git clone https://github.com/deyaaeldeen/sdk-chat
 cd sdk-chat
-dotnet build
-dotnet test
-```
 
-### Using Docker
-
-A unified development container includes all language runtimes and tools:
-
-```bash
 # Build dev container
 docker build -t sdk-chat-dev .
 
-# Run tests
+# Run tests (recommended)
 docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev
 
-# Interactive shell
+# Interactive shell for development
 docker run -it --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev bash
 
 # Build only
@@ -44,15 +38,23 @@ docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet 
 
 > **Note:** The `-u $(id -u):$(id -g)` flag maps your host user into the container, ensuring files created in `/workspace` have correct ownership.
 
-#### Docker Images
+### VS Code Dev Container
+
+For the best development experience, open the project in VS Code and use the dev container:
+
+F1 → "Dev Containers: Reopen in Container"
+
+The dev container includes: .NET SDK 10, Python 3, Node.js, Go, JBang, VHS, Copilot CLI.
+
+### Docker Images
 
 | Image | Dockerfile | Purpose |
 |-------|------------|--------|
 | `sdk-chat-dev` | `Dockerfile` | Development and testing |
 | `sdk-chat-demo` | `demo/Dockerfile` | VHS demo recording |
-| `sdk-chat:latest` | `Dockerfile.release` | Production (Native AOT, ~181MB binaries) |
+| `sdk-chat:latest` | `Dockerfile.release` | Production (Native AOT, ~500MB) |
 
-#### Release Container Size Breakdown
+### Release Container Size Breakdown
 
 The release image is ~500 MB. Here's what's inside:
 
@@ -66,12 +68,6 @@ The release image is ~500 MB. Here's what's inside:
 | `go_extractor` | 2.6 MB | `/app/` | Go extractor (native Go binary) |
 | Base image | ~22 MB | | Debian bookworm-slim + glibc |
 | **Total** | **~504 MB** | |
-
-### VS Code Dev Container
-
-Open in container: F1 → "Dev Containers: Reopen in Container"
-
-The dev container includes: .NET SDK 10, Python 3, Node.js, Go, JBang, VHS, Copilot CLI.
 
 ### Docker-in-Docker
 
