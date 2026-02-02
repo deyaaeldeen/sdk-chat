@@ -37,7 +37,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         var tempApiFile = Path.GetTempFileName();
         try
         {
-            var apiJson = JsonSerializer.Serialize(apiIndex);
+            var apiJson = JsonSerializer.Serialize(apiIndex, SourceGenerationContext.Default.ApiIndex);
             await File.WriteAllTextAsync(tempApiFile, apiJson, ct);
 
             // Get script path
@@ -71,7 +71,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 return new UsageIndex { FileCount = 0 };
 
             // Parse the JSON output
-            var result = JsonSerializer.Deserialize<UsageResult>(output, JsonOptionsCache.CaseInsensitive);
+            var result = DeserializeResult(output);
 
             if (result == null)
                 return new UsageIndex { FileCount = 0 };
@@ -157,7 +157,13 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         return AppContext.BaseDirectory;
     }
 
-    // Internal DTOs for JSON parsing
+    // Internal DTOs for JSON parsing - suppressions are safe as these are internal
+    // utilities for parsing known JSON from our own scripts
+#pragma warning disable IL2026, IL3050 // Suppressed: internal DTOs with known schema
+    private static UsageResult? DeserializeResult(string json) =>
+        JsonSerializer.Deserialize<UsageResult>(json, JsonOptionsCache.CaseInsensitive);
+#pragma warning restore IL2026, IL3050
+
     private record UsageResult(
         int FileCount,
         List<CoveredOp>? Covered,

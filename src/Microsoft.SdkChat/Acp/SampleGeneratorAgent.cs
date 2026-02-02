@@ -148,8 +148,8 @@ public sealed class SampleGeneratorAgent(
 
             // Stream parsed samples as they complete
             List<GeneratedSample> samples = [];
-            await foreach (var sample in aiService.StreamItemsAsync<GeneratedSample>(
-                systemPrompt, userPromptStream, null, null, effectiveCt))
+            await foreach (var sample in aiService.StreamItemsAsync(
+                systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, null, null, effectiveCt))
             {
                 if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
                 {

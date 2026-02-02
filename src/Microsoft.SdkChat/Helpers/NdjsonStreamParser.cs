@@ -4,6 +4,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Microsoft.SdkChat.Helpers;
 
@@ -18,11 +19,45 @@ public static class NdjsonStreamParser
     /// </summary>
     private const int MaxObjectSizeChars = 1024 * 1024;
 
+    /// <summary>
+    /// Parse NDJSON stream using source-generated JSON type info (AOT-compatible).
+    /// </summary>
+    public static async IAsyncEnumerable<T> ParseAsync<T>(
+        IAsyncEnumerable<string> chunks,
+        JsonTypeInfo<T> jsonTypeInfo,
+        bool ignoreNonJsonLinesBeforeFirstObject = true,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var item in ParseCoreAsync(chunks, json => JsonSerializer.Deserialize(json, jsonTypeInfo),
+            ignoreNonJsonLinesBeforeFirstObject, cancellationToken))
+        {
+            yield return item;
+        }
+    }
+
+    /// <summary>
+    /// Parse NDJSON stream using JsonSerializerOptions (reflection-based fallback).
+    /// </summary>
     public static async IAsyncEnumerable<T> ParseAsync<T>(
         IAsyncEnumerable<string> chunks,
         JsonSerializerOptions jsonOptions,
         bool ignoreNonJsonLinesBeforeFirstObject = true,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+#pragma warning disable IL2026, IL3050 // Reflection fallback for non-AOT scenarios
+        await foreach (var item in ParseCoreAsync(chunks, json => JsonSerializer.Deserialize<T>(json, jsonOptions),
+            ignoreNonJsonLinesBeforeFirstObject, cancellationToken))
+        {
+            yield return item;
+        }
+#pragma warning restore IL2026, IL3050
+    }
+
+    private static async IAsyncEnumerable<T> ParseCoreAsync<T>(
+        IAsyncEnumerable<string> chunks,
+        Func<string, T?> deserialize,
+        bool ignoreNonJsonLinesBeforeFirstObject,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var objectBuilder = new StringBuilder();
         var seenAnyItem = false;
@@ -113,7 +148,7 @@ public static class NdjsonStreamParser
                             var jsonText = objectBuilder.ToString().Trim();
                             objectBuilder.Clear();
 
-                            if (TryParseObject<T>(jsonText, jsonOptions, out var item))
+                            if (TryDeserialize(jsonText, deserialize, out var item))
                             {
                                 seenAnyItem = true;
                                 yield return item;
@@ -130,7 +165,7 @@ public static class NdjsonStreamParser
             var remaining = objectBuilder.ToString().Trim();
             if (remaining.Length > 0 && remaining.StartsWith('{'))
             {
-                if (TryParseObject<T>(remaining, jsonOptions, out var item))
+                if (TryDeserialize(remaining, deserialize, out var item))
                 {
                     yield return item;
                 }
@@ -138,7 +173,7 @@ public static class NdjsonStreamParser
         }
     }
 
-    private static bool TryParseObject<T>(string json, JsonSerializerOptions options, out T item)
+    private static bool TryDeserialize<T>(string json, Func<string, T?> deserialize, out T item)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -148,7 +183,7 @@ public static class NdjsonStreamParser
 
         try
         {
-            var parsed = JsonSerializer.Deserialize<T>(json, options);
+            var parsed = deserialize(json);
             if (parsed is not null)
             {
                 item = parsed;

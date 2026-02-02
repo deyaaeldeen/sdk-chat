@@ -25,8 +25,8 @@ public sealed record ApiIndex : IApiIndex
         GetAllClasses().Where(c => c.IsClientType);
 
     public string ToJson(bool pretty = false) => pretty
-        ? JsonSerializer.Serialize(this, JsonOptionsCache.Indented)
-        : JsonSerializer.Serialize(this);
+        ? JsonSerializer.Serialize(this, SourceGenerationContext.Indented.ApiIndex)
+        : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => TypeScriptFormatter.Format(this);
 }
@@ -265,4 +265,11 @@ public record ConstructorInfo
     WriteIndented = false,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(ApiIndex))]
-internal partial class SourceGenerationContext : JsonSerializerContext { }
+internal partial class SourceGenerationContext : JsonSerializerContext
+{
+    private static SourceGenerationContext? _indented;
+
+    /// <summary>Context configured for indented (pretty) output.</summary>
+    public static SourceGenerationContext Indented => _indented ??= new SourceGenerationContext(
+        new JsonSerializerOptions(Default.Options) { WriteIndented = true });
+}

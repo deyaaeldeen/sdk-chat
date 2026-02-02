@@ -33,9 +33,17 @@ docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet 
 
 | Image | Dockerfile | Purpose |
 |-------|------------|--------|
-| `sdk-chat-dev` | `Dockerfile` | Development and testing |
+| `sdk-chat-dev` | `Dockerfile` | Development, testing, AOT compilation |
 | `sdk-chat-demo` | `demo/Dockerfile` | VHS demo recording |
-| `sdk-chat:latest` | `Dockerfile.release` | Production (minimal) |
+| `sdk-chat:latest` | `Dockerfile.release` | Production (Native AOT, ~300MB) |
+
+### AOT Publishing
+
+The release Dockerfile produces a native AOT binary (~40MB) that runs without the .NET runtime:
+
+```bash
+docker build -f Dockerfile.release -t sdk-chat:latest .
+```
 
 ## Structure
 

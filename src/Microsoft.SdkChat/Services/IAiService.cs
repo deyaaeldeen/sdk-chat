@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services;
@@ -33,13 +34,12 @@ public interface IAiService : IAsyncDisposable
 
     /// <summary>
     /// Stream AI response and yield parsed items as they complete.
-    ///
-    /// Contract: the underlying model output is expected to be NDJSON (newline-delimited JSON),
-    /// where each line is a complete JSON object that can be deserialized into <typeparamref name="T"/>.
+    /// Uses source-generated JSON deserialization via JsonTypeInfo for AOT compatibility.
     /// </summary>
     IAsyncEnumerable<T> StreamItemsAsync<T>(
         string systemPrompt,
         IAsyncEnumerable<string> userPromptStream,
+        JsonTypeInfo<T> jsonTypeInfo,
         string? model = null,
         ContextInfo? contextInfo = null,
         CancellationToken cancellationToken = default);

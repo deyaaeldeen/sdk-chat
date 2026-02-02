@@ -3,7 +3,7 @@
 
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading.RateLimiting;
 using GitHub.Copilot.SDK;
 using Microsoft.Extensions.Logging;
@@ -29,7 +29,6 @@ public class AiService : IAiService
     private readonly RateLimiter _rateLimiter;
     private const int MaxConcurrentRequests = 5;
 
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, string> SchemaCache = new();
 
     private int _disposed;
@@ -66,6 +65,7 @@ public class AiService : IAiService
     public async IAsyncEnumerable<T> StreamItemsAsync<T>(
         string systemPrompt,
         IAsyncEnumerable<string> userPromptStream,
+        JsonTypeInfo<T> jsonTypeInfo,
         string? model = null,
         ContextInfo? contextInfo = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -91,7 +91,10 @@ public class AiService : IAiService
 
         // Append type schema to system prompt for structured output
         // Contract: NDJSON (one JSON object per line), no markdown, no array.
-        var schema = GenerateJsonSchema<T>();
+        // JsonTypeInfo.Type is preserved via [JsonSerializable] on source-generated context
+#pragma warning disable IL2072 // Type is preserved via JsonSerializable attribute
+        var schema = GenerateJsonSchema(jsonTypeInfo.Type);
+#pragma warning restore IL2072
         var enhancedSystemPrompt =
             $"{systemPrompt}\n\n" +
             "Output MUST be NDJSON (newline-delimited JSON):\n" +
@@ -124,7 +127,7 @@ public class AiService : IAiService
         IAsyncEnumerable<string> stream = StreamCopilotAsync(enhancedSystemPrompt, userPrompt, effectiveModel, cancellationToken);
 
         await using var enumerator = NdjsonStreamParser
-            .ParseAsync<T>(TapStream(stream, responseBuilder, cancellationToken), JsonOptions, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
+            .ParseAsync(TapStream(stream, responseBuilder, cancellationToken), jsonTypeInfo, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
             .GetAsyncEnumerator(cancellationToken);
 
         while (true)
@@ -173,14 +176,21 @@ public class AiService : IAiService
         }
     }
 
-    private static string GenerateJsonSchema<T>()
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL2070:UnrecognizedReflectionPattern",
+        Justification = "Schema generation uses reflection; types are preserved via JsonSerializable attribute on source-generated contexts")]
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL2067:UnrecognizedReflectionPattern",
+        Justification = "Schema generation lambda preserves type metadata via caller's JsonSerializable context")]
+    private static string GenerateJsonSchema(
+        [System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
     {
-        return SchemaCache.GetOrAdd(typeof(T), static type =>
+        return SchemaCache.GetOrAdd(type, static t =>
         {
-            return GenerateObjectSchema(type, 0, new HashSet<Type>());
+            return GenerateObjectSchema(t, 0, new HashSet<Type>());
         });
     }
 
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL2067:UnrecognizedReflectionPattern",
+        Justification = "Schema generation uses reflection on user-provided types; callers must preserve metadata")]
     private static string GenerateObjectSchema(
         [System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] Type type, 
         int indentLevel, 
@@ -207,6 +217,8 @@ public class AiService : IAiService
     private static string ToCamelCase(string name) =>
         string.IsNullOrEmpty(name) ? name : char.ToLowerInvariant(name[0]) + name[1..];
 
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL2067:UnrecognizedReflectionPattern",
+        Justification = "Schema generation uses reflection; types are validated at runtime")]
     private static string GetJsonType(Type type, int indentLevel, HashSet<Type> visitedTypes)
     {
         var underlying = Nullable.GetUnderlyingType(type) ?? type;

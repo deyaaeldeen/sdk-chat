@@ -45,8 +45,8 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
         => pretty
-            ? JsonSerializer.Serialize(index, JsonOptionsCache.Indented)
-            : JsonSerializer.Serialize(index);
+            ? JsonSerializer.Serialize(index, SourceGenerationContext.Indented.ApiIndex)
+            : JsonSerializer.Serialize(index, SourceGenerationContext.Default.ApiIndex);
 
     /// <inheritdoc />
     public string ToStubs(ApiIndex index) => JavaFormatter.Format(index);
@@ -104,7 +104,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
             return null;
         }
 
-        return JsonSerializer.Deserialize<ApiIndex>(result.StandardOutput);
+        return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
     }
 
     /// <summary>

@@ -689,6 +689,7 @@ public class SampleGeneratorMcpToolTests : IDisposable
         public async IAsyncEnumerable<T> StreamItemsAsync<T>(
             string systemPrompt,
             IAsyncEnumerable<string> userPromptStream,
+            System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> jsonTypeInfo,
             string? model = null,
             ContextInfo? contextInfo = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)

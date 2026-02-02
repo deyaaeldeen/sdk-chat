@@ -14,10 +14,14 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0
 LABEL org.opencontainers.image.source="https://github.com/deyaaeldeen/sdk-chat"
 LABEL org.opencontainers.image.description="SDK Chat development environment"
 
-# Install language runtimes for API extractors
+# Install language runtimes for API extractors and AOT compilation tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Core tools
     curl git unzip openssh-client \
+    # AOT native compilation (linker)
+    clang zlib1g-dev \
+    # Docker CLI (uses host's Docker via socket mount)
+    docker.io \
     # Python extractor
     python3 python3-pip \
     # TypeScript/JavaScript extractor

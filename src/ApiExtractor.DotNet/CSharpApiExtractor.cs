@@ -28,8 +28,8 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
         => pretty
-            ? JsonSerializer.Serialize(index, JsonOptionsCache.Indented)
-            : index.ToJson();
+            ? JsonSerializer.Serialize(index, JsonContext.Indented.ApiIndex)
+            : JsonSerializer.Serialize(index, JsonContext.Default.ApiIndex);
 
     /// <inheritdoc />
     public string ToStubs(ApiIndex index) => CSharpFormatter.Format(index);

@@ -51,8 +51,8 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
         => pretty
-            ? JsonSerializer.Serialize(index, JsonOptionsCache.Indented)
-            : index.ToJson();
+            ? JsonSerializer.Serialize(index, ApiIndexContext.Indented.ApiIndex)
+            : JsonSerializer.Serialize(index, ApiIndexContext.Default.ApiIndex);
 
     /// <inheritdoc />
     public string ToStubs(ApiIndex index) => PythonFormatter.Format(index);
@@ -106,7 +106,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         }
 
         // Parse JSON output
-        var raw = JsonSerializer.Deserialize<RawApiIndex>(result.StandardOutput, JsonOptionsCache.CaseInsensitive)
+        var raw = DeserializeRaw(result.StandardOutput)
             ?? throw new InvalidOperationException("Failed to parse Python extractor output");
 
         var apiIndex = ConvertToApiIndex(raw);
@@ -153,6 +153,13 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
         return new ApiIndex(raw.Package ?? "", modules);
     }
+
+    // Internal DTOs for JSON parsing - suppressions are safe as these are internal
+    // utilities for parsing known JSON from our own scripts
+#pragma warning disable IL2026, IL3050 // Suppressed: internal DTOs with known schema
+    private static RawApiIndex? DeserializeRaw(string json) =>
+        JsonSerializer.Deserialize<RawApiIndex>(json, JsonOptionsCache.CaseInsensitive);
+#pragma warning restore IL2026, IL3050
 
     // Raw JSON models for deserialization
     private record RawApiIndex(string? Package, List<RawModule>? Modules);

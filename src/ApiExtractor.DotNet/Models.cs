@@ -23,7 +23,7 @@ public sealed record ApiIndex : IApiIndex
     public IReadOnlyList<NamespaceInfo> Namespaces { get; init; } = [];
 
     public string ToJson(bool pretty = false) => pretty
-        ? JsonSerializer.Serialize(this, JsonOptionsCache.Indented)
+        ? JsonSerializer.Serialize(this, JsonContext.Indented.ApiIndex)
         : JsonSerializer.Serialize(this, JsonContext.Default.ApiIndex);
 
     public string ToStubs() => CSharpFormatter.Format(this);
@@ -217,4 +217,11 @@ public record MemberInfo
     WriteIndented = false,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-internal partial class JsonContext : JsonSerializerContext { }
+internal partial class JsonContext : JsonSerializerContext
+{
+    private static JsonContext? _indented;
+
+    /// <summary>Context configured for indented (pretty) output.</summary>
+    public static JsonContext Indented => _indented ??= new JsonContext(
+        new JsonSerializerOptions(Default.Options) { WriteIndented = true });
+}

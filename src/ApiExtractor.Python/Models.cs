@@ -19,8 +19,8 @@ public sealed record ApiIndex(string Package, IReadOnlyList<ModuleInfo> Modules)
         GetAllClasses().Where(c => c.IsClientType);
 
     public string ToJson(bool pretty = false) => pretty
-        ? JsonSerializer.Serialize(this, JsonOptionsCache.Indented)
-        : JsonSerializer.Serialize(this);
+        ? JsonSerializer.Serialize(this, ApiIndexContext.Indented.ApiIndex)
+        : JsonSerializer.Serialize(this, ApiIndexContext.Default.ApiIndex);
 
     public string ToStubs() => PythonFormatter.Format(this);
 }
@@ -117,7 +117,14 @@ public record FunctionInfo(
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ApiIndex))]
-public partial class ApiIndexContext : JsonSerializerContext { }
+public partial class ApiIndexContext : JsonSerializerContext
+{
+    private static ApiIndexContext? _indented;
+
+    /// <summary>Context configured for indented (pretty) output.</summary>
+    public static ApiIndexContext Indented => _indented ??= new ApiIndexContext(
+        new JsonSerializerOptions(Default.Options) { WriteIndented = true });
+}
 
 public static class ApiIndexExtensions
 {

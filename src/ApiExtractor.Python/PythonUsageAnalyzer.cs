@@ -70,7 +70,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 return new UsageIndex { FileCount = 0 };
 
             // Parse the JSON output
-            var result = JsonSerializer.Deserialize<UsageResult>(output, JsonOptionsCache.CaseInsensitive);
+            var result = DeserializeResult(output);
 
             if (result == null)
                 return new UsageIndex { FileCount = 0 };
@@ -155,7 +155,13 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         return null;
     }
 
-    // Internal DTOs for JSON parsing
+    // Internal DTOs for JSON parsing - suppressions are safe as these are internal
+    // utilities for parsing known JSON from our own scripts
+#pragma warning disable IL2026, IL3050 // Suppressed: internal DTOs with known schema
+    private static UsageResult? DeserializeResult(string json) =>
+        JsonSerializer.Deserialize<UsageResult>(json, JsonOptionsCache.CaseInsensitive);
+#pragma warning restore IL2026, IL3050
+
     private record UsageResult(
         int FileCount,
         List<CoveredOp>? Covered,

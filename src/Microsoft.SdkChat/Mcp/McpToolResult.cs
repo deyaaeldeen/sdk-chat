@@ -96,7 +96,9 @@ public sealed record McpToolResult
     /// <summary>
     /// Serializes to JSON string for MCP response.
     /// </summary>
+#pragma warning disable IL2026, IL3050 // McpToolResult is a known DTO with fixed structure
     public override string ToString() => JsonSerializer.Serialize(this, JsonOptions);
+#pragma warning restore IL2026, IL3050
 
     private static string MapExceptionToErrorCode(Exception ex) => ex switch
     {

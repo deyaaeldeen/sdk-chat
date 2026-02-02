@@ -298,7 +298,7 @@ public class SampleGeneratorToolTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_AiServiceThrows_ReturnsExitCode1()
     {
-        var mockAi = MockAiServiceFactory.CreateThatThrows(new InvalidOperationException("AI service failed"));
+        var mockAi = MockAiServiceFactory.CreateThatThrows<GeneratedSample>(new InvalidOperationException("AI service failed"));
         var tool = CreateTool(mockAi.Object);
 
         var result = await tool.ExecuteAsync(

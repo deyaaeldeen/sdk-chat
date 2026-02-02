@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using ApiExtractor.Contracts;
 using Microsoft.SdkChat.Models;
@@ -8,6 +9,10 @@ public class ConfigurationHelper
 {
     private const string ConfigFileName = "sdk-chat-config.json";
 
+    [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",
+        Justification = "SdkChatConfig is a simple DTO with known structure loaded from user config file")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "SdkChatConfig is a simple DTO with known structure loaded from user config file")]
     public async Task<SdkChatConfig?> TryLoadConfigAsync(string packagePath, CancellationToken cancellationToken = default)
     {
         var configPath = Path.Combine(packagePath, ConfigFileName);

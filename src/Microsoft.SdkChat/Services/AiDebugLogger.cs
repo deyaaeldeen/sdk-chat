@@ -327,6 +327,7 @@ public class AiDebugLogger
         await writer.WriteLineAsync("## Request Details");
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("```json");
+#pragma warning disable IL2026, IL3050 // Anonymous types used for debug logging only
         await writer.WriteLineAsync(JsonSerializer.Serialize(new
         {
             provider = session.Provider,
@@ -340,6 +341,7 @@ public class AiDebugLogger
             responseLength = session.Response?.Length ?? 0,
             durationMs = (session.EndTime - session.StartTime)?.TotalMilliseconds
         }, IndentedOptions));
+#pragma warning restore IL2026, IL3050
         await writer.WriteLineAsync("```");
         await writer.WriteLineAsync();
 

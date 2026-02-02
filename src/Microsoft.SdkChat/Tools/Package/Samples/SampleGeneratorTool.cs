@@ -190,8 +190,8 @@ public class SampleGeneratorTool
             try
             {
                 // Stream parsed samples as they complete
-                await foreach (var sample in _aiService.StreamItemsAsync<GeneratedSample>(
-                    systemPrompt, userPromptStream, model, null, cancellationToken))
+                await foreach (var sample in _aiService.StreamItemsAsync(
+                    systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, model, null, cancellationToken))
                 {
                     if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
                     {

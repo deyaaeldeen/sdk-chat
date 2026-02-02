@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -26,6 +27,8 @@ public static class McpServer
         "sse"
     };
 
+    [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",
+        Justification = "WithToolsFromAssembly requires reflection - MCP SDK design limitation")]
     public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false, CancellationToken cancellationToken = default)
     {
         // Validate transport type - fail fast if unsupported
@@ -86,7 +89,9 @@ public static class McpServer
         if (useOpenAi) options.UseOpenAi = true;
 
         // Validate configuration at startup
-        var validationResults = options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options));
+#pragma warning disable IL2026 // ValidationContext constructor uses reflection to get DisplayName attribute
+        var validationResults = options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options) { DisplayName = nameof(SdkChatOptions) });
+#pragma warning restore IL2026
         var errors = validationResults.ToList();
         if (errors.Count > 0)
         {

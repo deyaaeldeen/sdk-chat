@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
 using Moq;
@@ -24,9 +25,10 @@ public static class MockAiServiceFactory
         mock.SetupGet(x => x.IsUsingOpenAi).Returns(false);
         mock.Setup(x => x.GetEffectiveModel(It.IsAny<string?>())).Returns("mock-model");
 
-        mock.Setup(x => x.StreamItemsAsync<T>(
+        mock.Setup(x => x.StreamItemsAsync(
                 It.IsAny<string>(),
                 It.IsAny<IAsyncEnumerable<string>>(),
+                It.IsAny<JsonTypeInfo<T>>(),
                 It.IsAny<string?>(),
                 It.IsAny<ContextInfo?>(),
                 It.IsAny<CancellationToken>()))
@@ -38,16 +40,17 @@ public static class MockAiServiceFactory
     /// <summary>
     /// Creates a mock that throws the specified exception.
     /// </summary>
-    public static Mock<IAiService> CreateThatThrows(Exception exception)
+    public static Mock<IAiService> CreateThatThrows<T>(Exception exception)
     {
         var mock = new Mock<IAiService>();
 
         mock.SetupGet(x => x.IsUsingOpenAi).Returns(false);
         mock.Setup(x => x.GetEffectiveModel(It.IsAny<string?>())).Returns("mock-model");
 
-        mock.Setup(x => x.StreamItemsAsync<It.IsAnyType>(
+        mock.Setup(x => x.StreamItemsAsync(
                 It.IsAny<string>(),
                 It.IsAny<IAsyncEnumerable<string>>(),
+                It.IsAny<JsonTypeInfo<T>>(),
                 It.IsAny<string?>(),
                 It.IsAny<ContextInfo?>(),
                 It.IsAny<CancellationToken>()))
@@ -62,9 +65,10 @@ public static class MockAiServiceFactory
     public static Mock<IAiService> CreateVerifiable<T>(params T[] samples)
     {
         var mock = CreateWithSamples(samples);
-        mock.Setup(x => x.StreamItemsAsync<T>(
+        mock.Setup(x => x.StreamItemsAsync(
                 It.IsAny<string>(),
                 It.IsAny<IAsyncEnumerable<string>>(),
+                It.IsAny<JsonTypeInfo<T>>(),
                 It.IsAny<string?>(),
                 It.IsAny<ContextInfo?>(),
                 It.IsAny<CancellationToken>()))
@@ -128,6 +132,7 @@ public class MockAiService : IAiService
     public async IAsyncEnumerable<T> StreamItemsAsync<T>(
         string systemPrompt,
         IAsyncEnumerable<string> userPromptStream,
+        JsonTypeInfo<T> jsonTypeInfo,
         string? model = null,
         ContextInfo? contextInfo = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)

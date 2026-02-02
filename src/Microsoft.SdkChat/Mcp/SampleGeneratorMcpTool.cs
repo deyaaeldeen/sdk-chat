@@ -87,8 +87,8 @@ public class SampleGeneratorMcpTool(
             // Stream parsed samples as they complete
             List<GeneratedSample> samples = [];
             List<string> generatedFiles = [];
-            await foreach (var sample in aiService.StreamItemsAsync<GeneratedSample>(
-                systemPrompt, userPromptStream, model, null, cancellationToken))
+            await foreach (var sample in aiService.StreamItemsAsync(
+                systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, model, null, cancellationToken))
             {
                 if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
                 {
