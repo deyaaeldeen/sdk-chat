@@ -123,7 +123,7 @@ if ($FirstArg -eq "mcp") {
             $DockerArgs += @("-v", "${WorkspacePath}:${WorkspacePath}")
         }
     }
-    
+
     # For MCP SSE, expose port
     if ($ArgsString -match "--transport[=\s]+sse") {
         $Port = "8080"
