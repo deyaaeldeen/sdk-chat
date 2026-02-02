@@ -120,35 +120,41 @@ Start MCP server for AI agent integration.
 
 #### Configuring MCP Clients
 
-**VS Code** (`settings.json`):
+**VS Code** (`.vscode/mcp.json`) - Recommended:
 
-Using GitHub Copilot authentication (mount credentials):
+Using the wrapper script (handles paths and permissions automatically):
 ```json
 {
-  "mcp.servers": {
+  "servers": {
     "sdk-chat": {
-      "command": "docker",
+      "type": "stdio",
+      "command": "${workspaceFolder}/scripts/sdk-chat.sh",
+      "args": ["mcp"],
+      "env": {
+        "SDK_WORKSPACE": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+Using Docker directly (requires manual volume mounts):
+```json
+{
+  "servers": {
+    "sdk-chat": {
+      "type": "stdio",
+      "command": "bash",
       "args": [
-        "run", "--rm", "-i",
-        "-v", "${userHome}/.copilot:/root/.copilot:ro",
-        "sdk-chat:latest", "mcp"
+        "-c",
+        "docker run --rm -i -u $(id -u):$(id -g) -v ${HOME}:${HOME} -v ${HOME}/.copilot:${HOME}/.copilot:ro -e HOME=${HOME} sdk-chat:latest mcp"
       ]
     }
   }
 }
 ```
 
-Using environment variable (requires `GH_TOKEN` set in your shell):
-```json
-{
-  "mcp.servers": {
-    "sdk-chat": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i", "-e", "GH_TOKEN", "sdk-chat:latest", "mcp"]
-    }
-  }
-}
-```
+> **Note:** The `-u $(id -u):$(id -g)` flag ensures files created by the MCP server have correct ownership. The home directory mount allows SDK paths anywhere under `$HOME` to work.
 
 **Claude Desktop** (`claude_desktop_config.json`):
 
@@ -157,39 +163,40 @@ On macOS/Linux:
 {
   "mcpServers": {
     "sdk-chat": {
-      "command": "docker",
+      "command": "bash",
       "args": [
-        "run", "--rm", "-i",
-        "-v", "/Users/YOUR_USERNAME/.copilot:/root/.copilot:ro",
-        "sdk-chat:latest", "mcp"
+        "-c",
+        "docker run --rm -i -u $(id -u):$(id -g) -v $HOME:$HOME -v $HOME/.copilot:$HOME/.copilot:ro -e HOME=$HOME sdk-chat:latest mcp"
       ]
     }
   }
 }
 ```
 
-On Windows:
+On Windows (PowerShell):
 ```json
 {
   "mcpServers": {
     "sdk-chat": {
-      "command": "docker",
+      "command": "powershell",
       "args": [
-        "run", "--rm", "-i",
-        "-v", "C:\\Users\\YOUR_USERNAME\\.copilot:/root/.copilot:ro",
-        "sdk-chat:latest", "mcp"
+        "-Command",
+        "docker run --rm -i -v ${env:USERPROFILE}:${env:USERPROFILE} -v ${env:USERPROFILE}\\.copilot:${env:USERPROFILE}/.copilot:ro -e HOME=${env:USERPROFILE} sdk-chat:latest mcp"
       ]
     }
   }
 }
+```
 ```
 
 **SSE Mode** (for HTTP-based MCP clients):
 
 Start the server:
 ```bash
-docker run --rm -p 8080:8080 \
-  -v "$HOME/.copilot:/root/.copilot:ro" \
+docker run --rm -p 8080:8080 -u $(id -u):$(id -g) \
+  -v "$HOME:$HOME" \
+  -v "$HOME/.copilot:$HOME/.copilot:ro" \
+  -e "HOME=$HOME" \
   sdk-chat:latest mcp --transport sse --port 8080
 ```
 

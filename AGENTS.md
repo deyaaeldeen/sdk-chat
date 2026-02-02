@@ -48,10 +48,12 @@ docker build -f Dockerfile.release -t sdk-chat:latest .
 docker run --rm sdk-chat:latest --help
 
 # Generate samples with GitHub token (recommended)
-docker run --rm \
+# Note: -u flag ensures correct file ownership
+docker run --rm -u $(id -u):$(id -g) \
   -e GH_TOKEN="ghp_..." \
-  -v /path/to/sdk:/sdk \
-  sdk-chat:latest package sample generate /sdk
+  -v "$HOME:$HOME" \
+  -e "HOME=$HOME" \
+  sdk-chat:latest package sample generate /path/to/sdk
 
 # Or with Docker Compose
 GH_TOKEN="ghp_..." SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package sample generate /sdk
@@ -59,7 +61,11 @@ GH_TOKEN="ghp_..." SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat packag
 
 ### Wrapper Scripts (Host Only)
 
-The wrapper scripts in `scripts/` are designed for use **on the host machine**, not inside containers:
+The wrapper scripts in `scripts/` are designed for use **on the host machine**, not inside containers. They handle:
+- User ID mapping (`-u $(id -u):$(id -g)`) for correct file permissions
+- Home directory mounting for path transparency
+- Copilot credentials mounting at user's home (not `/root`)
+- Workspace mounting for MCP via `SDK_WORKSPACE` env var
 
 ```bash
 # From host machine (not inside dev container)

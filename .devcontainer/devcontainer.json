@@ -4,8 +4,8 @@
     "dockerfile": "../Dockerfile"
   },
   "mounts": [
-    "source=${localEnv:HOME}/.copilot,target=/root/.copilot,type=bind",
-    "source=${localEnv:HOME}/.ssh,target=/root/.ssh,type=bind,readonly",
+    "source=${localEnv:HOME}/.copilot,target=/home/sdkchat/.copilot,type=bind",
+    "source=${localEnv:HOME}/.ssh,target=/home/sdkchat/.ssh,type=bind,readonly",
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
   ],
   "customizations": {
@@ -20,5 +20,6 @@
     }
   },
   "postCreateCommand": "dotnet restore",
-  "remoteUser": "root"
+  "remoteUser": "sdkchat",
+  "updateRemoteUserUID": true
 }

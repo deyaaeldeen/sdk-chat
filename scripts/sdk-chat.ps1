@@ -68,15 +68,19 @@ if (-not $ImageExists -and -not $BuildImage) {
 }
 
 # Build docker run arguments
+# Note: Windows Docker doesn't need -u flag as it handles permissions differently
 $DockerArgs = @(
     "run"
     "--rm"
 )
 
 # Mount Copilot credentials if available (for auth fallback)
+# Mount at user's home path for proper credential discovery
 $CopilotDir = Join-Path $env:USERPROFILE ".copilot"
 if (Test-Path $CopilotDir) {
-    $DockerArgs += @("-v", "${CopilotDir}:/root/.copilot:ro")
+    $UserHome = $env:USERPROFILE -replace '\\', '/'
+    $DockerArgs += @("-v", "${CopilotDir}:${UserHome}/.copilot:ro")
+    $DockerArgs += @("-e", "HOME=${UserHome}")
 }
 
 # Pass through relevant environment variables if set
@@ -108,11 +112,16 @@ if ($FirstArg -eq "acp") {
     $DockerArgs += @("-it")
 }
 
-# For MCP stdio, we need stdin
+# For MCP stdio, we need stdin and workspace mount
 if ($FirstArg -eq "mcp") {
     $ArgsString = $Arguments -join " "
     if ($ArgsString -notmatch "--transport" -or $ArgsString -match "--transport[=\s]+stdio") {
         $DockerArgs += @("-i")
+        # Mount workspace if SDK_WORKSPACE is set (from VS Code mcp.json)
+        if ($env:SDK_WORKSPACE) {
+            $WorkspacePath = $env:SDK_WORKSPACE -replace '\\', '/'
+            $DockerArgs += @("-v", "${WorkspacePath}:${WorkspacePath}")
+        }
     }
     
     # For MCP SSE, expose port

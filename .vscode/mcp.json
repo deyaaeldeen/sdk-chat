@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "sdk-chat": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/scripts/sdk-chat.sh",
+      "args": ["mcp"],
+      "env": {
+        "SDK_WORKSPACE": "${workspaceFolder}"
+      }
+    }
+  }
+}

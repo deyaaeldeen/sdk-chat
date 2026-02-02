@@ -52,11 +52,14 @@ fi
 # Build docker run arguments
 DOCKER_ARGS=(
     --rm
+    -u "$(id -u):$(id -g)"
 )
 
 # Mount Copilot credentials if available (for auth fallback)
+# Mount at both /root/.copilot (for root) and user's home (for -u flag)
 if [[ -d "${HOME}/.copilot" ]]; then
-    DOCKER_ARGS+=(-v "${HOME}/.copilot:/root/.copilot:ro")
+    DOCKER_ARGS+=(-v "${HOME}/.copilot:${HOME}/.copilot:ro")
+    DOCKER_ARGS+=(-e "HOME=${HOME}")
 fi
 
 # Pass through relevant environment variables if set
@@ -86,9 +89,13 @@ if [[ "${ARGS[0]:-}" == "acp" ]] || [[ -t 0 && -t 1 ]]; then
     DOCKER_ARGS+=(-it)
 fi
 
-# For MCP stdio, we need stdin
+# For MCP stdio, we need stdin and workspace mount (paths come via JSON, not args)
 if [[ "${ARGS[0]:-}" == "mcp" ]] && [[ "${ARGS[1]:-}" != "--transport" || "${ARGS[2]:-}" == "stdio" ]]; then
     DOCKER_ARGS+=(-i)
+    # Mount workspace if SDK_WORKSPACE is set (from VS Code mcp.json)
+    if [[ -n "${SDK_WORKSPACE:-}" ]]; then
+        DOCKER_ARGS+=(-v "${SDK_WORKSPACE}:${SDK_WORKSPACE}")
+    fi
 fi
 
 # For MCP SSE, expose port
