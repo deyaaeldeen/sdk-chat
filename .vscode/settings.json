@@ -3,8 +3,12 @@
     "servers": {
       "sdk-chat": {
         "type": "stdio",
-        "command": "dotnet",
-        "args": ["run", "--project", "${workspaceFolder}/Microsoft.SdkChat/Microsoft.SdkChat.csproj", "--", "mcp"]
+        "command": "docker",
+        "args": [
+          "run", "--rm", "-i",
+          "-v", "${userHome}/.copilot:/root/.copilot:ro",
+          "sdk-chat:latest", "mcp"
+        ]
       }
     }
   }

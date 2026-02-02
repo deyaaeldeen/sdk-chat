@@ -118,7 +118,27 @@ Start MCP server for AI agent integration.
 | `--use-openai` | `false` | Use OpenAI API |
 | `--load-dotenv` | `false` | Load `.env` file |
 
-**VS Code MCP** (`settings.json`) - using Docker:
+#### Configuring MCP Clients
+
+**VS Code** (`settings.json`):
+
+Using GitHub Copilot authentication (mount credentials):
+```json
+{
+  "mcp.servers": {
+    "sdk-chat": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "${userHome}/.copilot:/root/.copilot:ro",
+        "sdk-chat:latest", "mcp"
+      ]
+    }
+  }
+}
+```
+
+Using environment variable (requires `GH_TOKEN` set in your shell):
 ```json
 {
   "mcp.servers": {
@@ -130,17 +150,50 @@ Start MCP server for AI agent integration.
 }
 ```
 
-**Claude Desktop** (`claude_desktop_config.json`) - using Docker:
+**Claude Desktop** (`claude_desktop_config.json`):
+
+On macOS/Linux:
 ```json
 {
   "mcpServers": {
     "sdk-chat": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "-e", "GH_TOKEN", "sdk-chat:latest", "mcp"]
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "/Users/YOUR_USERNAME/.copilot:/root/.copilot:ro",
+        "sdk-chat:latest", "mcp"
+      ]
     }
   }
 }
 ```
+
+On Windows:
+```json
+{
+  "mcpServers": {
+    "sdk-chat": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "C:\\Users\\YOUR_USERNAME\\.copilot:/root/.copilot:ro",
+        "sdk-chat:latest", "mcp"
+      ]
+    }
+  }
+}
+```
+
+**SSE Mode** (for HTTP-based MCP clients):
+
+Start the server:
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$HOME/.copilot:/root/.copilot:ro" \
+  sdk-chat:latest mcp --transport sse --port 8080
+```
+
+Connect your MCP client to: `http://localhost:8080/sse`
 
 ### `acp`
 
