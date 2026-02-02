@@ -88,10 +88,20 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
 
         if (apiIndex == null)
         {
-            // Fall back to base implementation
-            await foreach (var chunk in base.StreamContextAsync(sourcePath, samplesPath, config, totalBudget, ct))
-                yield return chunk;
-            yield break;
+            throw new InvalidOperationException(
+                $"Failed to extract API surface from '{sourcePath}'. " +
+                "Ensure JBang is installed and the path contains valid Java source files.");
+        }
+
+        // Validate that we extracted meaningful API surface
+        var classCount = apiIndex.Packages.Sum(p => p.Classes?.Count ?? 0);
+        var interfaceCount = apiIndex.Packages.Sum(p => p.Interfaces?.Count ?? 0);
+        var enumCount = apiIndex.Packages.Sum(p => p.Enums?.Count ?? 0);
+        if (classCount == 0 && interfaceCount == 0 && enumCount == 0)
+        {
+            throw new InvalidOperationException(
+                $"No public API surface found in '{sourcePath}'. " +
+                "Ensure the path contains Java source files with public classes or interfaces.");
         }
 
         // Analyze coverage if samples exist

@@ -195,14 +195,78 @@ dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/s
 ### Quick Start
 
 ```bash
-# Build production image
-docker build -f Dockerfile.release -t sdk-chat:latest .
+# Generate samples (Linux/macOS) - auto-builds image if needed
+export GH_TOKEN="ghp_..."
+./scripts/sdk-chat.sh package sample generate /path/to/sdk
 
-# Show help
-docker run --rm sdk-chat:latest --help
+# Generate samples (Windows PowerShell)
+$env:GH_TOKEN = "ghp_..."
+.\scripts\sdk-chat.ps1 package sample generate C:\path\to\sdk
+```
 
-# Check dependencies
-docker run --rm sdk-chat:latest doctor
+### Wrapper Scripts (Recommended)
+
+The wrapper scripts handle volume mounts and environment variables automatically:
+
+| Script | Platform | Location |
+|--------|----------|----------|
+| `sdk-chat.sh` | Linux/macOS | `scripts/sdk-chat.sh` |
+| `sdk-chat.ps1` | Windows | `scripts/sdk-chat.ps1` |
+
+**Authentication** (choose one):
+- GitHub token: `export GH_TOKEN="ghp_..."` or `GITHUB_TOKEN`
+- Copilot credentials: Scripts auto-mount `~/.copilot` if present
+- OpenAI: `export OPENAI_API_KEY="sk-..."` with `--use-openai`
+
+**Linux/macOS:**
+```bash
+# Make executable (one time)
+chmod +x scripts/sdk-chat.sh
+
+# Generate samples (auto-builds image if not present)
+export GH_TOKEN="ghp_..."
+./scripts/sdk-chat.sh package sample generate /path/to/sdk
+
+# Force rebuild the image
+./scripts/sdk-chat.sh --build package sample generate /path/to/sdk
+
+# With OpenAI instead
+export OPENAI_API_KEY="sk-..."
+./scripts/sdk-chat.sh package sample generate /path/to/sdk --use-openai
+
+# Other commands
+./scripts/sdk-chat.sh doctor
+./scripts/sdk-chat.sh --help
+```
+
+**Windows PowerShell:**
+```powershell
+# Generate samples (auto-builds image if not present)
+$env:GH_TOKEN = "ghp_..."
+.\scripts\sdk-chat.ps1 package sample generate C:\path\to\sdk
+
+# Force rebuild the image
+.\scripts\sdk-chat.ps1 --build package sample generate C:\path\to\sdk
+
+# With OpenAI instead
+$env:OPENAI_API_KEY = "sk-..."
+.\scripts\sdk-chat.ps1 package sample generate C:\path\to\sdk --use-openai
+```
+
+### Docker Compose
+
+Alternative approach using Docker Compose:
+
+```bash
+# Generate samples
+export GH_TOKEN="ghp_..."
+SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package sample generate /sdk
+
+# Start MCP server with SSE on port 8080
+docker compose up mcp-sse
+
+# Run interactive ACP agent
+SDK_PATH=/path/to/sdk docker compose run --rm acp
 ```
 
 ### All Images
@@ -226,8 +290,19 @@ docker build -f demo/Dockerfile -t sdk-chat-demo .      # Demo
 docker build -f Dockerfile.release -t sdk-chat:latest . # Production
 ```
 
-**Generate samples with GitHub Copilot:**
+### Manual Docker Usage
 
+If you prefer not to use the wrapper scripts:
+
+**With GitHub token (recommended):**
+```bash
+docker run --rm \
+  -v "/path/to/your-sdk:/sdk" \
+  -e GH_TOKEN="ghp_..." \
+  sdk-chat:latest package sample generate /sdk --count 5
+```
+
+**With Copilot credentials file:**
 ```bash
 docker run --rm \
   -v "$HOME/.copilot:/root/.copilot:ro" \
@@ -235,9 +310,7 @@ docker run --rm \
   sdk-chat:latest package sample generate /sdk --count 5
 ```
 
-> **Note:** Mount your `~/.copilot` directory to provide Copilot CLI authentication credentials.
-
-**Generate samples with OpenAI:**
+**With OpenAI:**
 
 ```bash
 docker run --rm \
@@ -259,7 +332,7 @@ docker run --rm \
 
 ```bash
 docker run --rm -i \
-  -v "$HOME/.copilot:/root/.copilot:ro" \
+  -e GH_TOKEN="ghp_..." \
   sdk-chat:latest mcp
 ```
 
@@ -267,7 +340,7 @@ docker run --rm -i \
 
 ```bash
 docker run --rm -p 8080:8080 \
-  -v "$HOME/.copilot:/root/.copilot:ro" \
+  -e GH_TOKEN="ghp_..." \
   sdk-chat:latest mcp --transport sse --port 8080
 ```
 

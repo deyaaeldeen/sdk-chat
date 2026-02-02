@@ -4,10 +4,16 @@
 # Build:
 #   docker build -f Dockerfile.release -t sdk-chat:latest .
 #
-# Usage with GitHub Copilot:
+# Usage with GitHub Copilot (token auth):
 #   docker run --rm \
 #     -v "/path/to/sdk:/sdk" \
-#     -e COPILOT_GITHUB_TOKEN="gho_..." \
+#     -e GH_TOKEN="ghp_..." \
+#     sdk-chat:latest package sample generate /sdk
+#
+# Usage with GitHub Copilot (credentials file):
+#   docker run --rm \
+#     -v "/path/to/sdk:/sdk" \
+#     -v "$HOME/.copilot:/root/.copilot:ro" \
 #     sdk-chat:latest package sample generate /sdk
 #
 # Usage with OpenAI:
@@ -17,8 +23,12 @@
 #     sdk-chat:latest package sample generate /sdk --use-openai
 #
 # MCP server:
-#   docker run --rm -i -e COPILOT_GITHUB_TOKEN="gho_..." \
+#   docker run --rm -i -e GH_TOKEN="ghp_..." \
 #     sdk-chat:latest mcp
+#
+# Wrapper scripts (recommended):
+#   ./scripts/sdk-chat.sh package sample generate /path/to/sdk
+#   .\scripts\sdk-chat.ps1 package sample generate C:\path\to\sdk
 
 # ============================================================================
 # Stage 1: Build .NET Native AOT

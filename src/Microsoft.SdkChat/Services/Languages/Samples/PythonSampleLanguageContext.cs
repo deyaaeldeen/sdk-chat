@@ -91,10 +91,19 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
 
         if (apiIndex == null)
         {
-            // Fall back to base implementation
-            await foreach (var chunk in base.StreamContextAsync(sourcePath, samplesPath, config, totalBudget, ct))
-                yield return chunk;
-            yield break;
+            throw new InvalidOperationException(
+                $"Failed to extract API surface from '{sourcePath}'. " +
+                "Ensure Python 3 is installed and the path contains valid Python source files.");
+        }
+
+        // Validate that we extracted meaningful API surface
+        var classCount = apiIndex.Modules.Sum(m => m.Classes?.Count ?? 0);
+        var functionCount = apiIndex.Modules.Sum(m => m.Functions?.Count ?? 0);
+        if (classCount == 0 && functionCount == 0)
+        {
+            throw new InvalidOperationException(
+                $"No public API surface found in '{sourcePath}'. " +
+                "Ensure the path contains Python source files with classes or functions.");
         }
 
         // Analyze coverage if samples exist

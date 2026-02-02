@@ -88,10 +88,20 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
 
         if (apiIndex == null)
         {
-            // Fall back to base implementation
-            await foreach (var chunk in base.StreamContextAsync(sourcePath, samplesPath, config, totalBudget, ct))
-                yield return chunk;
-            yield break;
+            throw new InvalidOperationException(
+                $"Failed to extract API surface from '{sourcePath}'. " +
+                "Ensure Node.js is installed and the path contains valid TypeScript source files.");
+        }
+
+        // Validate that we extracted meaningful API surface
+        var classCount = apiIndex.Modules.Sum(m => m.Classes?.Count ?? 0);
+        var interfaceCount = apiIndex.Modules.Sum(m => m.Interfaces?.Count ?? 0);
+        var functionCount = apiIndex.Modules.Sum(m => m.Functions?.Count ?? 0);
+        if (classCount == 0 && interfaceCount == 0 && functionCount == 0)
+        {
+            throw new InvalidOperationException(
+                $"No public API surface found in '{sourcePath}'. " +
+                "Ensure the path contains TypeScript source files with exported classes, interfaces, or functions.");
         }
 
         // Analyze coverage if samples exist

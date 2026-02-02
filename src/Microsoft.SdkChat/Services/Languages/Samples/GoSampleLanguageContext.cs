@@ -86,10 +86,20 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
 
         if (apiIndex == null)
         {
-            // Fall back to base implementation
-            await foreach (var chunk in base.StreamContextAsync(sourcePath, samplesPath, config, totalBudget, ct))
-                yield return chunk;
-            yield break;
+            throw new InvalidOperationException(
+                $"Failed to extract API surface from '{sourcePath}'. " +
+                "Ensure Go is installed and the path contains valid Go source files.");
+        }
+
+        // Validate that we extracted meaningful API surface
+        var structCount = apiIndex.Packages.Sum(p => p.Structs?.Count ?? 0);
+        var interfaceCount = apiIndex.Packages.Sum(p => p.Interfaces?.Count ?? 0);
+        var functionCount = apiIndex.Packages.Sum(p => p.Functions?.Count ?? 0);
+        if (structCount == 0 && interfaceCount == 0 && functionCount == 0)
+        {
+            throw new InvalidOperationException(
+                $"No public API surface found in '{sourcePath}'. " +
+                "Ensure the path contains Go source files with exported types or functions.");
         }
 
         // Analyze coverage if samples exist

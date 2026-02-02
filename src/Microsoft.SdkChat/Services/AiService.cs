@@ -313,9 +313,32 @@ public class AiService : IAiService
             await _copilotClient.StartAsync(cancellationToken);
             _logger.LogDebug("GitHub Copilot client started successfully");
 
+            // Verify authentication status immediately after starting
+            var authStatus = await _copilotClient.GetAuthStatusAsync(cancellationToken);
+            if (!authStatus.IsAuthenticated)
+            {
+                var statusMessage = authStatus.StatusMessage ?? "Not authenticated";
+                _logger.LogError("GitHub Copilot authentication failed: {StatusMessage}", statusMessage);
+
+                // Clean up the client since auth failed
+                await _copilotClient.StopAsync();
+                await _copilotClient.DisposeAsync();
+                _copilotClient = null;
+
+                throw new InvalidOperationException(
+                    $"GitHub Copilot authentication failed: {statusMessage}. " +
+                    "Please authenticate using one of these methods:\n" +
+                    "  1. Set GH_TOKEN or GITHUB_TOKEN environment variable with a valid GitHub token\n" +
+                    "  2. Run 'copilot' CLI and use /login to authenticate interactively\n" +
+                    "  3. Use --use-openai flag with OPENAI_API_KEY set instead");
+            }
+
+            _logger.LogDebug("GitHub Copilot authenticated as: {Login} via {AuthType}",
+                authStatus.Login ?? "unknown", authStatus.AuthType ?? "unknown");
+
             return _copilotClient;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException)
         {
             _logger.LogError(ex, "Failed to start GitHub Copilot client");
             throw new InvalidOperationException(

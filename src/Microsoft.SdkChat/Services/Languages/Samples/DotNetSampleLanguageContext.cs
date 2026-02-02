@@ -46,6 +46,15 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
         // Extract API surface (C# extractor is native - always available)
         var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
 
+        // Validate that we extracted meaningful API surface
+        var typeCount = apiIndex.Namespaces.Sum(ns => ns.Types.Count);
+        if (typeCount == 0)
+        {
+            throw new InvalidOperationException(
+                $"No public API surface found in '{sourcePath}'. " +
+                "Ensure the path contains C# source files with public types and the SDK is built correctly.");
+        }
+
         // Analyze coverage if samples exist
         UsageIndex? coverage = null;
         if (!string.IsNullOrEmpty(samplesPath) && Directory.Exists(samplesPath))

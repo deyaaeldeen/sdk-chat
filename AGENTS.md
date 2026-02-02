@@ -47,12 +47,44 @@ docker build -f Dockerfile.release -t sdk-chat:latest .
 # Test it
 docker run --rm sdk-chat:latest --help
 
-# Generate samples (mount SDK and Copilot credentials)
+# Generate samples with GitHub token (recommended)
 docker run --rm \
-  -v ~/.copilot:/root/.copilot:ro \
+  -e GH_TOKEN="ghp_..." \
   -v /path/to/sdk:/sdk \
   sdk-chat:latest package sample generate /sdk
+
+# Or with Docker Compose
+GH_TOKEN="ghp_..." SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package sample generate /sdk
 ```
+
+### Wrapper Scripts (Host Only)
+
+The wrapper scripts in `scripts/` are designed for use **on the host machine**, not inside containers:
+
+```bash
+# From host machine (not inside dev container)
+./scripts/sdk-chat.sh package sample generate /path/to/sdk
+```
+
+### Docker-in-Docker (Dev Container)
+
+When testing the release container from inside the dev container, you must use **host paths**, not container paths:
+
+```bash
+# Inside dev container, paths are mapped:
+#   Container: /workspaces/sdk-chat → Host: /home/<user>/sdk-chat
+
+# Find your host path
+docker inspect $(hostname) | grep -A 2 'workspaces/sdk-chat'
+
+# Use the HOST path when mounting volumes
+docker run --rm \
+  -e GH_TOKEN="ghp_..." \
+  -v "/home/<user>/sdk-chat/temp/openai-dotnet:/sdk" \
+  sdk-chat:latest package sample generate /sdk --dry-run
+```
+
+> **Why?** The Docker socket is shared, so `docker run` commands execute on the host. Paths passed to `-v` must exist on the host, not inside the dev container.
 
 ## Structure
 
