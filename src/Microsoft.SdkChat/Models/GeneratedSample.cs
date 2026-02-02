@@ -26,6 +26,19 @@ public sealed record GeneratedSample
 }
 
 /// <summary>
+/// Source-generated JSON serialization context for SDK Chat models.
+/// Enables AOT-compatible deserialization while preserving type safety.
+/// </summary>
+[JsonSourceGenerationOptions(
+    PropertyNameCaseInsensitive = true,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSerializable(typeof(GeneratedSample))]
+[JsonSerializable(typeof(SdkChatConfig))]
+public partial class SdkChatJsonContext : JsonSerializerContext
+{
+}
+
+/// <summary>
 /// Source-generated JSON serialization context for AI streaming models.
 /// Enables AOT-compatible deserialization while preserving type safety.
 /// </summary>

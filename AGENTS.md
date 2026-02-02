@@ -33,16 +33,25 @@ docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet 
 
 | Image | Dockerfile | Purpose |
 |-------|------------|--------|
-| `sdk-chat-dev` | `Dockerfile` | Development, testing, AOT compilation |
+| `sdk-chat-dev` | `Dockerfile` | Development, testing |
 | `sdk-chat-demo` | `demo/Dockerfile` | VHS demo recording |
-| `sdk-chat:latest` | `Dockerfile.release` | Production (Native AOT, ~300MB) |
+| `sdk-chat:latest` | `Dockerfile.release` | Production (Native AOT, ~500MB) |
 
 ### AOT Publishing
 
-The release Dockerfile produces a native AOT binary (~40MB) that runs without the .NET runtime:
+The release Dockerfile produces a native AOT binary with glibc-linked extractors:
 
 ```bash
 docker build -f Dockerfile.release -t sdk-chat:latest .
+
+# Test it
+docker run --rm sdk-chat:latest --help
+
+# Generate samples (mount SDK and Copilot credentials)
+docker run --rm \
+  -v ~/.copilot:/root/.copilot:ro \
+  -v /path/to/sdk:/sdk \
+  sdk-chat:latest package sample generate /sdk
 ```
 
 ## Structure

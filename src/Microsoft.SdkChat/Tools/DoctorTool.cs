@@ -10,6 +10,7 @@ namespace Microsoft.SdkChat.Tools;
 /// <summary>
 /// Validates all external dependencies required by the SDK Chat tool.
 /// Reports version information, path locations, and potential security concerns.
+/// In AOT mode with pre-compiled extractors, checks for extractor binaries instead of interpreters.
 /// </summary>
 public sealed partial class DoctorTool
 {
@@ -20,6 +21,26 @@ public sealed partial class DoctorTool
     // Source-generated regex for extracting Go version (avoids repeated compilation)
     [GeneratedRegex(@"go(\d+\.\d+\.?\d*)")]
     private static partial Regex GoVersionRegex();
+
+    /// <summary>
+    /// Checks if we're running in AOT mode with pre-compiled extractors available.
+    /// Returns true if all language extractors are present as native binaries.
+    /// </summary>
+    private static bool HasPrecompiledExtractors()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var extractors = new[] { "go_extractor", "java_extractor", "python_extractor", "ts_extractor" };
+
+        foreach (var extractor in extractors)
+        {
+            var binaryName = OperatingSystem.IsWindows() ? $"{extractor}.exe" : extractor;
+            var path = Path.Combine(baseDir, binaryName);
+            if (!File.Exists(path))
+                return false;
+        }
+
+        return true;
+    }
 
     public record DependencyStatus(
         string Name,
@@ -32,35 +53,67 @@ public sealed partial class DoctorTool
 
     public async Task<int> ExecuteAsync(bool verbose, CancellationToken ct = default)
     {
+        var hasPrecompiledExtractors = HasPrecompiledExtractors();
+
+        if (hasPrecompiledExtractors)
+        {
+            Console.WriteLine("SDK Chat Doctor - Native AOT Mode");
+            Console.WriteLine("==================================\n");
+            Console.WriteLine($"{Checkmark} Running with pre-compiled extractors\n");
+
+            // In AOT mode, check for extractor binaries instead of interpreters
+            var results = CheckPrecompiledExtractors();
+            PrintExtractorResults(results, verbose);
+
+            // Check for Copilot CLI
+            var copilotStatus = await CheckCopilotCliAsync(ct);
+            PrintCopilotStatus(copilotStatus, verbose);
+
+            Console.WriteLine();
+            var allAvailable = results.All(r => r.IsAvailable);
+            if (allAvailable)
+            {
+                Console.WriteLine($"{Checkmark} All extractors available. SDK Chat is fully operational.");
+                return 0;
+            }
+            else
+            {
+                var missing = results.Where(r => !r.IsAvailable).Select(r => r.Name);
+                Console.WriteLine($"{CrossMark} Missing extractors: {string.Join(", ", missing)}");
+                return 1;
+            }
+        }
+
+        // Standard mode: check for interpreters
         Console.WriteLine("SDK Chat Doctor - Dependency Validation");
         Console.WriteLine("========================================\n");
 
-        var results = new List<DependencyStatus>();
+        var standardResults = new List<DependencyStatus>();
 
         // Check .NET (always available since we're running on it)
-        results.Add(await CheckDotNetAsync(ct));
+        standardResults.Add(await CheckDotNetAsync(ct));
 
         // Check Python
-        results.Add(await CheckPythonAsync(ct));
+        standardResults.Add(await CheckPythonAsync(ct));
 
         // Check Go
-        results.Add(await CheckGoAsync(ct));
+        standardResults.Add(await CheckGoAsync(ct));
 
         // Check Java/JBang
-        results.Add(await CheckJBangAsync(ct));
+        standardResults.Add(await CheckJBangAsync(ct));
 
         // Check Node.js
-        results.Add(await CheckNodeAsync(ct));
+        standardResults.Add(await CheckNodeAsync(ct));
 
         // Print results
-        PrintResults(results, verbose);
+        PrintResults(standardResults, verbose);
 
         // Print security advisory
-        PrintSecurityAdvisory(results);
+        PrintSecurityAdvisory(standardResults);
 
         // Return non-zero if any required dependency is missing
-        var requiredMissing = results.Any(r => !r.IsAvailable && r.Name == ".NET Runtime");
-        var optionalMissing = results.Where(r => !r.IsAvailable && r.Name != ".NET Runtime").ToList();
+        var requiredMissing = standardResults.Any(r => !r.IsAvailable && r.Name == ".NET Runtime");
+        var optionalMissing = standardResults.Where(r => !r.IsAvailable && r.Name != ".NET Runtime").ToList();
 
         Console.WriteLine();
         if (requiredMissing)
@@ -347,5 +400,132 @@ public sealed partial class DoctorTool
         Console.WriteLine();
         Console.WriteLine("To enforce specific paths, set environment variables:");
         Console.WriteLine("  SDK_CHAT_PYTHON_PATH, SDK_CHAT_GO_PATH, SDK_CHAT_NODE_PATH, SDK_CHAT_JBANG_PATH");
+    }
+
+    private record ExtractorStatus(string Name, string Language, bool IsAvailable, string? Path);
+
+    private static List<ExtractorStatus> CheckPrecompiledExtractors()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var extractors = new (string Name, string Binary, string Language)[]
+        {
+            ("Go Extractor", "go_extractor", "Go"),
+            ("Java Extractor", "java_extractor", "Java"),
+            ("Python Extractor", "python_extractor", "Python"),
+            ("TypeScript Extractor", "ts_extractor", "TypeScript/JavaScript"),
+        };
+
+        var results = new List<ExtractorStatus>();
+
+        foreach (var (name, binary, language) in extractors)
+        {
+            var path = Path.Combine(baseDir, binary);
+            var exists = File.Exists(path);
+            results.Add(new ExtractorStatus(name, language, exists, exists ? path : null));
+        }
+
+        // .NET extractor is always available (built into the binary)
+        results.Insert(0, new ExtractorStatus(".NET Extractor", "C#/F#", true, "built-in"));
+
+        return results;
+    }
+
+    private static void PrintExtractorResults(List<ExtractorStatus> results, bool verbose)
+    {
+        Console.WriteLine("Pre-compiled Extractors:");
+        Console.WriteLine("-------------------------");
+        foreach (var extractor in results)
+        {
+            var icon = extractor.IsAvailable ? Checkmark : CrossMark;
+            var status = extractor.IsAvailable ? "available" : "MISSING";
+
+            Console.WriteLine($"{icon} {extractor.Name,-20} ({extractor.Language}) - {status}");
+
+            if (verbose && extractor.IsAvailable && extractor.Path != null && extractor.Path != "built-in")
+            {
+                Console.WriteLine($"    Path: {extractor.Path}");
+            }
+        }
+        Console.WriteLine();
+    }
+
+    private record CopilotStatus(bool IsAvailable, string? Version, string? AuthStatus);
+
+    private static async Task<CopilotStatus> CheckCopilotCliAsync(CancellationToken ct)
+    {
+        // First check for standalone copilot CLI
+        try
+        {
+            var (exitCode, output, _) = await RunCommandAsync("copilot", "--version", ct);
+            if (exitCode == 0)
+            {
+                var version = output.Trim();
+                return new CopilotStatus(true, version, null);
+            }
+        }
+        catch { /* copilot command not found - try gh */ }
+
+        // Fall back to gh with copilot extension
+        try
+        {
+            var (exitCode, output, _) = await RunCommandAsync("gh", "--version", ct);
+            if (exitCode == 0)
+            {
+                var version = output.Split('\n')[0].Trim();
+
+                // Check if copilot extension is available
+                var (copilotExit, _, _) = await RunCommandAsync("gh", "copilot --help", ct);
+                if (copilotExit != 0)
+                {
+                    return new CopilotStatus(false, version, "Copilot extension not installed");
+                }
+
+                // Check auth status
+                var (authExit, _, _) = await RunCommandAsync("gh", "auth status", ct);
+                var authStatus = authExit == 0 ? "authenticated" : "not authenticated";
+
+                return new CopilotStatus(true, version, authStatus);
+            }
+        }
+        catch { /* gh command not found or failed */ }
+
+        return new CopilotStatus(false, null, null);
+    }
+
+    private static void PrintCopilotStatus(CopilotStatus status, bool verbose)
+    {
+        Console.WriteLine("GitHub Copilot CLI:");
+        Console.WriteLine("-------------------");
+
+        if (status.IsAvailable)
+        {
+            Console.WriteLine($"{Checkmark} Copilot CLI: {status.Version}");
+
+            if (status.AuthStatus != null)
+            {
+                var authIcon = status.AuthStatus == "authenticated" ? Checkmark : WarningMark;
+                Console.WriteLine($"{authIcon} Auth status: {status.AuthStatus}");
+
+                if (status.AuthStatus != "authenticated")
+                {
+                    Console.WriteLine("  Run 'gh auth login' to authenticate for AI features.");
+                }
+            }
+        }
+        else
+        {
+            Console.WriteLine($"{WarningMark} GitHub Copilot CLI not available");
+            if (status.Version != null)
+            {
+                Console.WriteLine($"  GitHub CLI found ({status.Version}) but Copilot extension missing.");
+                Console.WriteLine("  Run 'gh extension install github/gh-copilot' to install.");
+            }
+            else
+            {
+                Console.WriteLine("  Install GitHub Copilot CLI for AI features.");
+                Console.WriteLine("  See: https://gh.io/copilot-install");
+            }
+        }
+        Console.WriteLine();
     }
 }

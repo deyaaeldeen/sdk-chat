@@ -211,7 +211,13 @@ docker run --rm sdk-chat:latest doctor
 |-------|------------|------|--------|
 | `sdk-chat-dev` | `Dockerfile` | ~1.5GB | Development/testing |
 | `sdk-chat-demo` | `demo/Dockerfile` | ~2GB | Demo recording (VHS) |
-| `sdk-chat:latest` | `Dockerfile.release` | ~800MB | Production |
+| `sdk-chat:latest` | `Dockerfile.release` | ~500MB | Production (Native AOT + glibc-linked extractors) |
+
+The release image includes:
+- .NET Native AOT binary (~40MB)
+- Go, Java, Python, TypeScript extractors (glibc-linked)
+- GitHub Copilot CLI (~138MB)
+- distroless/cc-debian12 base (minimal glibc runtime)
 
 ```bash
 # Build images
@@ -223,19 +229,18 @@ docker build -f Dockerfile.release -t sdk-chat:latest . # Production
 **Generate samples with GitHub Copilot:**
 
 ```bash
-docker run --rm -u $(id -u):$(id -g) \
-  -v "$HOME/.copilot:/tmp/.copilot" \
+docker run --rm \
+  -v "$HOME/.copilot:/root/.copilot:ro" \
   -v "/path/to/your-sdk:/sdk" \
-  -e HOME=/tmp \
   sdk-chat:latest package sample generate /sdk --count 5
 ```
 
-> **Note:** The `~/.copilot` directory must be mounted **read-write** because the Copilot CLI writes session state and cached packages.
+> **Note:** Mount your `~/.copilot` directory to provide Copilot CLI authentication credentials.
 
 **Generate samples with OpenAI:**
 
 ```bash
-docker run --rm -u $(id -u):$(id -g) \
+docker run --rm \
   -v "/path/to/your-sdk:/sdk" \
   -e OPENAI_API_KEY="sk-..." \
   sdk-chat:latest package sample generate /sdk --use-openai --count 5
@@ -244,10 +249,9 @@ docker run --rm -u $(id -u):$(id -g) \
 **Using a `.env` file:**
 
 ```bash
-docker run --rm -u $(id -u):$(id -g) \
+docker run --rm \
   -v "/path/to/your-sdk:/sdk" \
   -v "$PWD/.env:/app/.env:ro" \
-  -e HOME=/tmp \
   sdk-chat:latest package sample generate /sdk --use-openai --load-dotenv
 ```
 
@@ -255,8 +259,7 @@ docker run --rm -u $(id -u):$(id -g) \
 
 ```bash
 docker run --rm -i \
-  -v "$HOME/.copilot:/tmp/.copilot" \
-  -e HOME=/tmp \
+  -v "$HOME/.copilot:/root/.copilot:ro" \
   sdk-chat:latest mcp
 ```
 
@@ -264,8 +267,7 @@ docker run --rm -i \
 
 ```bash
 docker run --rm -p 8080:8080 \
-  -v "$HOME/.copilot:/tmp/.copilot" \
-  -e HOME=/tmp \
+  -v "$HOME/.copilot:/root/.copilot:ro" \
   sdk-chat:latest mcp --transport sse --port 8080
 ```
 
@@ -279,7 +281,7 @@ docker run --rm -p 8080:8080 \
   sdk-chat:latest mcp --transport sse --port 8080 --use-openai
 ```
 
-The container runs as non-root user `sdkchat` (UID 1001) by default. Use `-u $(id -u):$(id -g)` to match your host user for file permissions.
+The container runs as root by default (distroless base). Mount volumes with appropriate permissions.
 
 ---
 

@@ -125,7 +125,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
             "Reinstall the application to resolve this issue.");
     }
 
-    private static ApiIndex ConvertToApiIndex(RawApiIndex raw)
+    private static ApiIndex ConvertToApiIndex(RawPythonApiIndex raw)
     {
         var modules = raw.Modules?.Select(m => new ModuleInfo(
             m.Name ?? "",
@@ -154,18 +154,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         return new ApiIndex(raw.Package ?? "", modules);
     }
 
-    // Internal DTOs for JSON parsing - suppressions are safe as these are internal
-    // utilities for parsing known JSON from our own scripts
-#pragma warning disable IL2026, IL3050 // Suppressed: internal DTOs with known schema
-    private static RawApiIndex? DeserializeRaw(string json) =>
-        JsonSerializer.Deserialize<RawApiIndex>(json, JsonOptionsCache.CaseInsensitive);
-#pragma warning restore IL2026, IL3050
-
-    // Raw JSON models for deserialization
-    private record RawApiIndex(string? Package, List<RawModule>? Modules);
-    private record RawModule(string? Name, List<RawClass>? Classes, List<RawFunction>? Functions);
-    private record RawClass(string? Name, string? Base, string? Doc, List<RawMethod>? Methods, List<RawProperty>? Properties);
-    private record RawMethod(string? Name, string? Sig, string? Doc, bool? Async, bool? Classmethod, bool? Staticmethod);
-    private record RawProperty(string? Name, string? Type, string? Doc);
-    private record RawFunction(string? Name, string? Sig, string? Doc, bool? Async);
+    // AOT-safe deserialization using source-generated context
+    private static RawPythonApiIndex? DeserializeRaw(string json) =>
+        JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonApiIndex);
 }

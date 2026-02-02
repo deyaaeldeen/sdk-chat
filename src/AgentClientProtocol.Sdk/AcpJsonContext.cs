@@ -131,6 +131,19 @@ public partial class AcpJsonContext : JsonSerializerContext
     private static readonly object _lock = new();
 
     /// <summary>
+    /// Hardened JsonDocumentOptions for parsing untrusted JSON input.
+    /// - MaxDepth=64: Prevents stack overflow DoS from deeply nested payloads
+    /// - CommentHandling=Disallow: Strict JSON spec compliance
+    /// - AllowTrailingCommas=false: Strict parsing, reject malformed input
+    /// </summary>
+    public static System.Text.Json.JsonDocumentOptions SecureDocumentOptions { get; } = new()
+    {
+        MaxDepth = 64,
+        CommentHandling = System.Text.Json.JsonCommentHandling.Disallow,
+        AllowTrailingCommas = false
+    };
+
+    /// <summary>
     /// JSON options that prefer source-generated serialization for known ACP types
     /// but fall back to reflection for unknown/dynamic types (e.g., anonymous types).
     /// Use this for AOT-friendly serialization while maintaining flexibility.

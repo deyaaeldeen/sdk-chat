@@ -129,8 +129,6 @@ public class AiDebugLogger
     private readonly string _debugDir;
     private readonly bool _enabled;
 
-    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
-
     public AiDebugLogger(ILogger<AiDebugLogger> logger, SdkChatOptions options)
     {
         _logger = logger;
@@ -327,21 +325,20 @@ public class AiDebugLogger
         await writer.WriteLineAsync("## Request Details");
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("```json");
-#pragma warning disable IL2026, IL3050 // Anonymous types used for debug logging only
-        await writer.WriteLineAsync(JsonSerializer.Serialize(new
+        var details = new DebugRequestDetails
         {
-            provider = session.Provider,
-            model = session.Model,
-            endpoint = session.Endpoint ?? "(default)",
-            streaming = session.Streaming,
-            systemPromptHash = ComputeHash(session.SystemPrompt),
-            userPromptHash = ComputeHash(session.UserPrompt),
-            userPromptLength = session.UserPrompt.Length,
-            responseHash = ComputeHash(session.Response ?? ""),
-            responseLength = session.Response?.Length ?? 0,
-            durationMs = (session.EndTime - session.StartTime)?.TotalMilliseconds
-        }, IndentedOptions));
-#pragma warning restore IL2026, IL3050
+            Provider = session.Provider,
+            Model = session.Model,
+            Endpoint = session.Endpoint ?? "(default)",
+            Streaming = session.Streaming,
+            SystemPromptHash = ComputeHash(session.SystemPrompt),
+            UserPromptHash = ComputeHash(session.UserPrompt),
+            UserPromptLength = session.UserPrompt.Length,
+            ResponseHash = ComputeHash(session.Response ?? ""),
+            ResponseLength = session.Response?.Length ?? 0,
+            DurationMs = (session.EndTime - session.StartTime)?.TotalMilliseconds
+        };
+        await writer.WriteLineAsync(JsonSerializer.Serialize(details, DebugJsonContext.Default.DebugRequestDetails));
         await writer.WriteLineAsync("```");
         await writer.WriteLineAsync();
 
@@ -431,4 +428,30 @@ public class ContextFileInfo
     public double TruncationPercent => OriginalSize > 0
         ? (1.0 - (double)TruncatedSize / OriginalSize) * 100
         : 0;
+}
+
+/// <summary>
+/// Request details for debug logging. Typed record to enable AOT-safe serialization.
+/// </summary>
+internal sealed record DebugRequestDetails
+{
+    public required string Provider { get; init; }
+    public required string Model { get; init; }
+    public required string Endpoint { get; init; }
+    public required bool Streaming { get; init; }
+    public required string SystemPromptHash { get; init; }
+    public required string UserPromptHash { get; init; }
+    public required int UserPromptLength { get; init; }
+    public required string ResponseHash { get; init; }
+    public required int ResponseLength { get; init; }
+    public required double? DurationMs { get; init; }
+}
+
+/// <summary>
+/// Source-generated JSON context for debug logging.
+/// </summary>
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(WriteIndented = true)]
+[System.Text.Json.Serialization.JsonSerializable(typeof(DebugRequestDetails))]
+internal partial class DebugJsonContext : System.Text.Json.Serialization.JsonSerializerContext
+{
 }

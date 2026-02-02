@@ -12,13 +12,6 @@ namespace Microsoft.SdkChat.Mcp;
 /// </summary>
 public sealed record McpToolResult
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = false
-    };
-
     /// <summary>
     /// Whether the operation succeeded.
     /// </summary>
@@ -96,9 +89,7 @@ public sealed record McpToolResult
     /// <summary>
     /// Serializes to JSON string for MCP response.
     /// </summary>
-#pragma warning disable IL2026, IL3050 // McpToolResult is a known DTO with fixed structure
-    public override string ToString() => JsonSerializer.Serialize(this, JsonOptions);
-#pragma warning restore IL2026, IL3050
+    public override string ToString() => JsonSerializer.Serialize(this, McpJsonContext.Default.McpToolResult);
 
     private static string MapExceptionToErrorCode(Exception ex) => ex switch
     {
@@ -195,4 +186,18 @@ public sealed record ResultData
     /// </summary>
     [JsonPropertyName("language")]
     public string? Language { get; init; }
+}
+
+/// <summary>
+/// Source-generated JSON serialization context for MCP types.
+/// </summary>
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    WriteIndented = false)]
+[JsonSerializable(typeof(McpToolResult))]
+[JsonSerializable(typeof(ErrorDetails))]
+[JsonSerializable(typeof(ResultData))]
+internal partial class McpJsonContext : JsonSerializerContext
+{
 }

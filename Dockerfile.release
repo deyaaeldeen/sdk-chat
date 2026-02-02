@@ -1,5 +1,5 @@
 # SDK Chat Production Container (Native AOT)
-# Multi-stage build with native AOT compilation
+# Multi-stage build with statically compiled extractors
 #
 # Build:
 #   docker build -f Dockerfile.release -t sdk-chat:latest .
@@ -21,18 +21,15 @@
 #     sdk-chat:latest mcp
 
 # ============================================================================
-# Stage 1: Build (Native AOT)
+# Stage 1: Build .NET Native AOT
 # ============================================================================
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-dotnet
 
-# Install AOT compilation toolchain
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-
-# Copy project files first for layer caching
 COPY sdk-chat.sln Directory.Build.props ./
 COPY src/Microsoft.SdkChat/Microsoft.SdkChat.csproj src/Microsoft.SdkChat/
 COPY src/AgentClientProtocol.Sdk/AgentClientProtocol.Sdk.csproj src/AgentClientProtocol.Sdk/
@@ -43,48 +40,102 @@ COPY src/ApiExtractor.Python/ApiExtractor.Python.csproj src/ApiExtractor.Python/
 COPY src/ApiExtractor.Java/ApiExtractor.Java.csproj src/ApiExtractor.Java/
 COPY src/ApiExtractor.Go/ApiExtractor.Go.csproj src/ApiExtractor.Go/
 COPY src/ApiExtractor.TypeScript/ApiExtractor.TypeScript.csproj src/ApiExtractor.TypeScript/
-
-# Copy full source
 COPY src/ src/
 
-# Restore and publish as native AOT
 RUN dotnet restore src/Microsoft.SdkChat/Microsoft.SdkChat.csproj -r linux-x64 && \
     dotnet publish src/Microsoft.SdkChat/Microsoft.SdkChat.csproj \
         -c Release -r linux-x64 --self-contained -p:PublishAot=true \
+        -p:InvariantGlobalization=true \
         -p:TreatWarningsAsErrors=false -o /app
 
 # ============================================================================
-# Stage 2: Runtime (Native AOT binary + language runtimes)
+# Stage 2: Build Go extractor (glibc-linked)
 # ============================================================================
-FROM ubuntu:24.04 AS runtime
+FROM golang:1.22-bookworm AS build-go
 
-LABEL org.opencontainers.image.source="https://github.com/deyaaeldeen/sdk-chat"
-LABEL org.opencontainers.image.description="SDK Chat (Native AOT)"
-
-# Install language runtimes for API extractors
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 nodejs golang-go curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 1001 sdkchat && useradd --uid 1001 --gid sdkchat --create-home sdkchat
+    gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install JBang for Java
+WORKDIR /src
+COPY src/ApiExtractor.Go/extract_api.go .
+# Force external linking to produce glibc-linked binary
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-s -w -linkmode=external -extldflags=-Wl,-z,relro,-z,now' \
+    -o /go_extractor extract_api.go
+
+# ============================================================================
+# Stage 3: Build Java extractor (JBang native, glibc-linked)
+# ============================================================================
+FROM ghcr.io/graalvm/native-image-community:21 AS build-java
+
 ENV JBANG_DIR=/opt/jbang
-ENV PATH="$PATH:/opt/jbang/bin:/usr/local/bin"
-RUN curl -Ls https://sh.jbang.dev | bash -s - app setup \
-    && chmod -R a+rx /opt/jbang && mkdir -p /opt/jbang/cache && chmod -R a+rwx /opt/jbang/cache
+RUN curl -Ls https://sh.jbang.dev | bash -s - app setup
+ENV PATH="$PATH:/opt/jbang/bin"
+
+WORKDIR /src
+COPY src/ApiExtractor.Java/ExtractApi.java .
+# Build glibc-linked native image
+RUN jbang export native --fresh --force -O java_extractor ExtractApi.java
+
+# ============================================================================
+# Stage 4: Build Python extractor (PyInstaller, glibc-linked)
+# ============================================================================
+FROM python:3.12-slim AS build-python
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    binutils \
+    && pip install --no-cache-dir pyinstaller \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY src/ApiExtractor.Python/extract_api.py .
+RUN pyinstaller --onefile --strip --name python_extractor extract_api.py
+
+# Copy the glibc-linked binary
+RUN cp dist/python_extractor /python_extractor
+
+# ============================================================================
+# Stage 5: Build TypeScript extractor (Bun compile, glibc-linked)
+# ============================================================================
+FROM oven/bun:1-debian AS build-typescript
+
+WORKDIR /src
+COPY src/ApiExtractor.TypeScript/extract_api.mjs .
+COPY src/ApiExtractor.TypeScript/src/ ./src/
+RUN bun build --compile --minify ./extract_api.mjs --outfile ts_extractor
+
+# ============================================================================
+# Stage 6: Download Copilot CLI
+# ============================================================================
+FROM debian:bookworm-slim AS build-copilot
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub Copilot CLI
 RUN curl -fsSL https://gh.io/copilot-install | bash
 
-# Copy native AOT binary and extractors
+# ============================================================================
+# Stage 7: Runtime (distroless with glibc - .NET AOT requires glibc)
+# ============================================================================
+FROM gcr.io/distroless/cc-debian12 AS runtime
+
+LABEL org.opencontainers.image.source="https://github.com/deyaaeldeen/sdk-chat"
+LABEL org.opencontainers.image.description="SDK Chat (Native AOT)"
+
 WORKDIR /app
-COPY --from=build /app/Microsoft.SdkChat /app/sdk-chat
-COPY src/ApiExtractor.Python/extract_api.py src/ApiExtractor.TypeScript/extract_api.mjs \
-     src/ApiExtractor.Go/extract_api.go src/ApiExtractor.Java/ExtractApi.java /app/
 
-# Security: Run as non-root user
-USER sdkchat
+# Copy all binaries
+COPY --from=build-dotnet /app/Microsoft.SdkChat /app/sdk-chat
+COPY --from=build-go /go_extractor /app/go_extractor
+COPY --from=build-java /src/java_extractor /app/java_extractor
+COPY --from=build-python /python_extractor /app/python_extractor
+COPY --from=build-typescript /src/ts_extractor /app/ts_extractor
+COPY --from=build-copilot /usr/local/bin/copilot /usr/local/bin/copilot
 
-HEALTHCHECK CMD /app/sdk-chat doctor || exit 1
+ENV PATH="/usr/local/bin:$PATH"
+
 ENTRYPOINT ["/app/sdk-chat"]
 CMD ["--help"]

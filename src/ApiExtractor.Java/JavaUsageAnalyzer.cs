@@ -156,20 +156,7 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         return AppContext.BaseDirectory;
     }
 
-    // Internal DTOs for JSON parsing - suppressions are safe as these are internal
-    // utilities for parsing known JSON from our own scripts
-#pragma warning disable IL2026, IL3050 // Suppressed: internal DTOs with known schema
+    // AOT-safe deserialization using source-generated context
     private static UsageResult? DeserializeResult(string json) =>
-        JsonSerializer.Deserialize<UsageResult>(json, JsonOptionsCache.CaseInsensitive);
-#pragma warning restore IL2026, IL3050
-
-    private record UsageResult(
-        int FileCount,
-        List<CoveredOp>? Covered,
-        List<UncoveredOp>? Uncovered,
-        List<string>? Patterns
-    );
-
-    private record CoveredOp(string? Client, string? Method, string? File, int Line);
-    private record UncoveredOp(string? Client, string? Method, string? Sig);
+        JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.UsageResult);
 }

@@ -59,7 +59,7 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
 
             try
             {
-                using var doc = JsonDocument.Parse(line);
+                using var doc = JsonDocument.Parse(line, AcpJsonContext.SecureDocumentOptions);
                 var root = doc.RootElement;
 
                 // Check if it's a response (has result or error)
