@@ -3,6 +3,9 @@
   "build": {
     "dockerfile": "../Dockerfile"
   },
+  "mounts": [
+    "source=${localEnv:HOME}/.copilot,target=/root/.copilot,type=bind"
+  ],
   "customizations": {
     "vscode": {
       "extensions": [

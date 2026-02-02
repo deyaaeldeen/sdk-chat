@@ -258,9 +258,10 @@ public class AiService : IAiService
             var cliPath = Environment.GetEnvironmentVariable("COPILOT_CLI_PATH") ?? "copilot";
             _logger.LogDebug("Using Copilot CLI at: {CliPath}", cliPath);
             
-            // Check for GitHub token in environment (GH_TOKEN or GITHUB_TOKEN)
+            // Token is optional - CLI handles auth via ~/.copilot if not provided
             var githubToken = Environment.GetEnvironmentVariable("GH_TOKEN") 
-                           ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+                           ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
+                           ?? Environment.GetEnvironmentVariable("COPILOT_GITHUB_TOKEN");
             
             _copilotClient = new CopilotClient(new CopilotClientOptions
             {
@@ -268,7 +269,7 @@ public class AiService : IAiService
                 UseStdio = true,
                 AutoStart = true,
                 LogLevel = "debug",
-                GithubToken = githubToken  // Pass token for auth if available
+                GithubToken = githubToken
             });
             
             await _copilotClient.StartAsync();
@@ -281,7 +282,7 @@ public class AiService : IAiService
             _logger.LogError(ex, "Failed to start GitHub Copilot client");
             throw new InvalidOperationException(
                 $"Failed to start GitHub Copilot client: {ex.Message}. " +
-                "Ensure the Copilot CLI is installed and authenticated, " +
+                "Ensure the Copilot CLI is installed and authenticated (run 'copilot' and use /login), " +
                 "or use --use-openai flag with OPENAI_API_KEY set.", ex);
         }
         finally

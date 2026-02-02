@@ -1,0 +1,34 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Services;
+using Microsoft.SdkChat.Tools.Package.Samples;
+
+namespace Microsoft.SdkChat.Configuration;
+
+public static class ServiceBuilder
+{
+    public static IServiceProvider Build(bool useOpenAi)
+    {
+        var services = new ServiceCollection();
+
+        services.AddLogging(builder => builder.AddConsole());
+
+        var aiSettings = AiProviderSettings.FromEnvironment();
+        if (useOpenAi)
+        {
+            aiSettings = aiSettings with { UseOpenAi = true };
+        }
+        services.AddSingleton(aiSettings);
+
+        services.AddSingleton<AiDebugLogger>();
+        services.AddSingleton<AiService>();
+        services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
+        services.AddSingleton<FileHelper>();
+        services.AddSingleton<ConfigurationHelper>();
+        services.AddSingleton<SampleGeneratorTool>();
+
+        return services.BuildServiceProvider();
+    }
+}
