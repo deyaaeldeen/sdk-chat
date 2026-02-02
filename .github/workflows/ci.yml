@@ -9,15 +9,15 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Build dev container
         run: docker build -t sdk-chat-dev .
-      
+
       - name: Build
-        run: docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet build --configuration Release
-      
+        run: docker run --rm -u $(id -u):$(id -g) -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet build --configuration Release
+
       - name: Test
-        run: docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet test --configuration Release --verbosity normal
+        run: docker run --rm -u $(id -u):$(id -g) -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet test --configuration Release --verbosity normal

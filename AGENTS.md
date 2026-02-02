@@ -170,7 +170,7 @@ dotnet test --filter "FullyQualifiedName~AiServiceTests"
 dotnet test --filter "DisplayName~streaming"
 
 # Run from host (uses container)
-docker run --rm -v "$(pwd):/workspace" sdk-chat-dev dotnet test
+docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet test
 ```
 
 ## Do Not
