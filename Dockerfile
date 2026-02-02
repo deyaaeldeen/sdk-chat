@@ -42,10 +42,20 @@ ENV PATH="$PATH:/opt/jbang/bin"
 RUN curl -fsSL https://gh.io/copilot-install | bash
 
 # Security: Create non-root user
-RUN groupadd --gid 1001 sdkchat && \
-    useradd --uid 1001 --gid sdkchat --shell /bin/bash --create-home sdkchat && \
-    mkdir -p /workspace && \
-    chown -R sdkchat:sdkchat /workspace
+# Use UID/GID 1000 to match typical Linux host user (avoids permission issues in dev containers)
+# Handle case where GID/UID 1000 already exists in base image
+ARG USER_UID=1000
+ARG USER_GID=1000
+RUN if ! getent group $USER_GID >/dev/null; then groupadd --gid $USER_GID sdkchat; fi && \
+    if ! getent passwd $USER_UID >/dev/null; then \
+        useradd --uid $USER_UID --gid $USER_GID --shell /bin/bash --create-home sdkchat; \
+    else \
+        # User exists, just ensure home directory and shell are correct
+        existing_user=$(getent passwd $USER_UID | cut -d: -f1) && \
+        usermod -d /home/sdkchat -m -l sdkchat "$existing_user" 2>/dev/null || true; \
+    fi && \
+    mkdir -p /workspace /home/sdkchat && \
+    chown -R $USER_UID:$USER_GID /workspace /home/sdkchat
 
 # Environment
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1

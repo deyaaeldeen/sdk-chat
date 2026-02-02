@@ -30,5 +30,8 @@ TestResults/
 # NuGet
 *.nupkg
 
+# Temporary files
+temp/
+
 # AOT publish output
 publish/

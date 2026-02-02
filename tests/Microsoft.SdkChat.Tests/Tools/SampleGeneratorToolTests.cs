@@ -167,6 +167,13 @@ public class SampleGeneratorToolTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_LanguageOverride_UsesSpecifiedLanguage()
     {
+        // Create a Python SDK structure for this test (the default _validSdkPath is .NET)
+        var pythonSdkPath = Path.Combine(_testRoot, "python-sdk");
+        Directory.CreateDirectory(pythonSdkPath);
+        Directory.CreateDirectory(Path.Combine(pythonSdkPath, "src"));
+        File.WriteAllText(Path.Combine(pythonSdkPath, "setup.py"), "from setuptools import setup\nsetup(name='test-sdk')");
+        File.WriteAllText(Path.Combine(pythonSdkPath, "src", "client.py"), "class Client:\n    def connect(self):\n        pass");
+
         var tool = CreateTool();
         _mockAiService.SetSamplesToReturn([
             new GeneratedSample { Description = "Test", Name = "TestSample", Code = "# test code" }
@@ -175,7 +182,7 @@ public class SampleGeneratorToolTests : IDisposable
         var outputDir = Path.Combine(_testRoot, "output-python");
 
         var result = await tool.ExecuteAsync(
-            sdkPath: _validSdkPath,
+            sdkPath: pythonSdkPath,
             outputPath: outputDir,
             language: "python",
             prompt: null,

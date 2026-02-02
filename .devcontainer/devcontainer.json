@@ -1,7 +1,11 @@
 {
   "name": "SDK Chat",
   "build": {
-    "dockerfile": "../Dockerfile"
+    "dockerfile": "../Dockerfile",
+    "args": {
+      "USER_UID": "${localEnv:UID:1000}",
+      "USER_GID": "${localEnv:GID:1000}"
+    }
   },
   "mounts": [
     "source=${localEnv:HOME}/.copilot,target=/home/sdkchat/.copilot,type=bind",
@@ -20,6 +24,7 @@
     }
   },
   "postCreateCommand": "dotnet restore",
+  "containerUser": "sdkchat",
   "remoteUser": "sdkchat",
   "updateRemoteUserUID": true
 }
