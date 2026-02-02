@@ -28,7 +28,9 @@ public static class McpServer
     };
 
     [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",
-        Justification = "WithToolsFromAssembly requires reflection - MCP SDK design limitation")]
+        Justification = "WithTools<T> is AOT-safe, but analyzer can't verify it")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "WithTools<T> is AOT-safe, but analyzer can't verify it")]
     public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false, CancellationToken cancellationToken = default)
     {
         // Validate transport type - fail fast if unsupported
@@ -45,18 +47,19 @@ public static class McpServer
             ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
 
             // Configure MCP server with SSE transport
+            // Use explicit tool registration for Native AOT compatibility
             builder.Services.AddMcpServer(options =>
             {
                 options.ServerInfo = new() { Name = "sdk-chat", Version = "1.0.0" };
             })
             .WithHttpTransport()
-            .WithToolsFromAssembly();
+            .WithTools<SampleGeneratorMcpTool>();
 
             var app = builder.Build();
 
-            // Configure endpoint - clear default URLs and set only the requested port
+            // Configure endpoint - bind to all interfaces for Docker compatibility
             app.Urls.Clear();
-            app.Urls.Add($"http://localhost:{port}");
+            app.Urls.Add($"http://0.0.0.0:{port}");
 
             app.MapMcp();
             await app.RunAsync(cancellationToken);
@@ -67,12 +70,13 @@ public static class McpServer
             ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
 
             // Configure MCP server with stdio transport
+            // Use explicit tool registration for Native AOT compatibility
             builder.Services.AddMcpServer(options =>
             {
                 options.ServerInfo = new() { Name = "sdk-chat", Version = "1.0.0" };
             })
             .WithStdioServerTransport()
-            .WithToolsFromAssembly();
+            .WithTools<SampleGeneratorMcpTool>();
 
             var host = builder.Build();
             await host.RunAsync(cancellationToken);
