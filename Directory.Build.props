@@ -3,10 +3,10 @@
     <!-- Enforce code style analyzers during build (not just in IDE) -->
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     
-    <!-- Enable .NET analyzers -->
+    <!-- Enable .NET analyzers with recommended rules (All is too noisy) -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
-    <AnalysisMode>All</AnalysisMode>
+    <AnalysisMode>Recommended</AnalysisMode>
     
     <!-- Treat nullable warnings as errors for strict null safety -->
     <WarningsAsErrors>nullable</WarningsAsErrors>
@@ -20,8 +20,15 @@
     <!-- Required for IDE0005 (unnecessary usings) to work during build -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     
-    <!-- Suppress documentation warnings that are not actionable right now -->
-    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
+    <!-- Suppressed warnings:
+         CS1591/CS1573: Missing XML doc - enable after stabilization
+         CA1000: Static members on generic types - intentional for factory methods
+         CA1010: IEnumerable<T> on commands - System.CommandLine requirement
+         CA1051: Visible instance fields - SampleLanguageContext design choice
+         CA1848: LoggerMessage delegates - overkill for CLI tool
+         CA1727: PascalCase log placeholders - existing convention
+         VSTHRD200: Async suffix - conflicts with streaming patterns -->
+    <NoWarn>$(NoWarn);CS1591;CS1573;CA1000;CA1010;CA1051;CA1848;CA1727;VSTHRD200</NoWarn>
 
   </PropertyGroup>
 </Project>

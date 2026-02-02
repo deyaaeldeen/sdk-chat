@@ -49,7 +49,7 @@ public static class ConsoleUx
         {
             var result = await action();
             stopwatch.Stop();
-            spinnerCts.Cancel();
+            await spinnerCts.CancelAsync();
             await spinnerTask;
             ClearLine();
             Console.WriteLine($"  {Green("✓")} {message}{Dim($" ({FormatDuration(stopwatch.Elapsed)})")}");
@@ -58,7 +58,7 @@ public static class ConsoleUx
         catch
         {
             stopwatch.Stop();
-            spinnerCts.Cancel();
+            await spinnerCts.CancelAsync();
             await spinnerTask;
             ClearLine();
             Console.WriteLine($"  {Red("✗")} {message}{Dim($" ({FormatDuration(stopwatch.Elapsed)})")}");
@@ -136,7 +136,7 @@ public static class ConsoleUx
         return $"{duration.TotalSeconds:F1}s";
     }
 
-    public class StreamingProgress : IDisposable
+    public class StreamingProgress : IDisposable, IAsyncDisposable
     {
         private readonly string _message;
         private readonly bool _supportsAnsi;
@@ -212,13 +212,32 @@ public static class ConsoleUx
         }
 
         /// <summary>
-        /// Completes the progress with success.
+        /// Completes the progress with success (async).
+        /// </summary>
+        public async ValueTask CompleteAsync(string? summary = null)
+        {
+            await _cts.CancelAsync();
+            try { await _spinnerTask.WaitAsync(TimeSpan.FromMilliseconds(100)); } catch { }
+
+            FinishWithSuccess(summary);
+        }
+
+        /// <summary>
+        /// Completes the progress with success (sync - for event handlers).
+        /// Uses fire-and-forget cancellation, safe for console UI.
         /// </summary>
         public void Complete(string? summary = null)
         {
-            _cts.Cancel();
-            try { _spinnerTask.Wait(100); } catch { } // 100ms timeout
+            // Fire-and-forget the async cancellation - safe for UI operations
+            _ = _cts.CancelAsync();
+            // Give the spinner a moment to stop, but don't block
+            Thread.Sleep(10);
 
+            FinishWithSuccess(summary);
+        }
+
+        private void FinishWithSuccess(string? summary)
+        {
             if (_supportsAnsi) ClearLine();
 
             lock (_lock)
@@ -234,13 +253,32 @@ public static class ConsoleUx
         }
 
         /// <summary>
-        /// Completes the progress with failure.
+        /// Completes the progress with failure (async).
+        /// </summary>
+        public async ValueTask FailAsync(string? message = null)
+        {
+            await _cts.CancelAsync();
+            try { await _spinnerTask.WaitAsync(TimeSpan.FromMilliseconds(100)); } catch { }
+
+            FinishWithFailure(message);
+        }
+
+        /// <summary>
+        /// Completes the progress with failure (sync - for event handlers).
+        /// Uses fire-and-forget cancellation, safe for console UI.
         /// </summary>
         public void Fail(string? message = null)
         {
-            _cts.Cancel();
-            try { _spinnerTask.Wait(100); } catch { } // 100ms timeout
+            // Fire-and-forget the async cancellation - safe for UI operations
+            _ = _cts.CancelAsync();
+            // Give the spinner a moment to stop, but don't block
+            Thread.Sleep(10);
 
+            FinishWithFailure(message);
+        }
+
+        private void FinishWithFailure(string? message)
+        {
             if (_supportsAnsi) ClearLine();
 
             lock (_lock)
@@ -253,9 +291,20 @@ public static class ConsoleUx
             Console.WriteLine($"  {Red("✗")} {message ?? _message}");
         }
 
+        /// <summary>
+        /// Disposes the progress (sync - for event handlers).
+        /// </summary>
         public void Dispose()
         {
-            _cts.Cancel();
+            GC.SuppressFinalize(this);
+            _ = _cts.CancelAsync();
+            _cts.Dispose();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            GC.SuppressFinalize(this);
+            await _cts.CancelAsync();
             _cts.Dispose();
         }
     }

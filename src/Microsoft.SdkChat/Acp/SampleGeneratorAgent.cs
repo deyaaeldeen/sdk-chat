@@ -101,14 +101,21 @@ public sealed class SampleGeneratorAgent(
         var aiService = services.GetRequiredService<IAiService>();
         var fileHelper = services.GetRequiredService<FileHelper>();
 
-        // Track token usage via events
+        // Track token usage via async callbacks
         var promptTokens = 0;
         var responseTokens = 0;
-        void OnPromptReady(object? sender, AiPromptReadyEventArgs e) => promptTokens = e.EstimatedTokens;
-        void OnStreamComplete(object? sender, AiStreamCompleteEventArgs e) => responseTokens = e.EstimatedResponseTokens;
 
-        aiService.PromptReady += OnPromptReady;
-        aiService.StreamComplete += OnStreamComplete;
+        ValueTask OnPromptReadyAsync(AiPromptReadyEventArgs e)
+        {
+            promptTokens = e.EstimatedTokens;
+            return ValueTask.CompletedTask;
+        }
+
+        ValueTask OnStreamCompleteAsync(AiStreamCompleteEventArgs e)
+        {
+            responseTokens = e.EstimatedResponseTokens;
+            return ValueTask.CompletedTask;
+        }
 
         try
         {
@@ -149,7 +156,8 @@ public sealed class SampleGeneratorAgent(
             // Stream parsed samples as they complete
             List<GeneratedSample> samples = [];
             await foreach (var sample in aiService.StreamItemsAsync(
-                systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, null, null, effectiveCt))
+                systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, null, null,
+                OnPromptReadyAsync, OnStreamCompleteAsync, effectiveCt))
             {
                 if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
                 {
@@ -203,9 +211,6 @@ public sealed class SampleGeneratorAgent(
         }
         finally
         {
-            aiService.PromptReady -= OnPromptReady;
-            aiService.StreamComplete -= OnStreamComplete;
-
             // Cleanup session to prevent memory leak
             CleanupSession(request.SessionId);
         }
@@ -224,7 +229,7 @@ public sealed class SampleGeneratorAgent(
         }
     }
 
-    private SampleLanguageContext CreateLanguageContext(SdkLanguage language, FileHelper fileHelper) => language switch
+    private static SampleLanguageContext CreateLanguageContext(SdkLanguage language, FileHelper fileHelper) => language switch
     {
         SdkLanguage.DotNet => new DotNetSampleLanguageContext(fileHelper),
         SdkLanguage.Python => new PythonSampleLanguageContext(fileHelper),

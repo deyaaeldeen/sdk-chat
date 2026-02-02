@@ -265,7 +265,7 @@ public record ConstructorInfo
     WriteIndented = false,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(ApiIndex))]
-internal partial class SourceGenerationContext : JsonSerializerContext
+internal sealed partial class SourceGenerationContext : JsonSerializerContext
 {
     private static SourceGenerationContext? _indented;
 

@@ -22,7 +22,6 @@ public class SampleGeneratorToolTests : IDisposable
     private readonly string _validSdkPath;
     private readonly MockAiService _mockAiService;
     private readonly FileHelper _fileHelper;
-    private readonly ConfigurationHelper _configHelper;
     private readonly ILogger<SampleGeneratorTool> _logger;
 
     public SampleGeneratorToolTests()
@@ -39,7 +38,6 @@ public class SampleGeneratorToolTests : IDisposable
 
         _mockAiService = new MockAiService();
         _fileHelper = new FileHelper();
-        _configHelper = new ConfigurationHelper();
         _logger = NullLogger<SampleGeneratorTool>.Instance;
     }
 
@@ -60,7 +58,6 @@ public class SampleGeneratorToolTests : IDisposable
         return new SampleGeneratorTool(
             aiService ?? _mockAiService,
             _fileHelper,
-            _configHelper,
             _logger);
     }
 

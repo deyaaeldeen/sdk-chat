@@ -24,11 +24,13 @@ public static class ServiceBuilder
         }
         services.AddSingleton(options);
 
+        // Core services
         services.AddSingleton<AiDebugLogger>();
         services.AddSingleton<AiService>();
         services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
         services.AddSingleton<FileHelper>();
-        services.AddSingleton<ConfigurationHelper>();
+        
+        // Sample generation (SamplePromptBuilder and SampleWriter are created internally)
         services.AddSingleton<SampleGeneratorTool>();
 
         return services.BuildServiceProvider();

@@ -217,7 +217,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         }
     }
 
-    private string GetTypeKind(BaseTypeDeclarationSyntax type) => type switch
+    private static string GetTypeKind(BaseTypeDeclarationSyntax type) => type switch
     {
         RecordDeclarationSyntax r when r.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword) => "record struct",
         RecordDeclarationSyntax => "record",
@@ -228,7 +228,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         _ => "type"
     };
 
-    private string GetTypeName(BaseTypeDeclarationSyntax type)
+    private static string GetTypeName(BaseTypeDeclarationSyntax type)
     {
         var name = type.Identifier.Text;
         if (type is TypeDeclarationSyntax tds && tds.TypeParameterList != null)
@@ -288,19 +288,19 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         _ => null
     };
 
-    private string TypeParams(MethodDeclarationSyntax m) =>
+    private static string TypeParams(MethodDeclarationSyntax m) =>
         m.TypeParameterList != null
             ? "<" + string.Join(",", m.TypeParameterList.Parameters.Select(p => p.Identifier.Text)) + ">"
             : "";
 
-    private bool IsAsyncMethod(MethodDeclarationSyntax m)
+    private static bool IsAsyncMethod(MethodDeclarationSyntax m)
     {
         var ret = m.ReturnType.ToString();
         return m.Modifiers.Any(SyntaxKind.AsyncKeyword) ||
                ret.StartsWith("Task") || ret.StartsWith("ValueTask") || ret.StartsWith("IAsyncEnumerable");
     }
 
-    private string Accessors(PropertyDeclarationSyntax p)
+    private static string Accessors(PropertyDeclarationSyntax p)
     {
         if (p.ExpressionBody != null) return " { get; }";
         if (p.AccessorList == null) return "";
@@ -334,14 +334,14 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         return string.IsNullOrEmpty(mods) ? $"{type} {name}{def}" : $"{mods} {type} {name}{def}";
     }
 
-    private string Simplify(TypeSyntax? type) =>
+    private static string Simplify(TypeSyntax? type) =>
         type?.ToString()
             .Replace("System.Threading.Tasks.", "")
             .Replace("System.Collections.Generic.", "")
             .Replace("System.Threading.", "")
             .Replace("System.", "") ?? "";
 
-    private string? GetXmlDoc(SyntaxNode node)
+    private static string? GetXmlDoc(SyntaxNode node)
     {
         var trivia = node.GetLeadingTrivia()
             .FirstOrDefault(t => t.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) ||
@@ -365,9 +365,9 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
     private bool IsPublic(BaseTypeDeclarationSyntax t) => t.Modifiers.Any(SyntaxKind.PublicKeyword);
     private bool IsPublicMember(MemberDeclarationSyntax m) => m.Modifiers.Any(SyntaxKind.PublicKeyword);
-    private bool IsInterface(string name) => name.Length >= 2 && name[0] == 'I' && char.IsUpper(name[1]);
+    private static bool IsInterface(string name) => name.Length >= 2 && name[0] == 'I' && char.IsUpper(name[1]);
 
-    private string DetectPackageName(string rootPath)
+    private static string DetectPackageName(string rootPath)
     {
         var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
                   ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();

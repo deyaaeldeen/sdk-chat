@@ -74,26 +74,6 @@ public class AiServiceTests : IDisposable
     }
 
     [Fact]
-    public void PromptReady_CanSubscribe()
-    {
-        AiPromptReadyEventArgs? receivedArgs = null;
-        _service.PromptReady += (sender, args) => receivedArgs = args;
-
-        // Event is only raised during actual streaming, but we verify subscription works
-        Assert.Null(receivedArgs);
-    }
-
-    [Fact]
-    public void StreamComplete_CanSubscribe()
-    {
-        AiStreamCompleteEventArgs? receivedArgs = null;
-        _service.StreamComplete += (sender, args) => receivedArgs = args;
-
-        // Event is only raised during actual streaming, but we verify subscription works
-        Assert.Null(receivedArgs);
-    }
-
-    [Fact]
     public async Task DisposeAsync_CanBeCalledMultipleTimes()
     {
         // Thread-safe disposal should not throw on multiple calls

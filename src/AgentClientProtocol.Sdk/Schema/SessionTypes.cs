@@ -1,7 +1,16 @@
 // Agent Client Protocol - .NET SDK
 // Session-related types
 
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
+
+// Protocol DTOs must match JSON schema exactly - suppress CA rules that would require type changes
+[assembly: SuppressMessage("Performance", "CA1819:Properties should not return arrays",
+    Scope = "namespaceanddescendants", Target = "~N:AgentClientProtocol.Sdk.Schema",
+    Justification = "Protocol DTOs must match JSON schema; arrays are serialized directly")]
+[assembly: SuppressMessage("Design", "CA1056:URI-like properties should not be strings",
+    Scope = "namespaceanddescendants", Target = "~N:AgentClientProtocol.Sdk.Schema",
+    Justification = "Protocol DTOs must match JSON schema; URIs are serialized as strings")]
 
 namespace AgentClientProtocol.Sdk.Schema;
 

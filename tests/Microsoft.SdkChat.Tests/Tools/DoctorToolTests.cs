@@ -88,7 +88,7 @@ public class DoctorToolTests
 
         try
         {
-            var exitCode = await tool.ExecuteAsync(verbose: false);
+            var exitCode = await DoctorTool.ExecuteAsync(verbose: false);
 
             // Should return 0 (success) - .NET is always available
             // May return 0 even if optional deps are missing
@@ -115,7 +115,7 @@ public class DoctorToolTests
 
         try
         {
-            await tool.ExecuteAsync(verbose: true);
+            await DoctorTool.ExecuteAsync(verbose: true);
 
             var output = sw.ToString();
             // Verbose mode should show paths for available tools
@@ -138,7 +138,7 @@ public class DoctorToolTests
 
         try
         {
-            await tool.ExecuteAsync(verbose: false);
+            await DoctorTool.ExecuteAsync(verbose: false);
 
             var output = sw.ToString();
             // Non-verbose mode should not show paths (unless there's a warning)
@@ -165,7 +165,7 @@ public class DoctorToolTests
 
         try
         {
-            await tool.ExecuteAsync(verbose: false);
+            await DoctorTool.ExecuteAsync(verbose: false);
 
             var output = sw.ToString();
             Assert.Contains("SDK Chat Doctor", output);
@@ -188,7 +188,7 @@ public class DoctorToolTests
 
         try
         {
-            await tool.ExecuteAsync(verbose: false);
+            await DoctorTool.ExecuteAsync(verbose: false);
 
             var output = sw.ToString();
 
@@ -222,7 +222,7 @@ public class DoctorToolTests
         {
             // Tool should either throw OperationCanceledException or handle gracefully
             // Since it catches exceptions during command execution, it may complete with failures
-            var exitCode = await tool.ExecuteAsync(verbose: false, ct: cts.Token);
+            var exitCode = await DoctorTool.ExecuteAsync(verbose: false, ct: cts.Token);
             // If it completes without throwing, that's acceptable behavior
             // The exit code will reflect that tools couldn't be checked
         }
@@ -251,7 +251,7 @@ public class DoctorToolTests
 
         try
         {
-            await tool.ExecuteAsync(verbose: false);
+            await DoctorTool.ExecuteAsync(verbose: false);
 
             var output = sw.ToString();
 
@@ -278,7 +278,7 @@ public class DoctorToolTests
 
         try
         {
-            await tool.ExecuteAsync(verbose: false);
+            await DoctorTool.ExecuteAsync(verbose: false);
 
             var output = sw.ToString();
 
@@ -303,7 +303,7 @@ public class DoctorToolTests
 
         try
         {
-            await tool.ExecuteAsync(verbose: false);
+            await DoctorTool.ExecuteAsync(verbose: false);
 
             var output = sw.ToString();
 
@@ -347,7 +347,7 @@ public class DoctorToolTests
 
         try
         {
-            var exitCode = await tool.ExecuteAsync(verbose: false);
+            var exitCode = await DoctorTool.ExecuteAsync(verbose: false);
 
             // Exit code should always be 0 when running as a .NET app
             // because .NET Runtime is always available
@@ -374,7 +374,7 @@ public class DoctorToolTests
 
         try
         {
-            await tool.ExecuteAsync(verbose: false);
+            await DoctorTool.ExecuteAsync(verbose: false);
 
             var output = sw.ToString();
 

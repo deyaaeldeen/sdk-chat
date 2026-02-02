@@ -114,6 +114,8 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
 
+        GC.SuppressFinalize(this);
+
         // Wait for any in-flight writes to complete before disposing
         try
         {

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json.Serialization.Metadata;
@@ -59,15 +60,16 @@ public class AiService : IAiService
     public bool IsUsingOpenAi => _options.UseOpenAi;
     public string GetEffectiveModel(string? modelOverride = null) => _options.GetEffectiveModel(modelOverride);
 
-    public event EventHandler<AiPromptReadyEventArgs>? PromptReady;
-    public event EventHandler<AiStreamCompleteEventArgs>? StreamComplete;
-
+    [UnconditionalSuppressMessage("AOT", "IL2072:UnrecognizedReflectionPattern",
+        Justification = "JsonTypeInfo.Type is preserved via [JsonSerializable] attribute on source-generated contexts")]
     public async IAsyncEnumerable<T> StreamItemsAsync<T>(
         string systemPrompt,
         IAsyncEnumerable<string> userPromptStream,
         JsonTypeInfo<T> jsonTypeInfo,
         string? model = null,
         ContextInfo? contextInfo = null,
+        AiPromptReadyCallback? onPromptReady = null,
+        AiStreamCompleteCallback? onStreamComplete = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Acquire rate limit permit - throws RateLimiterRejectedException if queue is full
@@ -92,9 +94,7 @@ public class AiService : IAiService
         // Append type schema to system prompt for structured output
         // Contract: NDJSON (one JSON object per line), no markdown, no array.
         // JsonTypeInfo.Type is preserved via [JsonSerializable] on source-generated context
-#pragma warning disable IL2072 // Type is preserved via JsonSerializable attribute
         var schema = GenerateJsonSchema(jsonTypeInfo.Type);
-#pragma warning restore IL2072
         var enhancedSystemPrompt =
             $"{systemPrompt}\n\n" +
             "Output MUST be NDJSON (newline-delimited JSON):\n" +
@@ -106,10 +106,13 @@ public class AiService : IAiService
 
         var provider = _options.UseOpenAi ? "OpenAI" : "Copilot";
 
-        // Fire prompt ready event (used by UX to print model/size and start spinners)
+        // Invoke async prompt ready callback (used by UX to print model/size and start spinners)
         var promptChars = enhancedSystemPrompt.Length + userPrompt.Length;
         var estimatedTokens = promptChars / SampleConstants.CharsPerToken;
-        PromptReady?.Invoke(this, new AiPromptReadyEventArgs(promptChars, estimatedTokens));
+        if (onPromptReady != null)
+        {
+            await onPromptReady(new AiPromptReadyEventArgs(promptChars, estimatedTokens));
+        }
 
         // Start debug session
         var debugSession = _debugLogger.StartSession(
@@ -127,7 +130,7 @@ public class AiService : IAiService
         IAsyncEnumerable<string> stream = StreamCopilotAsync(enhancedSystemPrompt, userPrompt, effectiveModel, cancellationToken);
 
         await using var enumerator = NdjsonStreamParser
-            .ParseAsync(TapStream(stream, responseBuilder, cancellationToken), jsonTypeInfo, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
+            .ParseAsync(TapStreamAsync(stream, responseBuilder, cancellationToken), jsonTypeInfo, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
             .GetAsyncEnumerator(cancellationToken);
 
         while (true)
@@ -154,17 +157,20 @@ public class AiService : IAiService
             yield return item;
         }
 
-        // Fire stream complete event with response usage
+        // Invoke async stream complete callback with response usage
         var responseChars = responseBuilder.Length;
         var estimatedResponseTokens = responseChars / SampleConstants.CharsPerToken;
         var duration = DateTime.UtcNow - startTime;
 
-        StreamComplete?.Invoke(this, new AiStreamCompleteEventArgs(responseChars, estimatedResponseTokens, duration));
+        if (onStreamComplete != null)
+        {
+            await onStreamComplete(new AiStreamCompleteEventArgs(responseChars, estimatedResponseTokens, duration));
+        }
 
         await _debugLogger.CompleteSessionAsync(debugSession, responseBuilder.ToString(), streaming: true);
     }
 
-    private static async IAsyncEnumerable<string> TapStream(
+    private static async IAsyncEnumerable<string> TapStreamAsync(
         IAsyncEnumerable<string> stream,
         StringBuilder responseBuilder,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -304,7 +310,7 @@ public class AiService : IAiService
                 GithubToken = githubToken
             });
 
-            await _copilotClient.StartAsync();
+            await _copilotClient.StartAsync(cancellationToken);
             _logger.LogDebug("GitHub Copilot client started successfully");
 
             return _copilotClient;
@@ -364,7 +370,7 @@ public class AiService : IAiService
                 Content = systemPrompt
             },
             AvailableTools = new List<string>()
-        });
+        }, cancellationToken);
 
         var chunks = System.Threading.Channels.Channel.CreateUnbounded<string>();
 
@@ -384,7 +390,7 @@ public class AiService : IAiService
             }
         });
 
-        await session.SendAsync(new MessageOptions { Prompt = userPrompt });
+        await session.SendAsync(new MessageOptions { Prompt = userPrompt }, cancellationToken);
 
         await foreach (var chunk in chunks.Reader.ReadAllAsync(cancellationToken))
         {
@@ -399,6 +405,8 @@ public class AiService : IAiService
         // Thread-safe disposal - only first caller proceeds
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
+
+        GC.SuppressFinalize(this);
 
         // Dispose rate limiter first
         _rateLimiter.Dispose();

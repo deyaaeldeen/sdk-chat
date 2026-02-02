@@ -107,7 +107,6 @@ public static class McpServer
         services.AddSingleton<AiService>();
         services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
         services.AddSingleton<FileHelper>();
-        services.AddSingleton<ConfigurationHelper>();
     }
 
     private static LogLevel ParseLogLevel(string level) => level.ToLowerInvariant() switch

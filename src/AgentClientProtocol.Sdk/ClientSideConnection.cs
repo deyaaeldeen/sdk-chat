@@ -84,5 +84,9 @@ public class ClientSideConnection : IAgent, IAsyncDisposable
     public Task CancelAsync(CancelNotification notification, CancellationToken ct = default) =>
         _connection.SendNotificationAsync(AgentMethods.SessionCancel, notification, ct);
 
-    public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    public ValueTask DisposeAsync()
+    {
+        GC.SuppressFinalize(this);
+        return _connection.DisposeAsync();
+    }
 }

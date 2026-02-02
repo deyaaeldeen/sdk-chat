@@ -587,7 +587,7 @@ public class FileHelperTests : IDisposable
     public void ValidateEmptyDirectory_NonExistent_ReturnsError()
     {
         // Act
-        var result = _fileHelper.ValidateEmptyDirectory(Path.Combine(_testDir, "nonexistent"));
+        var result = FileHelper.ValidateEmptyDirectory(Path.Combine(_testDir, "nonexistent"));
 
         // Assert
         Assert.NotNull(result);
@@ -601,7 +601,7 @@ public class FileHelperTests : IDisposable
         CreateFile("file.txt", "content");
 
         // Act
-        var result = _fileHelper.ValidateEmptyDirectory(_testDir);
+        var result = FileHelper.ValidateEmptyDirectory(_testDir);
 
         // Assert
         Assert.NotNull(result);
@@ -616,7 +616,7 @@ public class FileHelperTests : IDisposable
         Directory.CreateDirectory(emptyDir);
 
         // Act
-        var result = _fileHelper.ValidateEmptyDirectory(emptyDir);
+        var result = FileHelper.ValidateEmptyDirectory(emptyDir);
 
         // Assert
         Assert.Null(result);
@@ -626,9 +626,9 @@ public class FileHelperTests : IDisposable
     public void ValidateEmptyDirectory_NullOrWhitespace_ReturnsError()
     {
         // Act & Assert
-        Assert.NotNull(_fileHelper.ValidateEmptyDirectory(""));
-        Assert.NotNull(_fileHelper.ValidateEmptyDirectory("   "));
-        Assert.NotNull(_fileHelper.ValidateEmptyDirectory(null!));
+        Assert.NotNull(FileHelper.ValidateEmptyDirectory(""));
+        Assert.NotNull(FileHelper.ValidateEmptyDirectory("   "));
+        Assert.NotNull(FileHelper.ValidateEmptyDirectory(null!));
     }
 
     [Fact]

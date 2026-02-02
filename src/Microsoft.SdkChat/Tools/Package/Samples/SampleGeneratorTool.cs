@@ -15,17 +15,14 @@ public class SampleGeneratorTool
 {
     private readonly IAiService _aiService;
     private readonly FileHelper _fileHelper;
-    private readonly ConfigurationHelper _configHelper;
 
     public SampleGeneratorTool(
         IAiService aiService,
         FileHelper fileHelper,
-        ConfigurationHelper configHelper,
         ILogger<SampleGeneratorTool> logger)
     {
         _aiService = aiService;
         _fileHelper = fileHelper;
-        _configHelper = configHelper;
         // logger available for future debugging if needed
     }
 
@@ -94,7 +91,7 @@ public class SampleGeneratorTool
         }
 
         // Load config if present
-        var config = await _configHelper.LoadConfigAsync(sdkPath, cancellationToken);
+        var config = await ConfigurationHelper.LoadConfigAsync(sdkPath, cancellationToken);
 
         // Get language context
         var context = CreateLanguageContext(detectedLanguage.Value);
@@ -138,11 +135,10 @@ public class SampleGeneratorTool
         var promptPrepStopwatch = Stopwatch.StartNew();
         promptPrepStopwatch.Stop();
 
-        // Named event handlers for proper cleanup (prevents memory leaks)
         int? responseTokens = null;
         TimeSpan? generationDuration = null;
 
-        void OnPromptReady(object? sender, AiPromptReadyEventArgs args)
+        async ValueTask OnPromptReadyAsync(AiPromptReadyEventArgs args)
         {
             promptTokens = args.EstimatedTokens;
 
@@ -151,9 +147,12 @@ public class SampleGeneratorTool
                 promptPrepStopwatch.Stop();
             }
 
-            preparingProgress?.Complete($"Prepared prompt ({FormatDuration(promptPrepStopwatch.Elapsed)})");
-            preparingProgress?.Dispose();
-            preparingProgress = null;
+            if (preparingProgress != null)
+            {
+                await preparingProgress.CompleteAsync($"Prepared prompt ({FormatDuration(promptPrepStopwatch.Elapsed)})");
+                await preparingProgress.DisposeAsync();
+                preparingProgress = null;
+            }
 
             // Print prompt size, then start the generation spinner
             ConsoleUx.Info($"Prompt: {FormatTokenEstimate(args.EstimatedTokens)}");
@@ -164,54 +163,57 @@ public class SampleGeneratorTool
                     : $"Generating with {providerName}...");
         }
 
-        void OnStreamComplete(object? sender, AiStreamCompleteEventArgs args)
+        // Async callback for stream complete
+        ValueTask OnStreamCompleteAsync(AiStreamCompleteEventArgs args)
         {
             responseTokens = args.EstimatedResponseTokens;
             generationDuration = args.Duration;
+            return ValueTask.CompletedTask;
         }
 
-        // Register event handlers - PromptReady fires during materialization inside StreamItemsAsync
-        _aiService.PromptReady += OnPromptReady;
-        _aiService.StreamComplete += OnStreamComplete;
+        // Create streaming user prompt (materialization happens inside AiService)
+        var userPromptStream = StreamUserPromptAsync(prompt, count ?? 5, existingSamplesCount > 0, sdkInfo.SourceFolder, existingSamplesPath, outputDir, context, config, contextBudget, cancellationToken);
+
+        List<GeneratedSample> samples = [];
+
+        // Start a spinner while AiService materializes the streamed user prompt.
+        preparingProgress = ConsoleUx.StartStreaming("Preparing prompt...");
+        promptPrepStopwatch.Restart();
+
+        var generationStopwatch = Stopwatch.StartNew();
 
         try
         {
-            // Create streaming user prompt (materialization happens inside AiService)
-            var userPromptStream = StreamUserPromptAsync(prompt, count ?? 5, existingSamplesCount > 0, sdkInfo.SourceFolder, existingSamplesPath, outputDir, context, config, contextBudget, cancellationToken);
-
-            List<GeneratedSample> samples = [];
-
-            // Start a spinner while AiService materializes the streamed user prompt.
-            preparingProgress = ConsoleUx.StartStreaming("Preparing prompt...");
-            promptPrepStopwatch.Restart();
-
-            var generationStopwatch = Stopwatch.StartNew();
-
-            try
+            // Stream parsed samples as they complete
+            await foreach (var sample in _aiService.StreamItemsAsync(
+                systemPrompt,
+                userPromptStream,
+                AiStreamingJsonContext.CaseInsensitive.GeneratedSample,
+                model,
+                contextInfo: null,
+                onPromptReady: OnPromptReadyAsync,
+                onStreamComplete: OnStreamCompleteAsync,
+                cancellationToken: cancellationToken))
             {
-                // Stream parsed samples as they complete
-                await foreach (var sample in _aiService.StreamItemsAsync(
-                    systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, model, null, cancellationToken))
+                if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
                 {
-                    if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
-                    {
-                        samples.Add(sample);
-                        // Use FilePath if provided, otherwise generate from Name
-                        var relativePath = !string.IsNullOrEmpty(sample.FilePath)
-                            ? SanitizePath(sample.FilePath, context.FileExtension)
-                            : SanitizeName(sample.Name) + context.FileExtension;
-                        var fullPath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
-                        progress?.Update(fullPath);
-                    }
+                    samples.Add(sample);
+                    // Use FilePath if provided, otherwise generate from Name
+                    var relativePath = !string.IsNullOrEmpty(sample.FilePath)
+                        ? SanitizePath(sample.FilePath, context.FileExtension)
+                        : SanitizeName(sample.Name) + context.FileExtension;
+                    var fullPath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
+                    progress?.Update(fullPath);
                 }
             }
-            catch (OperationCanceledException)
-            {
-                // Propagate cancellation - don't swallow it
-                preparingProgress?.Dispose();
-                progress?.Dispose();
-                throw;
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Propagate cancellation - use async dispose before rethrowing
+            if (preparingProgress != null) await preparingProgress.DisposeAsync();
+            if (progress != null) await progress.DisposeAsync();
+            throw;
+        }
             catch (Exception ex)
             {
                 if (promptPrepStopwatch.IsRunning)
@@ -219,12 +221,18 @@ public class SampleGeneratorTool
                     promptPrepStopwatch.Stop();
                 }
 
-                preparingProgress?.Fail("Preparing prompt failed");
-                preparingProgress?.Dispose();
-                preparingProgress = null;
+                if (preparingProgress != null)
+                {
+                    await preparingProgress.FailAsync("Preparing prompt failed");
+                    await preparingProgress.DisposeAsync();
+                    preparingProgress = null;
+                }
 
-                progress?.Fail("Generation failed");
-                progress?.Dispose();
+                if (progress != null)
+                {
+                    await progress.FailAsync("Generation failed");
+                    await progress.DisposeAsync();
+                }
                 ConsoleUx.Error(ex.Message);
                 return 1;
             }
@@ -240,16 +248,25 @@ public class SampleGeneratorTool
                     effectiveGenerationDuration = generationStopwatch.Elapsed;
                 }
 
-                progress?.Complete($"Generated {samples.Count} sample(s) ({FormatDuration(effectiveGenerationDuration.Value)})");
+                if (progress != null)
+                {
+                    await progress.CompleteAsync($"Generated {samples.Count} sample(s) ({FormatDuration(effectiveGenerationDuration.Value)})");
+                }
             }
             else
             {
-                progress?.Fail("No samples generated");
-                progress?.Dispose();
+                if (progress != null)
+                {
+                    await progress.FailAsync("No samples generated");
+                    await progress.DisposeAsync();
+                }
                 return 1;
             }
 
-            progress?.Dispose();
+            if (progress != null)
+            {
+                await progress.DisposeAsync();
+            }
 
             // Show response token usage
             if (responseTokens != null)
@@ -315,13 +332,6 @@ public class SampleGeneratorTool
                 $"Summary: time scan {FormatDuration(scanStopwatch.Elapsed)}, files {FormatDuration(filesStopwatch.Elapsed)}, prompt {FormatDuration(promptPrepDuration)}, generate {FormatDuration(genDuration)}, total {FormatDuration(totalStopwatch.Elapsed)}");
 
             return 0;
-        }
-        finally
-        {
-            // Always unsubscribe event handlers to prevent memory leaks
-            _aiService.PromptReady -= OnPromptReady;
-            _aiService.StreamComplete -= OnStreamComplete;
-        }
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -410,7 +420,7 @@ public class SampleGeneratorTool
     /// Streams the complete user prompt including prefix, context, and suffix.
     /// Uses budget tracking to enforce limits and prevent overflow.
     /// </summary>
-    private async IAsyncEnumerable<string> StreamUserPromptAsync(
+    private static async IAsyncEnumerable<string> StreamUserPromptAsync(
         string? customPrompt,
         int count,
         bool hasExistingSamples,
@@ -528,7 +538,7 @@ public class SampleGeneratorTool
     /// Streams context from source code and samples without materializing in memory.
     /// Uses language-specific API extraction with coverage-aware formatting for ~70% token reduction.
     /// </summary>
-    private async IAsyncEnumerable<string> StreamContextAsync(
+    private static async IAsyncEnumerable<string> StreamContextAsync(
         string sourceFolder,
         string? samplesFolder,
         SampleLanguageContext languageContext,

@@ -7,7 +7,7 @@ public class ConfigurationHelper
 {
     private const string ConfigFileName = "sdk-chat-config.json";
 
-    public async Task<SdkChatConfig?> TryLoadConfigAsync(string packagePath, CancellationToken cancellationToken = default)
+    public static async Task<SdkChatConfig?> TryLoadConfigAsync(string packagePath, CancellationToken cancellationToken = default)
     {
         var configPath = Path.Combine(packagePath, ConfigFileName);
 
@@ -19,7 +19,7 @@ public class ConfigurationHelper
         return JsonSerializer.Deserialize(json, SdkChatJsonContext.Default.SdkChatConfig);
     }
 
-    public async Task<SdkChatConfig> LoadConfigAsync(string packagePath, CancellationToken cancellationToken = default)
+    public static async Task<SdkChatConfig> LoadConfigAsync(string packagePath, CancellationToken cancellationToken = default)
     {
         return await TryLoadConfigAsync(packagePath, cancellationToken) ?? new SdkChatConfig();
     }

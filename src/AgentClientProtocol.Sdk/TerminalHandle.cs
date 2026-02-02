@@ -105,6 +105,7 @@ public class TerminalHandle : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        GC.SuppressFinalize(this);
         try
         {
             await ReleaseAsync().ConfigureAwait(false);

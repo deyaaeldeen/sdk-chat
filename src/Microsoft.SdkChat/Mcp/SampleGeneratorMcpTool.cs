@@ -37,15 +37,21 @@ public class SampleGeneratorMcpTool(
     {
         using var activity = SdkChatTelemetry.StartMcpTool("generate_samples");
 
-        // Track token usage via events
+        // Track token usage via async callbacks
         var promptTokens = 0;
         var responseTokens = 0;
 
-        void OnPromptReady(object? sender, AiPromptReadyEventArgs e) => promptTokens = e.EstimatedTokens;
-        void OnStreamComplete(object? sender, AiStreamCompleteEventArgs e) => responseTokens = e.EstimatedResponseTokens;
+        ValueTask OnPromptReadyAsync(AiPromptReadyEventArgs e)
+        {
+            promptTokens = e.EstimatedTokens;
+            return ValueTask.CompletedTask;
+        }
 
-        aiService.PromptReady += OnPromptReady;
-        aiService.StreamComplete += OnStreamComplete;
+        ValueTask OnStreamCompleteAsync(AiStreamCompleteEventArgs e)
+        {
+            responseTokens = e.EstimatedResponseTokens;
+            return ValueTask.CompletedTask;
+        }
 
         try
         {
@@ -88,7 +94,8 @@ public class SampleGeneratorMcpTool(
             List<GeneratedSample> samples = [];
             List<string> generatedFiles = [];
             await foreach (var sample in aiService.StreamItemsAsync(
-                systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, model, null, cancellationToken))
+                systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, model, null,
+                OnPromptReadyAsync, OnStreamCompleteAsync, cancellationToken))
             {
                 if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
                 {
@@ -143,11 +150,6 @@ public class SampleGeneratorMcpTool(
         {
             SdkChatTelemetry.RecordError(activity, ex);
             return McpToolResult.CreateFailure($"Error generating samples: {ex.Message}", ex).ToString();
-        }
-        finally
-        {
-            aiService.PromptReady -= OnPromptReady;
-            aiService.StreamComplete -= OnStreamComplete;
         }
     }
 

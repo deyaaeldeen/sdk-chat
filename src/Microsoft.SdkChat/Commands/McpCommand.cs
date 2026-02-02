@@ -28,7 +28,8 @@ public class McpCommand : Command
                 ctx.GetValue(transport)!,
                 ctx.GetValue(port),
                 ctx.GetValue(logLevel)!,
-                ctx.GetValue(useOpenAi)
+                ctx.GetValue(useOpenAi),
+                ct
             );
         });
     }

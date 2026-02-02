@@ -55,7 +55,12 @@ public interface IAgent : IAsyncDisposable
         Task.FromResult<LoadSessionResponse?>(null);
 
     /// <summary>
-    /// Default disposal implementation.
+    /// Default disposal implementation - no-op for interfaces.
+    /// Implementing classes should override if they hold resources.
     /// </summary>
-    ValueTask IAsyncDisposable.DisposeAsync() => ValueTask.CompletedTask;
+    ValueTask IAsyncDisposable.DisposeAsync()
+    {
+        GC.SuppressFinalize(this);
+        return ValueTask.CompletedTask;
+    }
 }

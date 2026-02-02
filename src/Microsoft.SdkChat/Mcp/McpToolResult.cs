@@ -198,6 +198,6 @@ public sealed record ResultData
 [JsonSerializable(typeof(McpToolResult))]
 [JsonSerializable(typeof(ErrorDetails))]
 [JsonSerializable(typeof(ResultData))]
-internal partial class McpJsonContext : JsonSerializerContext
+internal sealed partial class McpJsonContext : JsonSerializerContext
 {
 }

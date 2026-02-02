@@ -51,7 +51,7 @@ public sealed partial class DoctorTool
         string? Error
     );
 
-    public async Task<int> ExecuteAsync(bool verbose, CancellationToken ct = default)
+    public static async Task<int> ExecuteAsync(bool verbose, CancellationToken ct = default)
     {
         var hasPrecompiledExtractors = HasPrecompiledExtractors();
 
@@ -402,7 +402,7 @@ public sealed partial class DoctorTool
         Console.WriteLine("  SDK_CHAT_PYTHON_PATH, SDK_CHAT_GO_PATH, SDK_CHAT_NODE_PATH, SDK_CHAT_JBANG_PATH");
     }
 
-    private record ExtractorStatus(string Name, string Language, bool IsAvailable, string? Path);
+    private sealed record ExtractorStatus(string Name, string Language, bool IsAvailable, string? Path);
 
     private static List<ExtractorStatus> CheckPrecompiledExtractors()
     {
@@ -449,7 +449,7 @@ public sealed partial class DoctorTool
         Console.WriteLine();
     }
 
-    private record CopilotStatus(bool IsAvailable, string? Version, string? AuthStatus);
+    private sealed record CopilotStatus(bool IsAvailable, string? Version, string? AuthStatus);
 
     private static async Task<CopilotStatus> CheckCopilotCliAsync(CancellationToken ct)
     {

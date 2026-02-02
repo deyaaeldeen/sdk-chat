@@ -60,7 +60,6 @@ public static class SampleGeneratorAgentHost
         services.AddSingleton<AiService>();
         services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
         services.AddSingleton<FileHelper>();
-        services.AddSingleton<ConfigurationHelper>();
 
         return services.BuildServiceProvider();
     }

@@ -31,6 +31,8 @@ public static class MockAiServiceFactory
                 It.IsAny<JsonTypeInfo<T>>(),
                 It.IsAny<string?>(),
                 It.IsAny<ContextInfo?>(),
+                It.IsAny<AiPromptReadyCallback?>(),
+                It.IsAny<AiStreamCompleteCallback?>(),
                 It.IsAny<CancellationToken>()))
             .Returns(samples.ToAsyncEnumerable());
 
@@ -53,6 +55,8 @@ public static class MockAiServiceFactory
                 It.IsAny<JsonTypeInfo<T>>(),
                 It.IsAny<string?>(),
                 It.IsAny<ContextInfo?>(),
+                It.IsAny<AiPromptReadyCallback?>(),
+                It.IsAny<AiStreamCompleteCallback?>(),
                 It.IsAny<CancellationToken>()))
             .Throws(exception);
 
@@ -71,6 +75,8 @@ public static class MockAiServiceFactory
                 It.IsAny<JsonTypeInfo<T>>(),
                 It.IsAny<string?>(),
                 It.IsAny<ContextInfo?>(),
+                It.IsAny<AiPromptReadyCallback?>(),
+                It.IsAny<AiStreamCompleteCallback?>(),
                 It.IsAny<CancellationToken>()))
             .Returns(samples.ToAsyncEnumerable())
             .Verifiable();
@@ -94,9 +100,6 @@ public class MockAiService : IAiService
     private TimeSpan _delayBeforeResponse = TimeSpan.Zero;
 
     public bool IsUsingOpenAi => false;
-
-    public event EventHandler<AiPromptReadyEventArgs>? PromptReady;
-    public event EventHandler<AiStreamCompleteEventArgs>? StreamComplete;
 
     public string GetEffectiveModel(string? modelOverride = null) => modelOverride ?? "mock-model";
 
@@ -135,6 +138,8 @@ public class MockAiService : IAiService
         JsonTypeInfo<T> jsonTypeInfo,
         string? model = null,
         ContextInfo? contextInfo = null,
+        AiPromptReadyCallback? onPromptReady = null,
+        AiStreamCompleteCallback? onStreamComplete = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         CallCount++;
@@ -154,9 +159,12 @@ public class MockAiService : IAiService
             await Task.Delay(_delayBeforeResponse, cancellationToken);
         }
 
-        // Fire events
+        // Invoke async callback for prompt ready
         var promptChars = systemPrompt.Length + LastUserPrompt.Length;
-        PromptReady?.Invoke(this, new AiPromptReadyEventArgs(promptChars, promptChars / 4));
+        if (onPromptReady != null)
+        {
+            await onPromptReady(new AiPromptReadyEventArgs(promptChars, promptChars / 4));
+        }
 
         if (_exceptionToThrow != null)
         {
@@ -173,7 +181,11 @@ public class MockAiService : IAiService
             }
         }
 
-        StreamComplete?.Invoke(this, new AiStreamCompleteEventArgs(1000, 250, TimeSpan.FromMilliseconds(1)));
+        // Invoke async callback for stream complete
+        if (onStreamComplete != null)
+        {
+            await onStreamComplete(new AiStreamCompleteEventArgs(1000, 250, TimeSpan.FromMilliseconds(1)));
+        }
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

@@ -277,7 +277,7 @@ public class FileHelper
         );
     }
 
-    private async IAsyncEnumerable<FileChunk> StreamFilesAsync(
+    private static async IAsyncEnumerable<FileChunk> StreamFilesAsync(
         FileLoadingPlan plan,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -318,7 +318,7 @@ public class FileHelper
         }
     }
 
-    private async IAsyncEnumerable<FileChunk> StreamFileContentAsync(
+    private static async IAsyncEnumerable<FileChunk> StreamFileContentAsync(
         FileLoadingItem item,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -367,7 +367,7 @@ public class FileHelper
         }
     }
 
-    public string? ValidateEmptyDirectory(string dir)
+    public static string? ValidateEmptyDirectory(string dir)
     {
         if (string.IsNullOrWhiteSpace(dir))
             return "Directory must be defined";

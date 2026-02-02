@@ -181,5 +181,9 @@ public class AgentSideConnection : IAsyncDisposable
     public Task<KillTerminalCommandResponse> KillTerminalAsync(KillTerminalCommandRequest request, CancellationToken ct = default) =>
         _connection.SendRequestAsync<KillTerminalCommandResponse>(ClientMethods.TerminalKill, request, ct)!;
 
-    public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    public ValueTask DisposeAsync()
+    {
+        GC.SuppressFinalize(this);
+        return _connection.DisposeAsync();
+    }
 }

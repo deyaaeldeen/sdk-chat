@@ -2,12 +2,18 @@
 // Standard JSON-RPC error codes
 
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace AgentClientProtocol.Sdk.JsonRpc;
 
 /// <summary>
 /// JSON-RPC 2.0 error with standard ACP error codes.
+/// Named "Error" (not "Exception") to match JSON-RPC 2.0 specification terminology.
 /// </summary>
+[SuppressMessage("Design", "CA1032:Implement standard exception constructors",
+    Justification = "RequestError requires code+message; parameterless/message-only constructors are invalid for JSON-RPC errors")]
+[SuppressMessage("Naming", "CA1710:Identifiers should have correct suffix",
+    Justification = "Named 'Error' to match JSON-RPC 2.0 specification terminology")]
 public class RequestError : Exception
 {
     public int Code { get; }

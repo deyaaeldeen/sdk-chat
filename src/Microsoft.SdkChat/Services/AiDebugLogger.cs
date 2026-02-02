@@ -203,7 +203,7 @@ public class AiDebugLogger
         _logger.LogDebug("Wrote debug log to {FilePath}", session.FilePath);
     }
 
-    private async Task WriteMarkdownAsync(StreamWriter writer, AiDebugSession session)
+    private static async Task WriteMarkdownAsync(StreamWriter writer, AiDebugSession session)
     {
         // Header
         await writer.WriteLineAsync($"# AI Debug Log: {session.SessionId}");
@@ -452,6 +452,6 @@ internal sealed record DebugRequestDetails
 /// </summary>
 [System.Text.Json.Serialization.JsonSourceGenerationOptions(WriteIndented = true)]
 [System.Text.Json.Serialization.JsonSerializable(typeof(DebugRequestDetails))]
-internal partial class DebugJsonContext : System.Text.Json.Serialization.JsonSerializerContext
+internal sealed partial class DebugJsonContext : System.Text.Json.Serialization.JsonSerializerContext
 {
 }

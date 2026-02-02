@@ -333,6 +333,8 @@ public class Connection : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
 
+        GC.SuppressFinalize(this);
+
         // Cancel ongoing operations
         await _cts.CancelAsync().ConfigureAwait(false);
 

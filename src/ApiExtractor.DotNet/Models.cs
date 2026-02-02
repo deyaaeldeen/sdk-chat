@@ -217,7 +217,7 @@ public record MemberInfo
     WriteIndented = false,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-internal partial class JsonContext : JsonSerializerContext
+internal sealed partial class JsonContext : JsonSerializerContext
 {
     private static JsonContext? _indented;
 

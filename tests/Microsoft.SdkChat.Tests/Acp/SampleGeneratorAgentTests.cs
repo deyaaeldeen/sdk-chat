@@ -38,7 +38,6 @@ public class SampleGeneratorAgentTests : IDisposable
         serviceCollection.AddSingleton(SdkChatOptions.FromEnvironment());
         serviceCollection.AddSingleton<AiDebugLogger>();
         serviceCollection.AddSingleton<FileHelper>();
-        serviceCollection.AddSingleton<ConfigurationHelper>();
 
         _mockAiService = new MockAiService();
         serviceCollection.AddSingleton<IAiService>(_mockAiService);

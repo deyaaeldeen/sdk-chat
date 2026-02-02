@@ -13,8 +13,7 @@ public class DoctorCommand : Command
         this.SetAction(async (ctx, ct) =>
         {
             var isVerbose = ctx.GetValue(verbose);
-            var tool = new DoctorTool();
-            Environment.ExitCode = await tool.ExecuteAsync(isVerbose, ct);
+            Environment.ExitCode = await DoctorTool.ExecuteAsync(isVerbose, ct);
         });
     }
 }

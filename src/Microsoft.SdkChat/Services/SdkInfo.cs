@@ -753,7 +753,7 @@ public class SdkInfo
         }
     }
 
-    private record LanguagePattern(
+    private sealed record LanguagePattern(
         SdkLanguage LanguageEnum,
         string Name,
         string FileExtension,
