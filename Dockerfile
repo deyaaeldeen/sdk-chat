@@ -7,7 +7,7 @@
 # Test:   docker run --rm -u $(id -u):$(id -g) -v $(pwd):/workspace sdk-chat-dev
 #
 # For production: use Dockerfile.release
-# For demo recording: use Dockerfile.demo
+# For demo recording: use demo/Dockerfile
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0
 
@@ -17,7 +17,7 @@ LABEL org.opencontainers.image.description="SDK Chat development environment"
 # Install language runtimes for API extractors
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Core tools
-    curl git unzip \
+    curl git unzip openssh-client \
     # Python extractor
     python3 python3-pip \
     # TypeScript/JavaScript extractor

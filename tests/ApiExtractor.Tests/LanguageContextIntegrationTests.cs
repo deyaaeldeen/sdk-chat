@@ -23,15 +23,15 @@ public class LanguageContextIntegrationTests
     {
         var context = new DotNetSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "DotNet");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Should use API extractor format
         Assert.Contains("<api-surface", content);
         Assert.Contains("</api-surface>", content);
@@ -43,17 +43,17 @@ public class LanguageContextIntegrationTests
     {
         var context = new DotNetSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "DotNet");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var extractedSize = string.Join("", chunks).Length;
         var sourceSize = Directory.GetFiles(sourcePath, "*.cs", SearchOption.AllDirectories)
             .Sum(f => new FileInfo(f).Length);
-        
+
         Assert.True(extractedSize < sourceSize,
             $"Extracted ({extractedSize}) should be smaller than source ({sourceSize})");
     }
@@ -66,18 +66,18 @@ public class LanguageContextIntegrationTests
     public async Task PythonContext_UsesApiExtractor_WhenPythonAvailable()
     {
         Skip.IfNot(IsPythonInstalled(), "Python not installed");
-        
+
         var context = new PythonSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Python");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Should use API extractor format when Python is available
         Assert.Contains("<api-surface", content);
         Assert.Contains("SampleClient", content);
@@ -89,15 +89,15 @@ public class LanguageContextIntegrationTests
         // This test verifies context works regardless of extractor availability
         var context = new PythonSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Python");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Either extracted or raw source should contain relevant content
         Assert.Contains("SampleClient", content);
     }
@@ -110,18 +110,18 @@ public class LanguageContextIntegrationTests
     public async Task JavaContext_UsesApiExtractor_WhenJBangAvailable()
     {
         Skip.IfNot(IsJBangInstalled(), "JBang not installed");
-        
+
         var context = new JavaSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Java");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Should use API extractor format when JBang is available
         Assert.Contains("<api-surface", content);
         Assert.Contains("SampleClient", content);
@@ -132,15 +132,15 @@ public class LanguageContextIntegrationTests
     {
         var context = new JavaSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Java");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Either extracted or raw source should contain relevant content
         Assert.Contains("SampleClient", content);
     }
@@ -153,18 +153,18 @@ public class LanguageContextIntegrationTests
     public async Task TypeScriptContext_UsesApiExtractor_WhenNodeAvailable()
     {
         Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
-        
+
         var context = new TypeScriptSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "TypeScript");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Should use API extractor format when Node is available
         Assert.Contains("<api-surface", content);
         Assert.Contains("SampleClient", content);
@@ -175,15 +175,15 @@ public class LanguageContextIntegrationTests
     {
         var context = new TypeScriptSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "TypeScript");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Either extracted or raw source should contain relevant content
         Assert.Contains("SampleClient", content);
     }
@@ -196,18 +196,18 @@ public class LanguageContextIntegrationTests
     public async Task GoContext_UsesApiExtractor_WhenGoAvailable()
     {
         Skip.IfNot(IsGoInstalled(), "Go not installed");
-        
+
         var context = new GoSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Go");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Should use API extractor format when Go is available
         Assert.Contains("<api-surface", content);
         Assert.Contains("SampleClient", content);
@@ -218,15 +218,15 @@ public class LanguageContextIntegrationTests
     {
         var context = new GoSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Go");
-        
+
         var chunks = new List<string>();
         await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
         {
             chunks.Add(chunk);
         }
-        
+
         var content = string.Join("", chunks);
-        
+
         // Either extracted or raw source should contain relevant content
         Assert.Contains("SampleClient", content);
     }
@@ -240,13 +240,13 @@ public class LanguageContextIntegrationTests
     {
         // When extractors work, all should extract similar semantic information
         var expectedTypes = new[] { "SampleClient", "Resource" };
-        
+
         // Only test languages where the runtime is available
         var languages = new List<(SampleLanguageContext context, string folder)>
         {
             (new DotNetSampleLanguageContext(_fileHelper), "DotNet"),
         };
-        
+
         if (IsPythonInstalled())
             languages.Add((new PythonSampleLanguageContext(_fileHelper), "Python"));
         if (IsJBangInstalled())
@@ -259,15 +259,15 @@ public class LanguageContextIntegrationTests
         foreach (var (context, folder) in languages)
         {
             var sourcePath = Path.Combine(TestFixturesPath, folder);
-            
+
             var chunks = new List<string>();
             await foreach (var chunk in context.StreamContextAsync(sourcePath, null))
             {
                 chunks.Add(chunk);
             }
-            
+
             var content = string.Join("", chunks);
-            
+
             foreach (var expectedType in expectedTypes)
             {
                 Assert.Contains(expectedType, content, StringComparison.OrdinalIgnoreCase);

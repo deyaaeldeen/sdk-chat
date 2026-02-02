@@ -14,7 +14,7 @@ public static class GoFormatter
 {
     /// <summary>Formats the full API surface.</summary>
     public static string Format(ApiIndex index) => Format(index, int.MaxValue);
-    
+
     /// <summary>
     /// Formats with coverage awareness: compact summary of covered ops, full signatures for uncovered.
     /// This provides ~70% token savings while maintaining complete context for generation.
@@ -22,12 +22,12 @@ public static class GoFormatter
     public static string FormatWithCoverage(ApiIndex index, UsageIndex coverage, int maxLength)
     {
         var sb = new StringBuilder();
-        
+
         // Section 1: Compact summary of what's already covered
         var coveredByClient = coverage.CoveredOperations
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-        
+
         if (coveredByClient.Count > 0)
         {
             var totalCovered = coverage.CoveredOperations.Count;
@@ -38,33 +38,33 @@ public static class GoFormatter
             }
             sb.AppendLine();
         }
-        
+
         // Section 2: Full signatures for types containing uncovered operations
         var uncoveredByClient = coverage.UncoveredOperations
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-        
+
         if (uncoveredByClient.Count == 0)
         {
             sb.AppendLine("// All operations are covered in existing samples.");
             return sb.ToString();
         }
-        
+
         sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
-        
+
         // Format only structs that have uncovered operations
         var allStructs = index.GetAllStructs().ToList();
         var structsWithUncovered = allStructs.Where(s => uncoveredByClient.ContainsKey(s.Name)).ToList();
-        
+
         var includedStructs = new HashSet<string>();
         var currentLength = sb.Length;
-        
+
         foreach (var st in structsWithUncovered)
         {
             if (includedStructs.Contains(st.Name))
                 continue;
-            
+
             // Filter to show only uncovered methods for client structs
             var filteredStruct = st;
             if (uncoveredByClient.TryGetValue(st.Name, out var uncoveredOps))
@@ -76,30 +76,30 @@ public static class GoFormatter
                         .ToList() ?? []
                 };
             }
-            
+
             var structContent = FormatStructToString(filteredStruct);
-            
+
             if (currentLength + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
             {
                 sb.AppendLine($"// ... truncated ({structsWithUncovered.Count - includedStructs.Count} structs omitted)");
                 break;
             }
-            
+
             sb.Append(structContent);
             currentLength += structContent.Length;
             includedStructs.Add(st.Name);
         }
-        
+
         return sb.ToString();
     }
-    
+
     private static string FormatStructToString(StructApi st)
     {
         var sb = new StringBuilder();
         FormatStruct(sb, st);
         return sb.ToString();
     }
-    
+
     /// <summary>
     /// Formats with smart truncation to fit within budget.
     /// Prioritizes: Clients → Their dependencies → Options → Models → Rest
@@ -110,21 +110,21 @@ public static class GoFormatter
 
         sb.AppendLine($"// {index.Package} - Public API Surface");
         sb.AppendLine();
-        
+
         // Build type lookup
         var allStructs = index.GetAllStructs().ToList();
         var allTypeNames = allStructs.Select(s => s.Name).ToHashSet();
-        
+
         // Pre-build dictionary for O(1) lookups instead of O(n) FirstOrDefault
         var structsByName = allStructs.ToDictionary(s => s.Name);
-        
+
         // Get client dependencies first
         var clients = allStructs.Where(s => s.IsClientType).ToList();
         var clientDeps = new HashSet<string>();
         foreach (var client in clients)
             foreach (var dep in client.GetReferencedTypes(allTypeNames))
                 clientDeps.Add(dep);
-        
+
         // Prioritize structs
         var orderedStructs = allStructs
             .OrderBy(s =>
@@ -135,7 +135,7 @@ public static class GoFormatter
             })
             .ThenBy(s => s.Name)
             .ToList();
-        
+
         var includedStructs = new HashSet<string>();
         var currentLength = sb.Length;
 
@@ -144,12 +144,12 @@ public static class GoFormatter
             var pkgStructs = orderedStructs
                 .Where(s => pkg.Structs?.Contains(s) ?? false)
                 .ToList();
-            
-            if (pkgStructs.Count == 0 && 
-                (pkg.Functions?.Count ?? 0) == 0 && 
+
+            if (pkgStructs.Count == 0 &&
+                (pkg.Functions?.Count ?? 0) == 0 &&
                 (pkg.Interfaces?.Count ?? 0) == 0)
                 continue;
-            
+
             sb.AppendLine($"// Package: {pkg.Name}");
             if (!string.IsNullOrEmpty(pkg.Doc))
                 sb.AppendLine($"// {pkg.Doc}");
@@ -202,7 +202,7 @@ public static class GoFormatter
             {
                 if (includedStructs.Contains(s.Name))
                     continue;
-                
+
                 // Include struct + dependencies
                 var structsToAdd = new List<StructApi> { s };
                 var deps = s.GetReferencedTypes(allTypeNames);
@@ -213,18 +213,18 @@ public static class GoFormatter
                         structsToAdd.Add(depStruct);
                     }
                 }
-                
+
                 var structContent = FormatStructsToString(structsToAdd);
-                
+
                 if (currentLength + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
                 {
                     sb.AppendLine($"// ... truncated ({allStructs.Count - includedStructs.Count} structs omitted)");
                     return sb.ToString();
                 }
-                
+
                 sb.Append(structContent);
                 currentLength += structContent.Length;
-                
+
                 foreach (var st in structsToAdd)
                     includedStructs.Add(st.Name);
             }
@@ -242,7 +242,7 @@ public static class GoFormatter
 
         return sb.ToString();
     }
-    
+
     private static string FormatStructsToString(List<StructApi> structs)
     {
         var sb = new StringBuilder();
@@ -250,7 +250,7 @@ public static class GoFormatter
             FormatStruct(sb, s);
         return sb.ToString();
     }
-    
+
     private static void FormatStruct(StringBuilder sb, StructApi s)
     {
         if (!string.IsNullOrEmpty(s.Doc))

@@ -11,35 +11,35 @@ namespace ApiExtractor.DotNet;
 /// Output model for extracted API surface.
 /// Minimal schema - only what AI needs to understand the SDK.
 /// </summary>
-public record ApiIndex : IApiIndex
+public sealed record ApiIndex : IApiIndex
 {
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
-    
+
     [JsonPropertyName("version")]
     public string? Version { get; init; }
-    
+
     [JsonPropertyName("namespaces")]
     public IReadOnlyList<NamespaceInfo> Namespaces { get; init; } = [];
-    
-    public string ToJson(bool pretty = false) => pretty 
-        ? JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })
+
+    public string ToJson(bool pretty = false) => pretty
+        ? JsonSerializer.Serialize(this, JsonOptionsCache.Indented)
         : JsonSerializer.Serialize(this, JsonContext.Default.ApiIndex);
-    
+
     public string ToStubs() => CSharpFormatter.Format(this);
-    
+
     /// <summary>
     /// Gets a flattened list of all types in the API.
     /// </summary>
     public IEnumerable<TypeInfo> GetAllTypes() =>
         Namespaces.SelectMany(ns => ns.Types);
-    
+
     /// <summary>
     /// Gets client types (classes ending with "Client" that have operations).
     /// </summary>
     public IEnumerable<TypeInfo> GetClientTypes() =>
         GetAllTypes().Where(t => t.IsClientType);
-    
+
     /// <summary>
     /// Builds a dependency graph: for each type, which other types it references.
     /// Used for smart truncation to avoid orphan types.
@@ -48,15 +48,15 @@ public record ApiIndex : IApiIndex
     {
         var graph = new Dictionary<string, HashSet<string>>();
         var allTypeNames = GetAllTypes().Select(t => t.Name.Split('<')[0]).ToHashSet();
-        
+
         foreach (var type in GetAllTypes())
         {
             var deps = new HashSet<string>();
-            
+
             // Check base type
             if (!string.IsNullOrEmpty(type.Base) && allTypeNames.Contains(type.Base.Split('<')[0]))
                 deps.Add(type.Base.Split('<')[0]);
-            
+
             // Check interfaces
             foreach (var iface in type.Interfaces ?? [])
             {
@@ -64,7 +64,7 @@ public record ApiIndex : IApiIndex
                 if (allTypeNames.Contains(ifaceName))
                     deps.Add(ifaceName);
             }
-            
+
             // Check member signatures for type references
             foreach (var member in type.Members ?? [])
             {
@@ -74,10 +74,10 @@ public record ApiIndex : IApiIndex
                         deps.Add(typeName);
                 }
             }
-            
+
             graph[type.Name] = deps;
         }
-        
+
         return graph;
     }
 }
@@ -86,7 +86,7 @@ public record NamespaceInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
-    
+
     [JsonPropertyName("types")]
     public IReadOnlyList<TypeInfo> Types { get; init; } = [];
 }
@@ -95,34 +95,34 @@ public record TypeInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
-    
+
     [JsonPropertyName("kind")]
     public string Kind { get; init; } = ""; // class, interface, struct, enum, record, delegate
-    
+
     [JsonPropertyName("base")]
     public string? Base { get; init; }
-    
+
     [JsonPropertyName("interfaces")]
     public IReadOnlyList<string>? Interfaces { get; init; }
-    
+
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
-    
+
     [JsonPropertyName("members")]
     public IReadOnlyList<MemberInfo>? Members { get; init; }
-    
+
     [JsonPropertyName("values")]
     public IReadOnlyList<string>? Values { get; init; } // For enums
-    
+
     /// <summary>
     /// Returns true if this is a client class (entry point for SDK operations).
     /// </summary>
     [JsonIgnore]
-    public bool IsClientType => 
-        Kind == "class" && 
+    public bool IsClientType =>
+        Kind == "class" &&
         (Name.EndsWith("Client") || Name.EndsWith("Service") || Name.EndsWith("Manager")) &&
         (Members?.Any(m => m.Kind == "method") ?? false);
-    
+
     /// <summary>
     /// Returns true if this is a model/DTO type (no methods, just properties).
     /// </summary>
@@ -131,14 +131,14 @@ public record TypeInfo
         (Kind == "class" || Kind == "record" || Kind == "struct") &&
         !(Members?.Any(m => m.Kind == "method") ?? false) &&
         (Members?.Any(m => m.Kind == "property") ?? false);
-    
+
     /// <summary>
     /// Returns true if this is an Options type for configuration.
     /// </summary>
     [JsonIgnore]
     public bool IsOptionsType =>
         Name.EndsWith("Options") || Name.EndsWith("Settings") || Name.EndsWith("Config");
-    
+
     /// <summary>
     /// Gets the priority for smart truncation.
     /// Lower = more important, include first.
@@ -156,28 +156,28 @@ public record TypeInfo
             return 5;                          // Everything else
         }
     }
-    
+
     /// <summary>
     /// Gets all type names referenced by this type's members.
     /// </summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
         var refs = new HashSet<string>();
-        
+
         if (!string.IsNullOrEmpty(Base))
         {
             var baseName = Base.Split('<')[0];
             if (allTypeNames.Contains(baseName))
                 refs.Add(baseName);
         }
-        
+
         foreach (var iface in Interfaces ?? [])
         {
             var ifaceName = iface.Split('<')[0];
             if (allTypeNames.Contains(ifaceName))
                 refs.Add(ifaceName);
         }
-        
+
         foreach (var member in Members ?? [])
         {
             foreach (var typeName in allTypeNames)
@@ -186,7 +186,7 @@ public record TypeInfo
                     refs.Add(typeName);
             }
         }
-        
+
         return refs;
     }
 }
@@ -195,19 +195,19 @@ public record MemberInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
-    
+
     [JsonPropertyName("kind")]
     public string Kind { get; init; } = ""; // ctor, method, property, field, event, indexer
-    
+
     [JsonPropertyName("sig")]
     public string Signature { get; init; } = ""; // Compressed signature
-    
+
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
-    
+
     [JsonPropertyName("static")]
     public bool? IsStatic { get; init; }
-    
+
     [JsonPropertyName("async")]
     public bool? IsAsync { get; init; }
 }

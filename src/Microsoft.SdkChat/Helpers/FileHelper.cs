@@ -90,7 +90,7 @@ public class FileHelper
             // Discover and plan for this group
             List<FileMetadata> files = [];
             var priorityFunc = group.PriorityFunc ?? (_ => 0);
-            
+
             foreach (var input in group.Inputs)
             {
                 if (File.Exists(input.Path))
@@ -118,32 +118,32 @@ public class FileHelper
                     files.AddRange(discovered);
                 }
             }
-            
+
             if (files.Count == 0)
                 continue;
-            
+
             // Sort by priority (ascending), then by size (ascending)
             files.Sort((a, b) =>
             {
                 var priorityComparison = a.Priority.CompareTo(b.Priority);
                 return priorityComparison != 0 ? priorityComparison : a.FileSize.CompareTo(b.FileSize);
             });
-            
+
             // Create plan with this group's budget
             var plan = CreateLoadingPlan(files, group.Budget, group.PerFileLimit);
-            
+
             if (plan.Items.Count == 0)
                 continue;
-            
+
             // Yield section open tag
             yield return new FileChunk($"<{group.SectionName}>\n", "", IsHeader: true, IsFooter: false, IsTruncated: false);
-            
+
             // Stream files
             await foreach (var chunk in StreamFilesAsync(plan, ct))
             {
                 yield return chunk;
             }
-            
+
             // Yield section close tag
             yield return new FileChunk($"</{group.SectionName}>\n\n", "", IsHeader: false, IsFooter: true, IsTruncated: false);
         }
@@ -203,14 +203,14 @@ public class FileHelper
             // Get file size without full FileInfo overhead
             var fileSize = new FileInfo(filePath).Length;
             var relativePath = Path.GetRelativePath(relativeTo, filePath);
-            
+
             var metadata = new FileMetadata(
                 FilePath: filePath,
                 RelativePath: relativePath,
                 FileSize: fileSize,
                 Priority: 0
             );
-            
+
             // Calculate priority using the function
             metadata = metadata with { Priority = priorityFunc(metadata) };
             files.Add(metadata);
@@ -290,13 +290,13 @@ public class FileHelper
                 IsHeader: true,
                 IsFooter: false,
                 IsTruncated: false);
-            
+
             // Stream content
             await foreach (var chunk in StreamFileContentAsync(item, ct))
             {
                 yield return chunk;
             }
-            
+
             // Yield footer
             yield return new FileChunk(
                 "\n</file>\n\n",
@@ -305,7 +305,7 @@ public class FileHelper
                 IsFooter: true,
                 IsTruncated: item.IsTruncated);
         }
-        
+
         if (plan.TotalFilesFound > plan.TotalFilesIncluded)
         {
             var omitted = plan.TotalFilesFound - plan.TotalFilesIncluded;
@@ -317,35 +317,35 @@ public class FileHelper
                 IsTruncated: false);
         }
     }
-    
+
     private async IAsyncEnumerable<FileChunk> StreamFileContentAsync(
         FileLoadingItem item,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         const int ChunkSize = 8192; // 8KB chunks
-        
+
         await using var stream = new FileStream(
-            item.FilePath, 
-            FileMode.Open, 
-            FileAccess.Read, 
-            FileShare.Read, 
-            FileBufferSize, 
+            item.FilePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            FileBufferSize,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
-        
+
         using var reader = new StreamReader(stream, Encoding.UTF8);
-        
+
         var buffer = new char[ChunkSize];
         var totalRead = 0;
         var bytesToRead = item.ContentToLoad;
-        
+
         while (totalRead < bytesToRead)
         {
             var remaining = bytesToRead - totalRead;
             var toRead = Math.Min(ChunkSize, remaining);
-            
+
             var charsRead = await reader.ReadAsync(buffer.AsMemory(0, toRead), ct);
             if (charsRead == 0) break;
-            
+
             totalRead += charsRead;
             yield return new FileChunk(
                 new string(buffer.AsSpan(0, charsRead)),
@@ -354,7 +354,7 @@ public class FileHelper
                 IsFooter: false,
                 IsTruncated: false);
         }
-        
+
         // Add truncation marker if needed
         if (item.IsTruncated)
         {

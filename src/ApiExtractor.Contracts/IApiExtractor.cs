@@ -11,10 +11,10 @@ public interface IApiIndex
 {
     /// <summary>Gets the package name.</summary>
     string Package { get; }
-    
+
     /// <summary>Formats the API index as JSON.</summary>
     string ToJson(bool pretty = false);
-    
+
     /// <summary>Formats the API index as human-readable language-native stubs.</summary>
     string ToStubs();
 }
@@ -66,7 +66,7 @@ public interface IApiExtractor<TIndex> : IApiExtractor where TIndex : class, IAp
     /// Formats the API index as human-readable language-native stubs.
     /// </summary>
     string ToStubs(TIndex index);
-    
+
     /// <summary>
     /// Default implementation for non-generic extraction.
     /// </summary>
@@ -83,23 +83,23 @@ public interface IApiExtractor<TIndex> : IApiExtractor where TIndex : class, IAp
 public abstract record ExtractorResult
 {
     private ExtractorResult() { }
-    
+
     /// <summary>True if extraction succeeded.</summary>
     public abstract bool IsSuccess { get; }
-    
+
     /// <summary>Non-fatal warnings encountered during extraction.</summary>
     public IReadOnlyList<string> Warnings { get; init; } = [];
 
     /// <summary>Gets the API index or throws if failed.</summary>
     public abstract IApiIndex GetValueOrThrow();
-    
+
     /// <summary>Successful extraction result.</summary>
     public sealed record Success(IApiIndex Value) : ExtractorResult
     {
         public override bool IsSuccess => true;
         public override IApiIndex GetValueOrThrow() => Value;
     }
-    
+
     /// <summary>Failed extraction result.</summary>
     public sealed record Failure(string Error) : ExtractorResult
     {
@@ -115,19 +115,19 @@ public abstract record ExtractorResult
 public abstract record ExtractorResult<T> where T : class, IApiIndex
 {
     private ExtractorResult() { }
-    
+
     /// <summary>True if extraction succeeded.</summary>
     public abstract bool IsSuccess { get; }
-    
+
     /// <summary>Non-fatal warnings encountered during extraction.</summary>
     public IReadOnlyList<string> Warnings { get; init; } = [];
 
     /// <summary>Gets the value or throws if failed.</summary>
     public abstract T GetValueOrThrow();
-    
+
     /// <summary>Converts to non-generic base result.</summary>
     public abstract ExtractorResult ToBase();
-    
+
     /// <summary>Successful extraction result.</summary>
     public sealed record Success(T Value) : ExtractorResult<T>
     {
@@ -135,7 +135,7 @@ public abstract record ExtractorResult<T> where T : class, IApiIndex
         public override T GetValueOrThrow() => Value;
         public override ExtractorResult ToBase() => new ExtractorResult.Success(Value) { Warnings = Warnings };
     }
-    
+
     /// <summary>Failed extraction result.</summary>
     public sealed record Failure(string Error) : ExtractorResult<T>
     {
@@ -143,7 +143,7 @@ public abstract record ExtractorResult<T> where T : class, IApiIndex
         public override T GetValueOrThrow() => throw new InvalidOperationException(Error);
         public override ExtractorResult ToBase() => new ExtractorResult.Failure(Error) { Warnings = Warnings };
     }
-    
+
     /// <summary>Creates a successful result.</summary>
     public static ExtractorResult<T> CreateSuccess(T value, IReadOnlyList<string>? warnings = null)
         => new Success(value) { Warnings = warnings ?? [] };

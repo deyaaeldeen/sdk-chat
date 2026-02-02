@@ -49,7 +49,7 @@ docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet 
 | Image | Dockerfile | Purpose |
 |-------|------------|--------|
 | `sdk-chat-dev` | `Dockerfile` | Development and testing |
-| `sdk-chat-demo` | `Dockerfile.demo` | VHS demo recording |
+| `sdk-chat-demo` | `demo/Dockerfile` | VHS demo recording |
 | `sdk-chat:latest` | `Dockerfile.release` | Production (minimal) |
 
 ### VS Code Dev Container

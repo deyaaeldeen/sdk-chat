@@ -21,7 +21,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {
         var normalizedPath = Path.GetFullPath(codePath);
-        
+
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
 
@@ -106,10 +106,10 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     public string Format(UsageIndex index)
     {
         var sb = new StringBuilder();
-        
+
         sb.AppendLine($"Analyzed {index.FileCount} files.");
         sb.AppendLine();
-        
+
         if (index.CoveredOperations.Count > 0)
         {
             sb.AppendLine("COVERED OPERATIONS (already have examples):");
@@ -154,7 +154,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
     private static string GetScriptDir()
     {
-        return Path.GetDirectoryName(typeof(GoUsageAnalyzer).Assembly.Location) ?? ".";
+        return AppContext.BaseDirectory;
     }
 
     // Internal DTOs for JSON parsing

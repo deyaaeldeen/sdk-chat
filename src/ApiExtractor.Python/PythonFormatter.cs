@@ -14,7 +14,7 @@ public static class PythonFormatter
 {
     /// <summary>Formats the full API surface.</summary>
     public static string Format(ApiIndex index) => Format(index, int.MaxValue);
-    
+
     /// <summary>
     /// Formats with coverage awareness: compact summary of covered ops, full signatures for uncovered.
     /// This provides ~70% token savings while maintaining complete context for generation.
@@ -22,12 +22,12 @@ public static class PythonFormatter
     public static string FormatWithCoverage(ApiIndex index, UsageIndex coverage, int maxLength)
     {
         var sb = new StringBuilder();
-        
+
         // Section 1: Compact summary of what's already covered
         var coveredByClient = coverage.CoveredOperations
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-        
+
         if (coveredByClient.Count > 0)
         {
             var totalCovered = coverage.CoveredOperations.Count;
@@ -38,33 +38,33 @@ public static class PythonFormatter
             }
             sb.AppendLine();
         }
-        
+
         // Section 2: Full signatures for types containing uncovered operations
         var uncoveredByClient = coverage.UncoveredOperations
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-        
+
         if (uncoveredByClient.Count == 0)
         {
             sb.AppendLine("# All operations are covered in existing samples.");
             return sb.ToString();
         }
-        
+
         sb.AppendLine($"# UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
-        
+
         // Format only classes that have uncovered operations
         var allClasses = index.GetAllClasses().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
-        
+
         var includedClasses = new HashSet<string>();
         var currentLength = sb.Length;
-        
+
         foreach (var cls in classesWithUncovered)
         {
             if (includedClasses.Contains(cls.Name))
                 continue;
-            
+
             // Filter to show only uncovered methods for client classes
             var filteredClass = cls;
             if (uncoveredByClient.TryGetValue(cls.Name, out var uncoveredOps))
@@ -76,30 +76,30 @@ public static class PythonFormatter
                         .ToList() ?? []
                 };
             }
-            
+
             var classContent = FormatClassToString(filteredClass);
-            
+
             if (currentLength + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
             {
                 sb.AppendLine($"# ... truncated ({classesWithUncovered.Count - includedClasses.Count} classes omitted)");
                 break;
             }
-            
+
             sb.Append(classContent);
             currentLength += classContent.Length;
             includedClasses.Add(cls.Name);
         }
-        
+
         return sb.ToString();
     }
-    
+
     private static string FormatClassToString(ClassInfo cls)
     {
         var sb = new StringBuilder();
         FormatClass(sb, cls);
         return sb.ToString();
     }
-    
+
     /// <summary>
     /// Formats with smart truncation to fit within budget.
     /// Prioritizes: Clients → Their dependencies → Options → Models → Rest
@@ -114,14 +114,14 @@ public static class PythonFormatter
         // Build type lookup
         var allClasses = index.GetAllClasses().ToList();
         var allTypeNames = allClasses.Select(c => c.Name).ToHashSet();
-        
+
         // Get client dependencies first
         var clients = allClasses.Where(c => c.IsClientType).ToList();
         var clientDeps = new HashSet<string>();
         foreach (var client in clients)
             foreach (var dep in client.GetReferencedTypes(allTypeNames))
                 clientDeps.Add(dep);
-        
+
         // Prioritize classes
         var orderedClasses = allClasses
             .OrderBy(c =>
@@ -132,7 +132,7 @@ public static class PythonFormatter
             })
             .ThenBy(c => c.Name)
             .ToList();
-        
+
         var includedClasses = new HashSet<string>();
         var currentLength = sb.Length;
 
@@ -141,7 +141,7 @@ public static class PythonFormatter
             var moduleClasses = orderedClasses
                 .Where(c => module.Classes?.Contains(c) ?? false)
                 .ToList();
-            
+
             if (moduleClasses.Count == 0 && (module.Functions?.Count ?? 0) == 0)
                 continue;
 
@@ -163,7 +163,7 @@ public static class PythonFormatter
             {
                 if (includedClasses.Contains(cls.Name))
                     continue;
-                
+
                 // Include class + dependencies
                 var classesToAdd = new List<ClassInfo> { cls };
                 var deps = cls.GetReferencedTypes(allTypeNames);
@@ -176,18 +176,18 @@ public static class PythonFormatter
                             classesToAdd.Add(depClass);
                     }
                 }
-                
+
                 var classContent = FormatClassesToString(classesToAdd);
-                
+
                 if (currentLength + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
                 {
                     sb.AppendLine($"# ... truncated ({allClasses.Count - includedClasses.Count} classes omitted)");
                     return sb.ToString();
                 }
-                
+
                 sb.Append(classContent);
                 currentLength += classContent.Length;
-                
+
                 foreach (var c in classesToAdd)
                     includedClasses.Add(c.Name);
             }
@@ -197,7 +197,7 @@ public static class PythonFormatter
 
         return sb.ToString();
     }
-    
+
     private static string FormatClassesToString(List<ClassInfo> classes)
     {
         var sb = new StringBuilder();
@@ -205,7 +205,7 @@ public static class PythonFormatter
             FormatClass(sb, cls);
         return sb.ToString();
     }
-    
+
     private static string FormatFunctionToString(FunctionInfo func, string indent)
     {
         var sb = new StringBuilder();

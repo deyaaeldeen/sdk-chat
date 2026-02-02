@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using AgentClientProtocol.Sdk;
 using AgentClientProtocol.Sdk.Schema;
 using Xunit;
 
@@ -19,21 +18,21 @@ public class ProtocolIntegrationTests
     {
         // Arrange & Act
         var agent = new TestAgent();
-        
+
         // Assert
         Assert.IsAssignableFrom<IAgent>(agent);
     }
-    
+
     [Fact]
     public void TestInfrastructure_TestClientImplementsInterface()
     {
         // Arrange & Act
         var client = new TestClient();
-        
+
         // Assert
         Assert.IsAssignableFrom<IClient>(client);
     }
-    
+
     [Fact]
     public async Task TestAgent_Initialize_ReturnsValidResponse()
     {
@@ -44,32 +43,32 @@ public class ProtocolIntegrationTests
             ProtocolVersion = Protocol.Version,
             ClientCapabilities = new ClientCapabilities()
         };
-        
+
         // Act
         var response = await agent.InitializeAsync(request);
-        
+
         // Assert
         Assert.NotNull(response);
         Assert.Equal(Protocol.Version, response.ProtocolVersion);
         Assert.NotNull(response.AgentInfo);
         Assert.Equal("test-agent", response.AgentInfo.Name);
     }
-    
+
     [Fact]
     public async Task TestAgent_NewSession_ReturnsSessionId()
     {
         // Arrange
         var agent = new TestAgent();
         var request = new NewSessionRequest { Cwd = "/test" };
-        
+
         // Act
         var response = await agent.NewSessionAsync(request);
-        
+
         // Assert
         Assert.NotNull(response);
         Assert.StartsWith("test-session-", response.SessionId);
     }
-    
+
     [Fact]
     public async Task TestAgent_Prompt_ReturnsEndTurn()
     {
@@ -80,15 +79,15 @@ public class ProtocolIntegrationTests
             SessionId = "test-session",
             Prompt = [new TextContent { Text = "Test prompt" }]
         };
-        
+
         // Act
         var response = await agent.PromptAsync(request);
-        
+
         // Assert
         Assert.NotNull(response);
         Assert.Equal(StopReason.EndTurn, response.StopReason);
     }
-    
+
     [Fact]
     public async Task TestClient_RequestPermission_ReturnsOutcome()
     {
@@ -101,16 +100,16 @@ public class ProtocolIntegrationTests
             Title = "Test Permission",
             Options = [new PermissionOption(PermissionKind.AllowOnce, "Allow Once", PermissionKind.AllowOnce)]
         };
-        
+
         // Act
         var response = await client.RequestPermissionAsync(request);
-        
+
         // Assert
         Assert.NotNull(response);
         Assert.NotNull(response.Outcome);
         Assert.IsType<SelectedPermissionOutcome>(response.Outcome);
     }
-    
+
     private class TestAgent : IAgent
     {
         public Task<InitializeResponse> InitializeAsync(InitializeRequest request, CancellationToken ct = default)
@@ -122,7 +121,7 @@ public class ProtocolIntegrationTests
                 AgentInfo = new Implementation { Name = "test-agent", Version = "1.0.0" }
             });
         }
-        
+
         public Task<NewSessionResponse> NewSessionAsync(NewSessionRequest request, CancellationToken ct = default)
         {
             return Task.FromResult(new NewSessionResponse
@@ -130,26 +129,26 @@ public class ProtocolIntegrationTests
                 SessionId = $"test-session-{Guid.NewGuid():N}"
             });
         }
-        
+
         public Task<PromptResponse> PromptAsync(PromptRequest request, CancellationToken ct = default)
         {
             return Task.FromResult(new PromptResponse { StopReason = StopReason.EndTurn });
         }
-        
-        public Task CancelAsync(CancelNotification notification, CancellationToken ct = default) 
+
+        public Task CancelAsync(CancelNotification notification, CancellationToken ct = default)
             => Task.CompletedTask;
     }
-    
+
     private class TestClient : IClient
     {
         public Task<RequestPermissionResponse> RequestPermissionAsync(RequestPermissionRequest request, CancellationToken ct = default)
         {
-            return Task.FromResult(new RequestPermissionResponse 
-            { 
-                Outcome = new SelectedPermissionOutcome { OptionId = PermissionKind.AllowOnce } 
+            return Task.FromResult(new RequestPermissionResponse
+            {
+                Outcome = new SelectedPermissionOutcome { OptionId = PermissionKind.AllowOnce }
             });
         }
-        
+
         public Task SessionUpdateAsync(SessionNotification notification, CancellationToken ct = default)
         {
             return Task.CompletedTask;

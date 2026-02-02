@@ -13,16 +13,16 @@ public record AgentCapabilities
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("loadSession")]
     public bool? LoadSession { get; init; }
-    
+
     [JsonPropertyName("mcpCapabilities")]
     public McpCapabilities? McpCapabilities { get; init; }
-    
+
     [JsonPropertyName("promptCapabilities")]
     public PromptCapabilities? PromptCapabilities { get; init; }
-    
+
     [JsonPropertyName("sessionCapabilities")]
     public SessionCapabilities? SessionCapabilities { get; init; }
 }
@@ -35,10 +35,10 @@ public record ClientCapabilities
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("fs")]
     public FileSystemCapability? Fs { get; init; }
-    
+
     [JsonPropertyName("terminal")]
     public bool? Terminal { get; init; }
 }
@@ -50,7 +50,7 @@ public record FileSystemCapability
 {
     [JsonPropertyName("readTextFile")]
     public bool ReadTextFile { get; init; }
-    
+
     [JsonPropertyName("writeTextFile")]
     public bool WriteTextFile { get; init; }
 }
@@ -62,7 +62,7 @@ public record McpCapabilities
 {
     [JsonPropertyName("http")]
     public bool? Http { get; init; }
-    
+
     [JsonPropertyName("sse")]
     public bool? Sse { get; init; }
 }
@@ -85,13 +85,13 @@ public record SessionCapabilities
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("fork")]
     public SessionForkCapabilities? Fork { get; init; }
-    
+
     [JsonPropertyName("list")]
     public SessionListCapabilities? List { get; init; }
-    
+
     [JsonPropertyName("resume")]
     public SessionResumeCapabilities? Resume { get; init; }
 }
@@ -124,10 +124,10 @@ public record Implementation
 {
     [JsonPropertyName("name")]
     public required string Name { get; init; }
-    
+
     [JsonPropertyName("version")]
     public required string Version { get; init; }
-    
+
     [JsonPropertyName("title")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }

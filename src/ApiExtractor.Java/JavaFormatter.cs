@@ -14,7 +14,7 @@ public static class JavaFormatter
 {
     /// <summary>Formats the full API surface.</summary>
     public static string Format(ApiIndex api) => Format(api, int.MaxValue);
-    
+
     /// <summary>
     /// Formats with coverage awareness: compact summary of covered ops, full signatures for uncovered.
     /// This provides ~70% token savings while maintaining complete context for generation.
@@ -22,12 +22,12 @@ public static class JavaFormatter
     public static string FormatWithCoverage(ApiIndex index, UsageIndex coverage, int maxLength)
     {
         var sb = new StringBuilder();
-        
+
         // Section 1: Compact summary of what's already covered
         var coveredByClient = coverage.CoveredOperations
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-        
+
         if (coveredByClient.Count > 0)
         {
             var totalCovered = coverage.CoveredOperations.Count;
@@ -38,33 +38,33 @@ public static class JavaFormatter
             }
             sb.AppendLine();
         }
-        
+
         // Section 2: Full signatures for types containing uncovered operations
         var uncoveredByClient = coverage.UncoveredOperations
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-        
+
         if (uncoveredByClient.Count == 0)
         {
             sb.AppendLine("// All operations are covered in existing samples.");
             return sb.ToString();
         }
-        
+
         sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
-        
+
         // Format only classes that have uncovered operations
         var allClasses = index.GetAllClasses().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
-        
+
         var includedClasses = new HashSet<string>();
         var currentLength = sb.Length;
-        
+
         foreach (var cls in classesWithUncovered)
         {
             if (includedClasses.Contains(cls.Name))
                 continue;
-            
+
             // Filter to show only uncovered methods for client classes
             var filteredClass = cls;
             if (uncoveredByClient.TryGetValue(cls.Name, out var uncoveredOps))
@@ -76,30 +76,30 @@ public static class JavaFormatter
                         .ToList() ?? []
                 };
             }
-            
+
             var classContent = FormatClassToString(filteredClass);
-            
+
             if (currentLength + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
             {
                 sb.AppendLine($"// ... truncated ({classesWithUncovered.Count - includedClasses.Count} classes omitted)");
                 break;
             }
-            
+
             sb.Append(classContent);
             currentLength += classContent.Length;
             includedClasses.Add(cls.Name);
         }
-        
+
         return sb.ToString();
     }
-    
+
     private static string FormatClassToString(ClassInfo cls)
     {
         var sb = new StringBuilder();
         FormatType(sb, cls, "class");
         return sb.ToString();
     }
-    
+
     /// <summary>
     /// Formats with smart truncation to fit within budget.
     /// Prioritizes: Clients → Their dependencies → Builders → Options → Models → Rest
@@ -109,18 +109,18 @@ public static class JavaFormatter
         var sb = new StringBuilder();
         sb.AppendLine($"// {api.Package} - Public API Surface");
         sb.AppendLine();
-        
+
         // Build type lookup
         var allClasses = api.GetAllClasses().ToList();
         var allTypeNames = allClasses.Select(c => c.Name.Split('<')[0]).ToHashSet();
-        
+
         // Get client dependencies first
         var clients = allClasses.Where(c => c.IsClientType).ToList();
         var clientDeps = new HashSet<string>();
         foreach (var client in clients)
             foreach (var dep in client.GetReferencedTypes(allTypeNames))
                 clientDeps.Add(dep);
-        
+
         // Prioritize classes
         var orderedClasses = allClasses
             .OrderBy(c =>
@@ -131,7 +131,7 @@ public static class JavaFormatter
             })
             .ThenBy(c => c.Name)
             .ToList();
-        
+
         var includedClasses = new HashSet<string>();
         var currentLength = sb.Length;
 
@@ -140,13 +140,13 @@ public static class JavaFormatter
             var pkgClasses = orderedClasses
                 .Where(c => (pkg.Classes?.Contains(c) == true) || (pkg.Interfaces?.Contains(c) == true))
                 .ToList();
-            
+
             if (pkgClasses.Count == 0 && (pkg.Enums?.Count ?? 0) == 0)
                 continue;
-            
+
             sb.AppendLine($"package {pkg.Name};");
             sb.AppendLine();
-            
+
             // Enums first (usually small)
             if (pkg.Enums != null)
                 FormatEnums(sb, pkg.Enums);
@@ -156,7 +156,7 @@ public static class JavaFormatter
             {
                 if (includedClasses.Contains(cls.Name))
                     continue;
-                
+
                 // Include class + dependencies
                 var classesToAdd = new List<ClassInfo> { cls };
                 var deps = cls.GetReferencedTypes(allTypeNames);
@@ -169,18 +169,18 @@ public static class JavaFormatter
                             classesToAdd.Add(depClass);
                     }
                 }
-                
+
                 var classContent = FormatTypesToString(classesToAdd, pkg.Interfaces?.Any(i => classesToAdd.Contains(i)) == true);
-                
+
                 if (currentLength + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
                 {
                     sb.AppendLine($"// ... truncated ({allClasses.Count - includedClasses.Count} classes omitted)");
                     return sb.ToString();
                 }
-                
+
                 sb.Append(classContent);
                 currentLength += classContent.Length;
-                
+
                 foreach (var c in classesToAdd)
                     includedClasses.Add(c.Name);
             }
@@ -188,7 +188,7 @@ public static class JavaFormatter
 
         return sb.ToString();
     }
-    
+
     private static string FormatTypesToString(List<ClassInfo> types, bool isInterface)
     {
         var sb = new StringBuilder();
@@ -197,7 +197,7 @@ public static class JavaFormatter
             FormatType(sb, type, keyword);
         return sb.ToString();
     }
-    
+
     private static void FormatType(StringBuilder sb, ClassInfo type, string keyword)
     {
         if (!string.IsNullOrEmpty(type.Doc))

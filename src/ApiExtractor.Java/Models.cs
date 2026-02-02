@@ -8,31 +8,31 @@ using ApiExtractor.Contracts;
 namespace ApiExtractor.Java;
 
 /// <summary>Root container for extracted Java API.</summary>
-public record ApiIndex : IApiIndex
+public sealed record ApiIndex : IApiIndex
 {
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
     [JsonPropertyName("packages")]
     public IReadOnlyList<PackageInfo> Packages { get; init; } = [];
-    
+
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
         Packages.SelectMany(p => p.Classes ?? []);
-    
+
     /// <summary>Gets client classes (entry points for SDK operations).</summary>
     public IEnumerable<ClassInfo> GetClientClasses() =>
         GetAllClasses().Where(c => c.IsClientType);
-    
+
     public string ToJson(bool pretty = false) => pretty
-        ? JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })
+        ? JsonSerializer.Serialize(this, JsonOptionsCache.Indented)
         : JsonSerializer.Serialize(this);
-    
+
     public string ToStubs() => JavaFormatter.Format(this);
 }
 
 /// <summary>A Java package containing types.</summary>
-public record PackageInfo
+public sealed record PackageInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -48,7 +48,7 @@ public record PackageInfo
 }
 
 /// <summary>A class or interface.</summary>
-public record ClassInfo
+public sealed record ClassInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -76,19 +76,19 @@ public record ClassInfo
 
     [JsonPropertyName("fields")]
     public IReadOnlyList<FieldInfo>? Fields { get; init; }
-    
+
     /// <summary>Returns true if this is a client class (SDK entry point).</summary>
     [JsonIgnore]
     public bool IsClientType =>
         (Name.EndsWith("Client") || Name.EndsWith("Service") || Name.EndsWith("Manager") || Name.EndsWith("Builder")) &&
         (Methods?.Any() ?? false);
-    
+
     /// <summary>Returns true if this is a model/DTO class.</summary>
     [JsonIgnore]
     public bool IsModelType =>
         !(Methods?.Any(m => m.Modifiers?.Contains("public") == true) ?? false) ||
         (Methods?.All(m => m.Name.StartsWith("get") || m.Name.StartsWith("set") || m.Name.StartsWith("is")) ?? false);
-    
+
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
     public int TruncationPriority
@@ -102,26 +102,26 @@ public record ClassInfo
             return 4;
         }
     }
-    
+
     /// <summary>Gets type names referenced in method signatures.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
         var refs = new HashSet<string>();
-        
+
         if (!string.IsNullOrEmpty(Extends))
         {
             var baseName = Extends.Split('<')[0];
             if (allTypeNames.Contains(baseName))
                 refs.Add(baseName);
         }
-        
+
         foreach (var iface in Implements ?? [])
         {
             var ifaceName = iface.Split('<')[0];
             if (allTypeNames.Contains(ifaceName))
                 refs.Add(ifaceName);
         }
-        
+
         foreach (var method in Methods ?? [])
         {
             foreach (var typeName in allTypeNames)
@@ -130,7 +130,7 @@ public record ClassInfo
                     refs.Add(typeName);
             }
         }
-        
+
         foreach (var field in Fields ?? [])
         {
             foreach (var typeName in allTypeNames)
@@ -139,7 +139,7 @@ public record ClassInfo
                     refs.Add(typeName);
             }
         }
-        
+
         return refs;
     }
 }

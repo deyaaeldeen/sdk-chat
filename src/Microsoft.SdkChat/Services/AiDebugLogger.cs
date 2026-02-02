@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
-using Microsoft.SdkChat.Models;
+using Microsoft.SdkChat.Configuration;
 
 namespace Microsoft.SdkChat.Services;
 
@@ -18,29 +18,29 @@ public static partial class SensitiveDataScrubber
 {
     // Compiled regex patterns for common secret formats
     // Using source generators for performance (Regex attribute)
-    
+
     /// <summary>OpenAI API keys: sk-... or sk-proj-...</summary>
     [GeneratedRegex(@"sk-(?:proj-)?[a-zA-Z0-9]{20,}", RegexOptions.Compiled)]
     private static partial Regex OpenAiKeyPattern();
-    
+
     /// <summary>GitHub tokens: ghp_, gho_, ghu_, ghs_, ghr_</summary>
     [GeneratedRegex(@"gh[pousr]_[a-zA-Z0-9]{36,}", RegexOptions.Compiled)]
     private static partial Regex GitHubTokenPattern();
-    
+
     /// <summary>Generic Bearer tokens</summary>
     [GeneratedRegex(@"Bearer\s+[a-zA-Z0-9\-_\.]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex BearerTokenPattern();
-    
+
     /// <summary>Generic API key patterns in key=value or "key": "value" format</summary>
     [GeneratedRegex(@"(?i)(api[_-]?key|apikey|secret|password|token|credential|auth)([""']?\s*[:=]\s*[""']?)([a-zA-Z0-9\-_\.]{16,})", RegexOptions.Compiled)]
     private static partial Regex GenericSecretPattern();
-    
+
     /// <summary>Long hex strings that look like API keys (32+ chars, preceded by key-like word)</summary>
     [GeneratedRegex(@"(?i)(?:key|secret|password|token)([""']?\s*[:=]\s*[""']?)([a-fA-F0-9]{32,})", RegexOptions.Compiled)]
     private static partial Regex HexKeyPattern();
-    
+
     private const string RedactedPlaceholder = "[REDACTED]";
-    
+
     /// <summary>
     /// Environment variable name patterns that may contain secrets.
     /// Any env var matching these patterns will have its value scrubbed.
@@ -53,20 +53,20 @@ public static partial class SensitiveDataScrubber
         "_PASSWORD",
         "_CREDENTIAL"
     ];
-    
+
     // Lazy-loaded cache of actual secret values from environment (for runtime scrubbing)
     private static readonly Lazy<HashSet<string>> _cachedSecretValues = new(LoadSecretValuesFromEnvironment);
-    
+
     private static HashSet<string> LoadSecretValuesFromEnvironment()
     {
         var secrets = new HashSet<string>(StringComparer.Ordinal);
-        
+
         // Scan all environment variables for sensitive patterns
         foreach (var key in Environment.GetEnvironmentVariables().Keys.Cast<string>())
         {
-            var isSensitive = SensitiveEnvVarPatterns.Any(pattern => 
+            var isSensitive = SensitiveEnvVarPatterns.Any(pattern =>
                 key.Contains(pattern, StringComparison.OrdinalIgnoreCase));
-            
+
             if (isSensitive)
             {
                 var value = Environment.GetEnvironmentVariable(key);
@@ -77,10 +77,10 @@ public static partial class SensitiveDataScrubber
                 }
             }
         }
-        
+
         return secrets;
     }
-    
+
     /// <summary>
     /// Scrubs all recognized sensitive patterns from the input text.
     /// Also scrubs any values matching known sensitive environment variables.
@@ -89,9 +89,9 @@ public static partial class SensitiveDataScrubber
     {
         if (string.IsNullOrEmpty(text))
             return text ?? string.Empty;
-        
+
         var result = text;
-        
+
         // PRIORITY 1: Scrub known secret values from environment variables
         // This catches secrets even if they don't match standard patterns
         foreach (var secret in _cachedSecretValues.Value)
@@ -101,20 +101,20 @@ public static partial class SensitiveDataScrubber
                 result = result.Replace(secret, RedactedPlaceholder);
             }
         }
-        
+
         // PRIORITY 2: Apply pattern-based scrubbing (catches any remaining patterns)
         result = OpenAiKeyPattern().Replace(result, RedactedPlaceholder);
         result = GitHubTokenPattern().Replace(result, RedactedPlaceholder);
         result = BearerTokenPattern().Replace(result, $"Bearer {RedactedPlaceholder}");
-        
+
         // Generic secret pattern preserves the key name for debugging
-        result = GenericSecretPattern().Replace(result, m => 
+        result = GenericSecretPattern().Replace(result, m =>
             $"{m.Groups[1].Value}{m.Groups[2].Value}{RedactedPlaceholder}");
-        
+
         // Hex keys preceded by key-like words
-        result = HexKeyPattern().Replace(result, m => 
+        result = HexKeyPattern().Replace(result, m =>
             $"{m.Groups[0].Value.Split('=')[0].Split(':')[0]}{m.Groups[1].Value}{RedactedPlaceholder}");
-        
+
         return result;
     }
 }
@@ -126,30 +126,30 @@ public static partial class SensitiveDataScrubber
 public class AiDebugLogger
 {
     private readonly ILogger<AiDebugLogger> _logger;
-    private readonly AiProviderSettings _settings;
     private readonly string _debugDir;
     private readonly bool _enabled;
-    
-    public AiDebugLogger(ILogger<AiDebugLogger> logger, AiProviderSettings settings)
+
+    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
+
+    public AiDebugLogger(ILogger<AiDebugLogger> logger, SdkChatOptions options)
     {
         _logger = logger;
-        _settings = settings;
-        _enabled = settings.DebugEnabled;
-        _debugDir = settings.DebugDirectory ?? GetDefaultDebugDir();
-        
+        _enabled = options.DebugEnabled;
+        _debugDir = options.DebugDirectory ?? GetDefaultDebugDir();
+
         if (_enabled)
         {
             Directory.CreateDirectory(_debugDir);
             _logger.LogInformation("AI Debug logging enabled. Logs will be written to: {DebugDir}", _debugDir);
         }
     }
-    
+
     private static string GetDefaultDebugDir()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return Path.Combine(home, ".sdk-chat", "debug");
     }
-    
+
     /// <summary>
     /// Log an AI request before it's sent.
     /// </summary>
@@ -162,12 +162,12 @@ public class AiDebugLogger
         ContextInfo? contextInfo = null)
     {
         if (!_enabled) return new AiDebugSession(null, null);
-        
+
         var session = new AiDebugSession(
             _debugDir,
             $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}"[..31]  // truncate to reasonable length
         );
-        
+
         session.Provider = provider;
         session.Model = model;
         session.Endpoint = endpoint;
@@ -175,12 +175,12 @@ public class AiDebugLogger
         session.UserPrompt = userPrompt;
         session.ContextInfo = contextInfo;
         session.StartTime = DateTime.UtcNow;
-        
+
         _logger.LogDebug("Started debug session {SessionId}", session.SessionId);
-        
+
         return session;
     }
-    
+
     public async Task CompleteSessionAsync(
         AiDebugSession session,
         string response,
@@ -190,21 +190,21 @@ public class AiDebugLogger
         Exception? error = null)
     {
         if (!_enabled || session.FilePath == null) return;
-        
+
         session.Response = response;
         session.Streaming = streaming;
         session.PromptTokens = promptTokens;
         session.CompletionTokens = completionTokens;
         session.Error = error;
         session.EndTime = DateTime.UtcNow;
-        
+
         // Stream directly to file to handle large content
         await using var writer = new StreamWriter(session.FilePath, false, Encoding.UTF8);
         await WriteMarkdownAsync(writer, session);
-        
+
         _logger.LogDebug("Wrote debug log to {FilePath}", session.FilePath);
     }
-    
+
     private async Task WriteMarkdownAsync(StreamWriter writer, AiDebugSession session)
     {
         // Header
@@ -212,7 +212,7 @@ public class AiDebugLogger
         await writer.WriteLineAsync();
         await writer.WriteLineAsync($"**Generated:** {session.StartTime:yyyy-MM-dd HH:mm:ss} UTC");
         await writer.WriteLineAsync();
-        
+
         // Summary Table
         await writer.WriteLineAsync("## Summary");
         await writer.WriteLineAsync();
@@ -225,7 +225,7 @@ public class AiDebugLogger
         await writer.WriteLineAsync($"| Duration | {(session.EndTime - session.StartTime)?.TotalMilliseconds:F0}ms |");
         await writer.WriteLineAsync($"| Status | {(session.Error == null ? "✅ Success" : "❌ Error")} |");
         await writer.WriteLineAsync();
-        
+
         // Token usage if available
         if (session.PromptTokens.HasValue || session.CompletionTokens.HasValue)
         {
@@ -241,28 +241,28 @@ public class AiDebugLogger
                 await writer.WriteLineAsync($"| **Total** | **{session.PromptTokens + session.CompletionTokens:N0}** |");
             await writer.WriteLineAsync();
         }
-        
+
         // Context Information
         if (session.ContextInfo != null)
         {
             await writer.WriteLineAsync("## Context Files");
             await writer.WriteLineAsync();
-            
+
             if (session.ContextInfo.Files.Count > 0)
             {
                 await writer.WriteLineAsync("| File | Size | Status |");
                 await writer.WriteLineAsync("|------|------|--------|");
-                
+
                 foreach (var file in session.ContextInfo.Files.OrderByDescending(f => f.OriginalSize))
                 {
-                    var status = file.WasTruncated 
+                    var status = file.WasTruncated
                         ? $"⚠️ Truncated ({file.TruncatedSize:N0}/{file.OriginalSize:N0} chars, {file.TruncationPercent:F0}%)"
                         : "✅ Full";
                     await writer.WriteLineAsync($"| `{file.RelativePath}` | {FormatBytes(file.OriginalSize)} | {status} |");
                 }
                 await writer.WriteLineAsync();
             }
-            
+
             // Context stats
             await writer.WriteLineAsync("### Context Statistics");
             await writer.WriteLineAsync();
@@ -274,7 +274,7 @@ public class AiDebugLogger
             await writer.WriteLineAsync($"- **Max Context Size:** {FormatBytes(session.ContextInfo.MaxContextSize)}");
             await writer.WriteLineAsync();
         }
-        
+
         // System Prompt
         // SECURITY: Scrub sensitive data before writing
         await writer.WriteLineAsync("## System Prompt");
@@ -283,7 +283,7 @@ public class AiDebugLogger
         await writer.WriteLineAsync(SensitiveDataScrubber.Scrub(session.SystemPrompt));
         await writer.WriteLineAsync("```");
         await writer.WriteLineAsync();
-        
+
         // User Prompt - FULL content, no truncation
         // SECURITY: Scrub sensitive data before writing
         var scrubbedUserPrompt = SensitiveDataScrubber.Scrub(session.UserPrompt);
@@ -296,11 +296,11 @@ public class AiDebugLogger
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("```");
         await writer.WriteLineAsync();
-        
+
         // Response - FULL content, no truncation
         await writer.WriteLineAsync("## Response");
         await writer.WriteLineAsync();
-        
+
         if (session.Error != null)
         {
             await writer.WriteLineAsync("### ❌ Error");
@@ -322,7 +322,7 @@ public class AiDebugLogger
             await writer.WriteLineAsync("```");
         }
         await writer.WriteLineAsync();
-        
+
         // Request Details (for debugging purposes)
         await writer.WriteLineAsync("## Request Details");
         await writer.WriteLineAsync();
@@ -339,28 +339,28 @@ public class AiDebugLogger
             responseHash = ComputeHash(session.Response ?? ""),
             responseLength = session.Response?.Length ?? 0,
             durationMs = (session.EndTime - session.StartTime)?.TotalMilliseconds
-        }, new JsonSerializerOptions { WriteIndented = true }));
+        }, IndentedOptions));
         await writer.WriteLineAsync("```");
         await writer.WriteLineAsync();
-        
+
         // Footer
         await writer.WriteLineAsync("---");
         await writer.WriteLineAsync($"*Debug log generated by SDK Chat v1.0.0*");
     }
-    
+
     private static string FormatBytes(long bytes)
     {
         if (bytes < 1024) return $"{bytes} B";
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         return $"{bytes / (1024.0 * 1024.0):F1} MB";
     }
-    
+
     private static int EstimateTokens(string text)
     {
         // Rough estimate: ~4 characters per token
         return text.Length / 4;
     }
-    
+
     private static string ComputeHash(string text)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
@@ -376,7 +376,7 @@ public class AiDebugSession
 {
     public string? SessionId { get; }
     public string? FilePath { get; }
-    
+
     public string Provider { get; set; } = "";
     public string Model { get; set; } = "";
     public string? Endpoint { get; set; }
@@ -385,19 +385,19 @@ public class AiDebugSession
     public string? Response { get; set; }
     public bool Streaming { get; set; }
     public ContextInfo? ContextInfo { get; set; }
-    
+
     public DateTime StartTime { get; set; }
     public DateTime? EndTime { get; set; }
-    
+
     public int? PromptTokens { get; set; }
     public int? CompletionTokens { get; set; }
     public Exception? Error { get; set; }
-    
+
     public AiDebugSession(string? debugDir, string? sessionId)
     {
         SessionId = sessionId;
-        FilePath = sessionId != null && debugDir != null 
-            ? Path.Combine(debugDir, $"{sessionId}.md") 
+        FilePath = sessionId != null && debugDir != null
+            ? Path.Combine(debugDir, $"{sessionId}.md")
             : null;
     }
 }
@@ -425,8 +425,8 @@ public class ContextFileInfo
     public long OriginalSize { get; set; }
     public long TruncatedSize { get; set; }
     public bool WasTruncated { get; set; }
-    
-    public double TruncationPercent => OriginalSize > 0 
-        ? (1.0 - (double)TruncatedSize / OriginalSize) * 100 
+
+    public double TruncationPercent => OriginalSize > 0
+        ? (1.0 - (double)TruncatedSize / OriginalSize) * 100
         : 0;
 }

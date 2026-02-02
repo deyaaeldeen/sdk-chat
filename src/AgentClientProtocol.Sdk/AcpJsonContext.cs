@@ -127,4 +127,40 @@ namespace AgentClientProtocol.Sdk;
 
 public partial class AcpJsonContext : JsonSerializerContext
 {
+    private static System.Text.Json.JsonSerializerOptions? _flexibleOptions;
+    private static readonly object _lock = new();
+
+    /// <summary>
+    /// JSON options that prefer source-generated serialization for known ACP types
+    /// but fall back to reflection for unknown/dynamic types (e.g., anonymous types).
+    /// Use this for AOT-friendly serialization while maintaining flexibility.
+    /// </summary>
+    public static System.Text.Json.JsonSerializerOptions FlexibleOptions
+    {
+        get
+        {
+            if (_flexibleOptions is not null) return _flexibleOptions;
+
+            lock (_lock)
+            {
+                if (_flexibleOptions is not null) return _flexibleOptions;
+
+                // Intentionally allow reflection fallback for dynamic types (anonymous types, user-defined types)
+                // This is the only place where we accept the AOT/trim tradeoff for flexibility
+#pragma warning disable IL2026, IL3050 // Reflection fallback intentional for dynamic types
+                var options = new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                    WriteIndented = false,
+                    // Chain: source-generated first, then fall back to default reflection resolver
+                    TypeInfoResolver = System.Text.Json.Serialization.Metadata.JsonTypeInfoResolver.Combine(Default, new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver())
+                };
+#pragma warning restore IL2026, IL3050
+                _flexibleOptions = options;
+            }
+
+            return _flexibleOptions;
+        }
+    }
 }

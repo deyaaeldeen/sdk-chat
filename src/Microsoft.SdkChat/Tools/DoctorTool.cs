@@ -16,7 +16,7 @@ public sealed partial class DoctorTool
     private const string Checkmark = "✓";
     private const string CrossMark = "✗";
     private const string WarningMark = "⚠";
-    
+
     // Source-generated regex for extracting Go version (avoids repeated compilation)
     [GeneratedRegex(@"go(\d+\.\d+\.?\d*)")]
     private static partial Regex GoVersionRegex();
@@ -68,7 +68,7 @@ public sealed partial class DoctorTool
             Console.WriteLine($"{CrossMark} Critical dependencies missing. SDK Chat cannot run.");
             return 1;
         }
-        
+
         if (optionalMissing.Count > 0)
         {
             Console.WriteLine($"{WarningMark} Some language extractors unavailable: {string.Join(", ", optionalMissing.Select(m => m.Name))}");
@@ -105,7 +105,7 @@ public sealed partial class DoctorTool
 
         return new DependencyStatus(".NET Runtime", false, null, null, null, "dotnet not found in PATH");
     }
-    
+
     private static string? ExtractDotNetRuntimeVersion(string output)
     {
         // Look for ".NET runtimes installed:" section and extract version
@@ -154,7 +154,7 @@ public sealed partial class DoctorTool
             catch { /* Command not found or failed - try next candidate */ }
         }
 
-        return new DependencyStatus("Python", false, null, null, null, 
+        return new DependencyStatus("Python", false, null, null, null,
             "Python 3 not found. Install Python 3.9+ and ensure it's in PATH.");
     }
 
@@ -251,7 +251,7 @@ public sealed partial class DoctorTool
         var errorTask = process.StandardError.ReadToEndAsync(ct);
 
         await process.WaitForExitAsync(ct);
-        
+
         return (process.ExitCode, await outputTask, await errorTask);
     }
 
@@ -279,21 +279,21 @@ public sealed partial class DoctorTool
 
         // Define trusted locations based on OS
         var trustedPrefixes = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new[] { 
-                @"C:\Program Files", 
-                @"C:\Program Files (x86)", 
+            ? new[] {
+                @"C:\Program Files",
+                @"C:\Program Files (x86)",
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 @"C:\Windows"
               }
-            : new[] { 
-                "/usr/bin", 
-                "/usr/local/bin", 
-                "/opt", 
-                "/home", 
+            : new[] {
+                "/usr/bin",
+                "/usr/local/bin",
+                "/opt",
+                "/home",
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
               };
 
-        var isTrusted = trustedPrefixes.Any(prefix => 
+        var isTrusted = trustedPrefixes.Any(prefix =>
             normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
         if (!isTrusted)
@@ -310,19 +310,19 @@ public sealed partial class DoctorTool
         {
             var icon = dep.IsAvailable ? Checkmark : CrossMark;
             var status = dep.IsAvailable ? $"v{dep.Version}" : "NOT FOUND";
-            
+
             Console.WriteLine($"{icon} {dep.Name,-15} {status}");
-            
+
             if (verbose && dep.IsAvailable && dep.Path != null)
             {
                 Console.WriteLine($"  Path: {dep.Path}");
             }
-            
+
             if (dep.Warning != null)
             {
                 Console.WriteLine($"  {WarningMark} {dep.Warning}");
             }
-            
+
             if (!dep.IsAvailable && dep.Error != null)
             {
                 Console.WriteLine($"  {dep.Error}");

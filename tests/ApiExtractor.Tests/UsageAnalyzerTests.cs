@@ -12,21 +12,21 @@ namespace ApiExtractor.Tests;
 public class UsageAnalyzerTests
 {
     private readonly CSharpUsageAnalyzer _analyzer = new();
-    
+
     [Fact]
     public async Task AnalyzeAsync_EmptyDirectory_ReturnsEmptyIndex()
     {
         // Arrange
         var tempDir = Path.Combine(Path.GetTempPath(), $"usage_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
-        
+
         try
         {
             var apiIndex = CreateTestApiIndex();
-            
+
             // Act
             var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
-            
+
             // Assert
             Assert.Equal(0, result.FileCount);
             Assert.Empty(result.CoveredOperations);
@@ -36,7 +36,7 @@ public class UsageAnalyzerTests
             Directory.Delete(tempDir, true);
         }
     }
-    
+
     [Fact]
     public async Task AnalyzeAsync_DetectsDirectMethodCall()
     {
@@ -49,14 +49,14 @@ public class UsageAnalyzerTests
                 var result = await client.GetCompletionAsync("Hello");
                 Console.WriteLine(result);
                 """));
-        
+
         try
         {
             var apiIndex = CreateTestApiIndex();
-            
+
             // Act
             var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
-            
+
             // Assert
             Assert.Equal(1, result.FileCount);
             Assert.Single(result.CoveredOperations);
@@ -68,7 +68,7 @@ public class UsageAnalyzerTests
             Directory.Delete(tempDir, true);
         }
     }
-    
+
     [Fact]
     public async Task AnalyzeAsync_DetectsMultipleMethods()
     {
@@ -82,22 +82,22 @@ public class UsageAnalyzerTests
                 var embedClient = new EmbeddingClient();
                 var embeddings = await embedClient.GetEmbeddingsAsync(["text"]);
                 """));
-        
+
         try
         {
             var apiIndex = CreateTestApiIndex();
-            
+
             // Act
             var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
-            
+
             // Assert
             Assert.Equal(3, result.CoveredOperations.Count);
-            
+
             var chatOps = result.CoveredOperations.Where(o => o.ClientType == "ChatClient").ToList();
             Assert.Equal(2, chatOps.Count);
             Assert.Contains(chatOps, o => o.Operation == "GetCompletionAsync");
             Assert.Contains(chatOps, o => o.Operation == "GetStreamingCompletionAsync");
-            
+
             var embedOps = result.CoveredOperations.Where(o => o.ClientType == "EmbeddingClient").ToList();
             Assert.Single(embedOps);
             Assert.Equal("GetEmbeddingsAsync", embedOps[0].Operation);
@@ -107,7 +107,7 @@ public class UsageAnalyzerTests
             Directory.Delete(tempDir, true);
         }
     }
-    
+
     [Fact]
     public async Task AnalyzeAsync_IdentifiesUncoveredOperations()
     {
@@ -117,18 +117,18 @@ public class UsageAnalyzerTests
                 var client = new ChatClient();
                 await client.GetCompletionAsync("test");
                 """));
-        
+
         try
         {
             var apiIndex = CreateTestApiIndex();
-            
+
             // Act
             var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
-            
+
             // Assert - GetStreamingCompletionAsync should be uncovered
-            Assert.Contains(result.UncoveredOperations, 
+            Assert.Contains(result.UncoveredOperations,
                 o => o.ClientType == "ChatClient" && o.Operation == "GetStreamingCompletionAsync");
-            
+
             // EmbeddingClient.GetEmbeddingsAsync should also be uncovered
             Assert.Contains(result.UncoveredOperations,
                 o => o.ClientType == "EmbeddingClient" && o.Operation == "GetEmbeddingsAsync");
@@ -138,7 +138,7 @@ public class UsageAnalyzerTests
             Directory.Delete(tempDir, true);
         }
     }
-    
+
     [Fact]
     public async Task AnalyzeAsync_DeduplicatesOperations()
     {
@@ -153,16 +153,16 @@ public class UsageAnalyzerTests
                 await client.GetCompletionAsync("test2");
                 await client.GetCompletionAsync("test3");
                 """));
-        
+
         try
         {
             var apiIndex = CreateTestApiIndex();
-            
+
             // Act
             var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
-            
+
             // Assert - should only appear once despite 3 calls
-            var chatOps = result.CoveredOperations.Where(o => 
+            var chatOps = result.CoveredOperations.Where(o =>
                 o.ClientType == "ChatClient" && o.Operation == "GetCompletionAsync").ToList();
             Assert.Single(chatOps);
         }
@@ -171,7 +171,7 @@ public class UsageAnalyzerTests
             Directory.Delete(tempDir, true);
         }
     }
-    
+
     [Fact]
     public async Task AnalyzeAsync_IgnoresBinObjFolders()
     {
@@ -179,20 +179,20 @@ public class UsageAnalyzerTests
         var tempDir = Path.Combine(Path.GetTempPath(), $"usage_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
         Directory.CreateDirectory(Path.Combine(tempDir, "obj"));
-        
+
         // Put a file in obj that should be ignored
         await File.WriteAllTextAsync(Path.Combine(tempDir, "obj", "sample.cs"), """
             var client = new ChatClient();
             await client.GetCompletionAsync("test");
             """);
-        
+
         try
         {
             var apiIndex = CreateTestApiIndex();
-            
+
             // Act
             var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
-            
+
             // Assert - file in obj should be ignored
             Assert.Equal(0, result.FileCount);
         }
@@ -201,7 +201,7 @@ public class UsageAnalyzerTests
             Directory.Delete(tempDir, true);
         }
     }
-    
+
     [Fact]
     public void Format_ProducesReadableOutput()
     {
@@ -209,7 +209,7 @@ public class UsageAnalyzerTests
         var usage = new Contracts.UsageIndex
         {
             FileCount = 5,
-            CoveredOperations = 
+            CoveredOperations =
             [
                 new() { ClientType = "ChatClient", Operation = "GetCompletionAsync", File = "sample1.cs", Line = 10 },
                 new() { ClientType = "ChatClient", Operation = "GetStreamingCompletionAsync", File = "sample2.cs", Line = 15 }
@@ -219,10 +219,10 @@ public class UsageAnalyzerTests
                 new() { ClientType = "EmbeddingClient", Operation = "GetEmbeddingsAsync", Signature = "GetEmbeddingsAsync(...)" }
             ]
         };
-        
+
         // Act
         var output = _analyzer.Format(usage);
-        
+
         // Assert
         Assert.Contains("Analyzed 5 files", output);
         Assert.Contains("COVERED OPERATIONS", output);
@@ -230,7 +230,7 @@ public class UsageAnalyzerTests
         Assert.Contains("UNCOVERED OPERATIONS", output);
         Assert.Contains("EmbeddingClient.GetEmbeddingsAsync", output);
     }
-    
+
     [Fact]
     public async Task AnalyzeAsync_NoApiClients_ReturnsEmptyIndex()
     {
@@ -239,15 +239,15 @@ public class UsageAnalyzerTests
             ("sample.cs", """
                 Console.WriteLine("Hello World");
                 """));
-        
+
         try
         {
             // Empty API index with no clients
             var apiIndex = new ApiIndex { Package = "TestSdk" };
-            
+
             // Act
             var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
-            
+
             // Assert
             Assert.Empty(result.CoveredOperations);
             Assert.Empty(result.UncoveredOperations);
@@ -257,9 +257,9 @@ public class UsageAnalyzerTests
             Directory.Delete(tempDir, true);
         }
     }
-    
+
     #region Test Helpers
-    
+
     private static ApiIndex CreateTestApiIndex() => new()
     {
         Package = "TestSdk",
@@ -293,12 +293,12 @@ public class UsageAnalyzerTests
             }
         ]
     };
-    
+
     private static async Task<(string TempDir, string[] Files)> SetupTestFilesAsync(params (string Name, string Content)[] files)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"usage_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
-        
+
         var paths = new List<string>();
         foreach (var (name, content) in files)
         {
@@ -306,9 +306,9 @@ public class UsageAnalyzerTests
             await File.WriteAllTextAsync(path, content);
             paths.Add(path);
         }
-        
+
         return (tempDir, paths.ToArray());
     }
-    
+
     #endregion
 }

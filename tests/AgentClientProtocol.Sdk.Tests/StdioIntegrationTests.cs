@@ -34,9 +34,9 @@ public class StdioIntegrationTests
                 ClientCapabilities = new ClientCapabilities()
             })
         };
-        
+
         var jsonLine = JsonSerializer.Serialize(request) + "\n";
-        
+
         // Act - Use a simple echo via Process to verify stream handling
         using var process = new Process
         {
@@ -50,28 +50,28 @@ public class StdioIntegrationTests
                 CreateNoWindow = true
             }
         };
-        
+
         process.Start();
-        
+
         // Write to stdin
         await process.StandardInput.WriteAsync(jsonLine);
         process.StandardInput.Close();
-        
+
         // Read from stdout
         var output = await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
-        
+
         // Assert - Verify round-trip
         Assert.Equal(0, process.ExitCode);
         Assert.Equal(jsonLine, output);
-        
+
         // Verify we can deserialize the echoed message
         var echoed = JsonSerializer.Deserialize<JsonRpcRequest>(output.Trim());
         Assert.NotNull(echoed);
         Assert.Equal("initialize", echoed.Method);
         Assert.Equal(1, ((JsonElement)echoed.Id!).GetInt32());
     }
-    
+
     /// <summary>
     /// Tests that multiple messages can be sent through stdio in NDJSON format.
     /// </summary>
@@ -85,14 +85,14 @@ public class StdioIntegrationTests
             new JsonRpcRequest { Id = 2, Method = "second" },
             new JsonRpcNotification { Method = "notify", Params = JsonSerializer.SerializeToElement(new { value = 42 }) }
         };
-        
+
         var sb = new StringBuilder();
         foreach (var msg in messages)
         {
             sb.AppendLine(JsonSerializer.Serialize(msg, msg.GetType()));
         }
         var input = sb.ToString();
-        
+
         // Act - Echo through process
         using var process = new Process
         {
@@ -106,30 +106,30 @@ public class StdioIntegrationTests
                 CreateNoWindow = true
             }
         };
-        
+
         process.Start();
         await process.StandardInput.WriteAsync(input);
         process.StandardInput.Close();
-        
+
         var output = await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
-        
+
         // Assert
         Assert.Equal(0, process.ExitCode);
-        
+
         var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(3, lines.Length);
-        
+
         var first = JsonSerializer.Deserialize<JsonRpcRequest>(lines[0]);
         Assert.Equal("first", first?.Method);
-        
+
         var second = JsonSerializer.Deserialize<JsonRpcRequest>(lines[1]);
         Assert.Equal("second", second?.Method);
-        
+
         var notify = JsonSerializer.Deserialize<JsonRpcNotification>(lines[2]);
         Assert.Equal("notify", notify?.Method);
     }
-    
+
     /// <summary>
     /// Tests that the protocol handles large messages correctly through stdio.
     /// </summary>
@@ -144,9 +144,9 @@ public class StdioIntegrationTests
             Method = "large_payload",
             Params = JsonSerializer.SerializeToElement(new { content = largeContent })
         };
-        
+
         var jsonLine = JsonSerializer.Serialize(request) + "\n";
-        
+
         // Act
         using var process = new Process
         {
@@ -160,28 +160,28 @@ public class StdioIntegrationTests
                 CreateNoWindow = true
             }
         };
-        
+
         process.Start();
         await process.StandardInput.WriteAsync(jsonLine);
         process.StandardInput.Close();
-        
+
         var output = await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
-        
+
         // Assert
         Assert.Equal(0, process.ExitCode);
         Assert.Equal(jsonLine.Length, output.Length);
-        
+
         var echoed = JsonSerializer.Deserialize<JsonRpcRequest>(output.Trim());
         Assert.NotNull(echoed);
         Assert.Equal("large_payload", echoed.Method);
-        
+
         // Verify the content survived
         var paramsJson = echoed.Params!.Value;
         var content = paramsJson.GetProperty("content").GetString();
         Assert.Equal(100_000, content?.Length);
     }
-    
+
     /// <summary>
     /// Tests concurrent read/write operations on stdio streams.
     /// </summary>
@@ -190,9 +190,9 @@ public class StdioIntegrationTests
     {
         // This test verifies that our async patterns don't cause deadlocks
         // when reading and writing concurrently (as would happen in real ACP usage)
-        
+
         var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        
+
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -205,9 +205,9 @@ public class StdioIntegrationTests
                 CreateNoWindow = true
             }
         };
-        
+
         process.Start();
-        
+
         // Write and read concurrently
         var writeTask = Task.Run(async () =>
         {
@@ -218,7 +218,7 @@ public class StdioIntegrationTests
             }
             process.StandardInput.Close();
         }, cts.Token);
-        
+
         var readTask = Task.Run(async () =>
         {
             var lines = new List<string>();
@@ -228,11 +228,11 @@ public class StdioIntegrationTests
             }
             return lines;
         }, cts.Token);
-        
+
         await writeTask;
         var receivedLines = await readTask;
         await process.WaitForExitAsync(cts.Token);
-        
+
         // Assert - all messages received
         Assert.Equal(10, receivedLines.Count);
         for (int i = 0; i < 10; i++)

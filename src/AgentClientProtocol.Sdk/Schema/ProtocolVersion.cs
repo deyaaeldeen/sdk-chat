@@ -12,7 +12,7 @@ public static class Protocol
     /// Current protocol version supported by this SDK.
     /// </summary>
     public const int Version = 1;
-    
+
     /// <summary>
     /// Protocol version string for display.
     /// </summary>

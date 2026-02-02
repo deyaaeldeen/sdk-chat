@@ -1,7 +1,7 @@
 # SDK Chat Demo Recording Container
 # Used for: VHS demo recording with headless Chrome
 #
-# Build:  docker build -f Dockerfile.demo -t sdk-chat-demo .
+# Build:  docker build -f demo/Dockerfile -t sdk-chat-demo .
 # Record: docker run --rm -v $(pwd):/workspace -w /workspace sdk-chat-demo vhs demo/demo.tape
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0

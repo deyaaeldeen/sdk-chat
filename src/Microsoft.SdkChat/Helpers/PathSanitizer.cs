@@ -9,21 +9,21 @@ namespace Microsoft.SdkChat.Helpers;
 public static class PathSanitizer
 {
     // Pre-computed lookup table for invalid filename characters
-    private static readonly SearchValues<char> InvalidFileNameChars = 
+    private static readonly SearchValues<char> InvalidFileNameChars =
         SearchValues.Create(Path.GetInvalidFileNameChars());
-    
+
     // Additional characters to sanitize for cross-platform compatibility
-    private static readonly SearchValues<char> AdditionalInvalidChars = 
+    private static readonly SearchValues<char> AdditionalInvalidChars =
         SearchValues.Create([':', ' ']);
-    
+
     public static string SanitizeFileName(string? name)
     {
         if (string.IsNullOrEmpty(name)) return "Sample";
-        
+
         // Fast path: if no invalid characters, return original
         if (!ContainsInvalidChar(name.AsSpan()))
             return name;
-        
+
         // Slow path: replace invalid characters
         return string.Create(name.Length, name, static (span, src) =>
         {
@@ -34,37 +34,37 @@ public static class PathSanitizer
             }
         });
     }
-    
+
     /// <summary>Sanitizes a relative path, blocking traversal attacks.</summary>
     public static string SanitizeFilePath(string? path, string expectedExtension)
     {
         if (string.IsNullOrEmpty(path)) return "Sample" + expectedExtension;
-        
+
         var normalized = path.Replace('\\', '/');
         var parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        
+
         if (parts.Length == 0) return "Sample" + expectedExtension;
-        
+
         var sanitizedParts = new string[parts.Length];
         var validPartCount = 0;
-        
+
         for (var i = 0; i < parts.Length; i++)
         {
             var part = parts[i];
-            
+
             // Explicitly block path traversal attempts - ".." could escape output directory
             if (part == ".." || part == ".")
                 continue;
-            
+
             sanitizedParts[validPartCount++] = SanitizeFileName(part);
         }
-        
+
         if (validPartCount == 0) return "Sample" + expectedExtension;
-        
+
         // Create final array with only valid parts
         var finalParts = sanitizedParts[..validPartCount];
         var result = string.Join(Path.DirectorySeparatorChar, finalParts);
-        
+
         // Ensure correct extension
         if (!result.EndsWith(expectedExtension, StringComparison.OrdinalIgnoreCase))
         {
@@ -80,15 +80,15 @@ public static class PathSanitizer
                 result += expectedExtension;
             }
         }
-        
+
         return result;
     }
-    
+
     private static bool ContainsInvalidChar(ReadOnlySpan<char> span)
     {
         return span.ContainsAny(InvalidFileNameChars) || span.ContainsAny(AdditionalInvalidChars);
     }
-    
+
     private static bool IsInvalidFileNameChar(char c)
     {
         return InvalidFileNameChars.Contains(c) || c == ':' || c == ' ';

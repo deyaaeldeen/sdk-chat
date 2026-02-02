@@ -241,9 +241,9 @@ public class SampleLanguageContextTests
         foreach (var context in contexts)
         {
             var instructions = context.GetInstructions();
-            Assert.False(string.IsNullOrWhiteSpace(instructions), 
+            Assert.False(string.IsNullOrWhiteSpace(instructions),
                 $"{context.Language} should have instructions");
-            Assert.True(instructions.Length > 50, 
+            Assert.True(instructions.Length > 50,
                 $"{context.Language} instructions should be substantial");
         }
     }

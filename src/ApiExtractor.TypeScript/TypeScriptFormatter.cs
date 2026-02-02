@@ -13,7 +13,7 @@ namespace ApiExtractor.TypeScript;
 public static class TypeScriptFormatter
 {
     public static string Format(ApiIndex index) => Format(index, int.MaxValue);
-    
+
     /// <summary>
     /// Formats with coverage awareness: compact summary of covered ops, full signatures for uncovered.
     /// This provides ~70% token savings while maintaining complete context for generation.
@@ -21,12 +21,12 @@ public static class TypeScriptFormatter
     public static string FormatWithCoverage(ApiIndex index, UsageIndex coverage, int maxLength)
     {
         var sb = new StringBuilder();
-        
+
         // Section 1: Compact summary of what's already covered
         var coveredByClient = coverage.CoveredOperations
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-        
+
         if (coveredByClient.Count > 0)
         {
             var totalCovered = coverage.CoveredOperations.Count;
@@ -37,33 +37,33 @@ public static class TypeScriptFormatter
             }
             sb.AppendLine();
         }
-        
+
         // Section 2: Full signatures for types containing uncovered operations
         var uncoveredByClient = coverage.UncoveredOperations
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-        
+
         if (uncoveredByClient.Count == 0)
         {
             sb.AppendLine("// All operations are covered in existing samples.");
             return sb.ToString();
         }
-        
+
         sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
-        
+
         // Format only classes that have uncovered operations
         var allClasses = index.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
-        
+
         var includedClasses = new HashSet<string>();
         var currentLength = sb.Length;
-        
+
         foreach (var cls in classesWithUncovered)
         {
             if (includedClasses.Contains(cls.Name))
                 continue;
-            
+
             // Filter to show only uncovered methods for client classes
             var filteredClass = cls;
             if (uncoveredByClient.TryGetValue(cls.Name, out var uncoveredOps))
@@ -75,28 +75,28 @@ public static class TypeScriptFormatter
                         .ToList() ?? []
                 };
             }
-            
+
             var classContent = FormatClassToString(filteredClass);
-            
+
             if (currentLength + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
             {
                 sb.AppendLine($"// ... truncated ({classesWithUncovered.Count - includedClasses.Count} classes omitted)");
                 break;
             }
-            
+
             sb.Append(classContent);
             currentLength += classContent.Length;
             includedClasses.Add(cls.Name);
         }
-        
+
         return sb.ToString();
     }
-    
+
     private static string FormatClassToString(ClassInfo cls)
     {
         return FormatClass(cls);
     }
-    
+
     /// <summary>
     /// Formats the API surface with smart truncation that prioritizes client classes.
     /// </summary>
@@ -114,49 +114,49 @@ public static class TypeScriptFormatter
         var allEnums = index.Modules.SelectMany(m => m.Enums ?? []).ToList();
         var allTypes = index.Modules.SelectMany(m => m.Types ?? []).ToList();
         var allFunctions = index.Modules.SelectMany(m => m.Functions ?? []).ToList();
-        
+
         // Build set of all type names for dependency tracking
         var allTypeNames = new HashSet<string>();
         foreach (var c in allClasses) allTypeNames.Add(c.Name);
         foreach (var i in allInterfaces) allTypeNames.Add(i.Name);
         foreach (var e in allEnums) allTypeNames.Add(e.Name);
         foreach (var t in allTypes) allTypeNames.Add(t.Name);
-        
+
         // Build dependency graph for classes
         var classDeps = new Dictionary<string, HashSet<string>>();
         foreach (var cls in allClasses)
         {
             classDeps[cls.Name] = cls.GetReferencedTypes(allTypeNames);
         }
-        
+
         // Prioritize classes: clients first, then their dependencies, then others
         var prioritizedClasses = GetPrioritizedClasses(allClasses, classDeps);
-        
+
         // Format with budget awareness
         int totalItems = allClasses.Count + allInterfaces.Count + allEnums.Count + allTypes.Count + allFunctions.Count;
         int includedItems = 0;
         var includedTypeNames = new HashSet<string>();
-        
+
         // First pass: Include client classes and their dependencies
         foreach (var cls in prioritizedClasses)
         {
             if (sb.Length >= maxLength) break;
-            
+
             // Include this class
             var classStr = FormatClass(cls);
             if (sb.Length + classStr.Length > maxLength && includedItems > 0)
                 break;
-                
+
             sb.Append(classStr);
             includedTypeNames.Add(cls.Name);
             includedItems++;
-            
+
             // Include its dependencies (interfaces, enums, types)
             foreach (var depName in classDeps.GetValueOrDefault(cls.Name, []))
             {
                 if (includedTypeNames.Contains(depName)) continue;
                 if (sb.Length >= maxLength) break;
-                
+
                 // Try to find and include the dependency
                 var iface = allInterfaces.FirstOrDefault(i => i.Name == depName);
                 if (iface != null)
@@ -170,7 +170,7 @@ public static class TypeScriptFormatter
                     }
                     continue;
                 }
-                
+
                 var enumDef = allEnums.FirstOrDefault(e => e.Name == depName);
                 if (enumDef != null)
                 {
@@ -183,7 +183,7 @@ public static class TypeScriptFormatter
                     }
                     continue;
                 }
-                
+
                 var typeDef = allTypes.FirstOrDefault(t => t.Name == depName);
                 if (typeDef != null)
                 {
@@ -197,7 +197,7 @@ public static class TypeScriptFormatter
                 }
             }
         }
-        
+
         // Second pass: Include remaining interfaces if space permits
         foreach (var iface in allInterfaces.Where(i => !includedTypeNames.Contains(i.Name)))
         {
@@ -210,7 +210,7 @@ public static class TypeScriptFormatter
                 includedItems++;
             }
         }
-        
+
         // Third pass: Include remaining enums if space permits
         foreach (var enumDef in allEnums.Where(e => !includedTypeNames.Contains(e.Name)))
         {
@@ -223,7 +223,7 @@ public static class TypeScriptFormatter
                 includedItems++;
             }
         }
-        
+
         // Fourth pass: Include functions if space permits (limit to first 20)
         int funcCount = 0;
         foreach (var fn in allFunctions.Take(20))
@@ -237,7 +237,7 @@ public static class TypeScriptFormatter
                 funcCount++;
             }
         }
-        
+
         // Add truncation notice if needed
         if (includedItems < totalItems)
         {
@@ -246,12 +246,12 @@ public static class TypeScriptFormatter
 
         return sb.ToString();
     }
-    
+
     private static List<ClassInfo> GetPrioritizedClasses(List<ClassInfo> classes, Dictionary<string, HashSet<string>> deps)
     {
         var result = new List<ClassInfo>();
         var added = new HashSet<string>();
-        
+
         // Add client classes first (priority 0)
         var clientClasses = classes.Where(c => c.IsClientType).OrderBy(c => c.Name).ToList();
         foreach (var client in clientClasses)
@@ -259,7 +259,7 @@ public static class TypeScriptFormatter
             result.Add(client);
             added.Add(client.Name);
         }
-        
+
         // Add classes that clients depend on
         foreach (var client in clientClasses)
         {
@@ -273,16 +273,16 @@ public static class TypeScriptFormatter
                 }
             }
         }
-        
+
         // Add remaining classes sorted by priority
         foreach (var cls in classes.Where(c => !added.Contains(c.Name)).OrderBy(c => c.TruncationPriority).ThenBy(c => c.Name))
         {
             result.Add(cls);
         }
-        
+
         return result;
     }
-    
+
     private static string FormatClass(ClassInfo cls)
     {
         var sb = new StringBuilder();
@@ -322,7 +322,7 @@ public static class TypeScriptFormatter
         sb.AppendLine();
         return sb.ToString();
     }
-    
+
     private static string FormatInterface(InterfaceInfo iface)
     {
         var sb = new StringBuilder();
@@ -350,7 +350,7 @@ public static class TypeScriptFormatter
         sb.AppendLine();
         return sb.ToString();
     }
-    
+
     private static string FormatEnum(EnumInfo e)
     {
         var sb = new StringBuilder();
@@ -363,7 +363,7 @@ public static class TypeScriptFormatter
         sb.AppendLine();
         return sb.ToString();
     }
-    
+
     private static string FormatTypeAlias(TypeAliasInfo t)
     {
         var sb = new StringBuilder();
@@ -373,7 +373,7 @@ public static class TypeScriptFormatter
         sb.AppendLine();
         return sb.ToString();
     }
-    
+
     private static string FormatFunction(FunctionInfo fn)
     {
         var sb = new StringBuilder();

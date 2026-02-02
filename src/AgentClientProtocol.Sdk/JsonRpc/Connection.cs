@@ -17,23 +17,23 @@ public sealed record ConnectionOptions
     /// Default request timeout (5 minutes for AI operations).
     /// </summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
-    
+
     /// <summary>
     /// Default handshake timeout (10 seconds for fast-fail on connection issues).
     /// </summary>
     public static readonly TimeSpan DefaultHandshakeTimeout = TimeSpan.FromSeconds(10);
-    
+
     /// <summary>
     /// Timeout for individual requests. Defaults to 5 minutes.
     /// </summary>
     public TimeSpan RequestTimeout { get; init; } = DefaultTimeout;
-    
+
     /// <summary>
     /// Timeout for handshake/initialization requests. Defaults to 10 seconds.
     /// Fast-fail for connection issues - AI generation uses RequestTimeout instead.
     /// </summary>
     public TimeSpan HandshakeTimeout { get; init; } = DefaultHandshakeTimeout;
-    
+
     /// <summary>
     /// Maximum number of pending inbound messages before backpressure is applied.
     /// </summary>
@@ -55,16 +55,16 @@ public class Connection : IAsyncDisposable
     private int _requestId;
     private int _handlerId;
     private int _disposed;
-    
+
     private Func<string, object?, Task<object?>>? _requestHandler;
     private Func<string, object?, Task>? _notificationHandler;
-    
+
     public Connection(IAcpStream stream, ILogger? logger = null, ConnectionOptions? options = null)
     {
         _stream = stream;
         _logger = logger;
         _options = options ?? new ConnectionOptions();
-        
+
         // Bounded channel provides backpressure for inbound messages
         _inboundChannel = Channel.CreateBounded<JsonRpcMessageBase>(new BoundedChannelOptions(_options.MaxPendingMessages)
         {
@@ -73,7 +73,7 @@ public class Connection : IAsyncDisposable
             SingleWriter = true
         });
     }
-    
+
     /// <summary>
     /// Set handler for incoming requests.
     /// </summary>
@@ -81,7 +81,7 @@ public class Connection : IAsyncDisposable
     {
         _requestHandler = handler;
     }
-    
+
     /// <summary>
     /// Set handler for incoming notifications.
     /// </summary>
@@ -89,20 +89,20 @@ public class Connection : IAsyncDisposable
     {
         _notificationHandler = handler;
     }
-    
+
     /// <summary>
     /// Start processing incoming messages.
     /// </summary>
     public async Task RunAsync(CancellationToken ct = default)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _cts.Token);
-        
+
         // Start the reader task (reads from stream, writes to channel)
         var readerTask = ReadMessagesAsync(linked.Token);
-        
+
         // Start the processor task (reads from channel, handles messages)
         var processorTask = ProcessMessagesAsync(linked.Token);
-        
+
         try
         {
             // Wait for both to complete (reader completing will close channel, processor will drain)
@@ -114,7 +114,7 @@ public class Connection : IAsyncDisposable
             _logger?.LogError(ex, "Connection error");
         }
     }
-    
+
     private async Task ReadMessagesAsync(CancellationToken ct)
     {
         try
@@ -123,7 +123,7 @@ public class Connection : IAsyncDisposable
             {
                 var message = await _stream.ReadAsync(ct).ConfigureAwait(false);
                 if (message == null) break;
-                
+
                 // Bounded channel - this will wait if consumer is slow (backpressure)
                 await _inboundChannel.Writer.WriteAsync(message, ct).ConfigureAwait(false);
             }
@@ -133,7 +133,7 @@ public class Connection : IAsyncDisposable
             _inboundChannel.Writer.Complete();
         }
     }
-    
+
     private async Task ProcessMessagesAsync(CancellationToken ct)
     {
         await foreach (var message in _inboundChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
@@ -150,7 +150,7 @@ public class Connection : IAsyncDisposable
             }, TaskScheduler.Default);
             _activeHandlers[handlerKey] = handlerTask;
         }
-        
+
         // Wait for all active handlers to complete before exiting
         var handlers = _activeHandlers.Values.ToArray();
         if (handlers.Length > 0)
@@ -158,7 +158,7 @@ public class Connection : IAsyncDisposable
             await Task.WhenAll(handlers).ConfigureAwait(false);
         }
     }
-    
+
     private async Task HandleMessageAsync(JsonRpcMessageBase message)
     {
         switch (message)
@@ -174,7 +174,7 @@ public class Connection : IAsyncDisposable
                 break;
         }
     }
-    
+
     private async Task HandleRequestAsync(JsonRpcRequest request)
     {
         if (_requestHandler == null)
@@ -182,7 +182,7 @@ public class Connection : IAsyncDisposable
             await SendErrorAsync(request.Id, RequestError.MethodNotFound(request.Method));
             return;
         }
-        
+
         try
         {
             var result = await _requestHandler(request.Method, request.Params);
@@ -198,11 +198,11 @@ public class Connection : IAsyncDisposable
             await SendErrorAsync(request.Id, RequestError.InternalError(null, ex.Message));
         }
     }
-    
+
     private void HandleResponse(JsonRpcResponse response)
     {
         if (response.Id == null) return;
-        
+
         // Normalize ID to int for matching (JSON deserializes numbers as JsonElement)
         var normalizedId = NormalizeId(response.Id);
         if (normalizedId != null && _pendingRequests.TryRemove(normalizedId, out var tcs))
@@ -210,7 +210,7 @@ public class Connection : IAsyncDisposable
             tcs.TrySetResult(response);
         }
     }
-    
+
     /// <summary>
     /// Normalize JSON-RPC ID to a consistent type for dictionary matching.
     /// JSON deserializes integer IDs as JsonElement, but we store them as int.
@@ -224,7 +224,7 @@ public class Connection : IAsyncDisposable
         System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String => je.GetString(),
         _ => id
     };
-    
+
     private async Task HandleNotificationAsync(JsonRpcNotification notification)
     {
         if (_notificationHandler != null)
@@ -239,97 +239,110 @@ public class Connection : IAsyncDisposable
             }
         }
     }
-    
+
     /// <summary>
     /// Send a request and wait for response.
     /// </summary>
     public async Task<T?> SendRequestAsync<T>(string method, object? parameters = null, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed == 1, this);
-        
+
         var id = Interlocked.Increment(ref _requestId);
         var tcs = new TaskCompletionSource<JsonRpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingRequests[id] = tcs;
-        
+
         try
         {
+            // Parameters is dynamic object - type unknown at compile time
+#pragma warning disable IL2026, IL3050 // Dynamic object serialization unavoidable
+            var serializedParams = parameters != null ? System.Text.Json.JsonSerializer.SerializeToElement(parameters, AcpJsonContext.FlexibleOptions) : (System.Text.Json.JsonElement?)null;
+#pragma warning restore IL2026, IL3050
+
             var request = new JsonRpcRequest
             {
                 Id = id,
                 Method = method,
-                Params = parameters != null ? System.Text.Json.JsonSerializer.SerializeToElement(parameters) : null
+                Params = serializedParams
             };
-            
+
             await _stream.WriteAsync(request, ct).ConfigureAwait(false);
-            
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(_options.RequestTimeout);
-            
+
             var response = await tcs.Task.WaitAsync(cts.Token).ConfigureAwait(false);
-            
+
             if (response.Error != null)
             {
                 throw new RequestError(response.Error.Code, response.Error.Message, response.Error.Data);
             }
-            
+
             if (response.Result == null) return default;
-            
+
             // Efficient deserialization: handle JsonElement directly without re-serializing
+            // Generic T cannot use source-generated serialization at compile time
+#pragma warning disable IL2026, IL3050 // Generic deserialization unavoidable - T is unknown at compile time
             if (response.Result is System.Text.Json.JsonElement jsonElement)
             {
-                return System.Text.Json.JsonSerializer.Deserialize<T>(jsonElement.GetRawText());
+                return System.Text.Json.JsonSerializer.Deserialize<T>(jsonElement.GetRawText(), AcpJsonContext.FlexibleOptions);
             }
-            
+
             // Fallback for non-JsonElement results (rare)
             return System.Text.Json.JsonSerializer.Deserialize<T>(
-                System.Text.Json.JsonSerializer.Serialize(response.Result));
+                System.Text.Json.JsonSerializer.Serialize(response.Result, AcpJsonContext.FlexibleOptions), AcpJsonContext.FlexibleOptions);
+#pragma warning restore IL2026, IL3050
         }
         finally
         {
             _pendingRequests.TryRemove(id, out _);
         }
     }
-    
+
     /// <summary>
     /// Send a notification (no response expected).
     /// </summary>
     public async Task SendNotificationAsync(string method, object? parameters = null, CancellationToken ct = default)
     {
+        // Parameters is dynamic object - type unknown at compile time
+#pragma warning disable IL2026, IL3050 // Dynamic object serialization unavoidable
+        var serializedParams = parameters != null ? System.Text.Json.JsonSerializer.SerializeToElement(parameters, AcpJsonContext.FlexibleOptions) : (System.Text.Json.JsonElement?)null;
+#pragma warning restore IL2026, IL3050
+
         var notification = new JsonRpcNotification
         {
             Method = method,
-            Params = parameters != null ? System.Text.Json.JsonSerializer.SerializeToElement(parameters) : null
+            Params = serializedParams
         };
         await _stream.WriteAsync(notification, ct).ConfigureAwait(false);
     }
-    
+
     private async Task SendResponseAsync(object? id, object? result)
     {
         var response = JsonRpcResponse.Success(id, result);
         await _stream.WriteAsync(response);
     }
-    
+
     private async Task SendErrorAsync(object? id, RequestError error)
     {
         var response = error.ToResponse(id);
         await _stream.WriteAsync(response);
     }
-    
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
-        
+
         // Cancel ongoing operations
         await _cts.CancelAsync().ConfigureAwait(false);
-        
+
         // Fault all pending requests to prevent callers from hanging forever
         foreach (var kvp in _pendingRequests)
         {
             kvp.Value.TrySetException(new ObjectDisposedException(nameof(Connection), "Connection was disposed while request was pending"));
         }
         _pendingRequests.Clear();
-        
+
         await _stream.DisposeAsync().ConfigureAwait(false);
         _cts.Dispose();
     }

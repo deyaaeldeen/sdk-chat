@@ -1,13 +1,11 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
-using ModelContextProtocol.Server;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
-using Microsoft.SdkChat.Services.Languages;
 using Microsoft.SdkChat.Services.Languages.Samples;
 using Microsoft.SdkChat.Telemetry;
+using ModelContextProtocol.Server;
 
 namespace Microsoft.SdkChat.Mcp;
 
@@ -19,7 +17,7 @@ public class SampleGeneratorMcpTool(
     IAiService aiService,
     FileHelper fileHelper)
 {
-    
+
     [McpServerTool(Name = "generate_samples"), Description(
         "Generate production-quality SDK samples with 70% less AI token usage than raw source. " +
         "Uses semantic API extraction to understand operations and coverage analysis to avoid duplicates. " +
@@ -38,22 +36,22 @@ public class SampleGeneratorMcpTool(
         CancellationToken cancellationToken = default)
     {
         using var activity = SdkChatTelemetry.StartMcpTool("generate_samples");
-        
+
         // Track token usage via events
         var promptTokens = 0;
         var responseTokens = 0;
-        
+
         void OnPromptReady(object? sender, AiPromptReadyEventArgs e) => promptTokens = e.EstimatedTokens;
         void OnStreamComplete(object? sender, AiStreamCompleteEventArgs e) => responseTokens = e.EstimatedResponseTokens;
-        
+
         aiService.PromptReady += OnPromptReady;
         aiService.StreamComplete += OnStreamComplete;
-        
+
         try
         {
             // Auto-detect source, samples folders, and language (async to avoid blocking)
             var sdkInfo = await SdkInfo.ScanAsync(packagePath, cancellationToken).ConfigureAwait(false);
-            
+
             // Use language override or auto-detected language
             SdkLanguage? effectiveLanguage = null;
             if (!string.IsNullOrEmpty(language))
@@ -63,7 +61,7 @@ public class SampleGeneratorMcpTool(
                     effectiveLanguage = null;
             }
             effectiveLanguage ??= sdkInfo.Language;
-            
+
             if (effectiveLanguage == null)
             {
                 return McpToolResult.CreateFailure(
@@ -72,20 +70,20 @@ public class SampleGeneratorMcpTool(
                     ["Ensure the path contains recognized SDK files", "Supported: .csproj, setup.py, pom.xml, package.json, go.mod", "Or specify language explicitly"]
                 ).ToString();
             }
-            
+
             activity?.SetTag("language", effectiveLanguage.Value.ToString());
-            
+
             // Create language context for streaming
             var context = CreateLanguageContext(effectiveLanguage.Value);
             var systemPrompt = BuildSystemPrompt(context, count ?? 5);
-            
+
             // Use specified budget or default
             var contextBudget = budget ?? SampleConstants.DefaultContextCharacters;
             var effectiveCount = count ?? 5;
-            
+
             // Stream user prompt (prefix + context) directly to AI without materialization
             var userPromptStream = StreamUserPromptAsync(prompt, effectiveCount, sdkInfo.SourceFolder, context, contextBudget, cancellationToken);
-            
+
             // Stream parsed samples as they complete
             List<GeneratedSample> samples = [];
             List<string> generatedFiles = [];
@@ -97,21 +95,21 @@ public class SampleGeneratorMcpTool(
                     samples.Add(sample);
                 }
             }
-            
+
             // Write to auto-detected or specified output folder
             var output = Path.GetFullPath(outputPath ?? sdkInfo.SuggestedSamplesFolder);
             Directory.CreateDirectory(output);
-            
+
             foreach (var sample in samples)
             {
                 // Use FilePath if provided, otherwise generate from Name
-                var relativePath = !string.IsNullOrEmpty(sample.FilePath) 
+                var relativePath = !string.IsNullOrEmpty(sample.FilePath)
                     ? PathSanitizer.SanitizeFilePath(sample.FilePath, context.FileExtension)
                     : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
                 var filePath = Path.GetFullPath(Path.Combine(output, relativePath));
 
                 // SECURITY: Ensure path stays within output directory (defense-in-depth)
-                if (!filePath.StartsWith(output + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) 
+                if (!filePath.StartsWith(output + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
                     && !filePath.Equals(output, StringComparison.OrdinalIgnoreCase))
                 {
                     continue; // Skip files that would escape output directory
@@ -126,10 +124,10 @@ public class SampleGeneratorMcpTool(
                 await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken).ConfigureAwait(false);
                 generatedFiles.Add(filePath);
             }
-            
+
             // Record telemetry with token counts
             SdkChatTelemetry.RecordSampleMetrics(activity, samples.Count, promptTokens, responseTokens);
-            
+
             return McpToolResult.CreateSuccess(
                 $"Generated {samples.Count} sample(s) in {output}",
                 new ResultData
@@ -152,7 +150,7 @@ public class SampleGeneratorMcpTool(
             aiService.StreamComplete -= OnStreamComplete;
         }
     }
-    
+
     // Language context factory for all supported languages
     private SampleLanguageContext CreateLanguageContext(SdkLanguage language) => language switch
     {
@@ -164,10 +162,10 @@ public class SampleGeneratorMcpTool(
         SdkLanguage.Go => new GoSampleLanguageContext(fileHelper),
         _ => throw new NotSupportedException($"Language {language} not supported")
     };
-    
+
     private static string BuildSystemPrompt(SampleLanguageContext context, int count) =>
         $"Generate {count} runnable SDK samples. {context.GetInstructions()}";
-    
+
     private static string BuildUserPromptPrefix(string? customPrompt, int count)
     {
         var prompt = customPrompt ?? $"Generate {count} samples demonstrating the main features of this SDK.";
@@ -189,12 +187,12 @@ public class SampleGeneratorMcpTool(
         // Create budget tracker - reserve space for prefix overhead
         const int OverheadReserve = 200;
         var budgetTracker = new Helpers.PromptBudgetTracker(contextBudget, OverheadReserve);
-        
+
         // Yield the prompt prefix
         var prefix = BuildUserPromptPrefix(customPrompt, count);
         budgetTracker.TryConsume(prefix.Length);
         yield return prefix;
-        
+
         // Stream context (source code) with remaining budget
         var remainingBudget = budgetTracker.Remaining;
         if (remainingBudget > 0)

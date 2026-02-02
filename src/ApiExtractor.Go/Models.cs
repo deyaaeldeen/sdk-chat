@@ -8,31 +8,31 @@ using ApiExtractor.Contracts;
 namespace ApiExtractor.Go;
 
 /// <summary>Root container for extracted Go API.</summary>
-public record ApiIndex : IApiIndex
+public sealed record ApiIndex : IApiIndex
 {
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
     [JsonPropertyName("packages")]
     public IReadOnlyList<PackageApi> Packages { get; init; } = [];
-    
+
     /// <summary>Gets all structs in the API.</summary>
     public IEnumerable<StructApi> GetAllStructs() =>
         Packages.SelectMany(p => p.Structs ?? []);
-    
+
     /// <summary>Gets client structs (entry points for SDK operations).</summary>
     public IEnumerable<StructApi> GetClientStructs() =>
         GetAllStructs().Where(s => s.IsClientType);
-    
+
     public string ToJson(bool pretty = false) => pretty
-        ? JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })
+        ? JsonSerializer.Serialize(this, JsonOptionsCache.Indented)
         : JsonSerializer.Serialize(this);
-    
+
     public string ToStubs() => GoFormatter.Format(this);
 }
 
 /// <summary>A Go package.</summary>
-public record PackageApi
+public sealed record PackageApi
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -60,7 +60,7 @@ public record PackageApi
 }
 
 /// <summary>A struct type.</summary>
-public record StructApi
+public sealed record StructApi
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -73,23 +73,23 @@ public record StructApi
 
     [JsonPropertyName("methods")]
     public IReadOnlyList<FuncApi>? Methods { get; init; }
-    
+
     /// <summary>Returns true if this is a client struct (SDK entry point).</summary>
     [JsonIgnore]
     public bool IsClientType =>
         (Name.EndsWith("Client") || Name.EndsWith("Service") || Name.EndsWith("Manager")) &&
         (Methods?.Any() ?? false);
-    
+
     /// <summary>Returns true if this is a model/DTO struct.</summary>
     [JsonIgnore]
     public bool IsModelType =>
         !(Methods?.Any() ?? false) && (Fields?.Any() ?? false);
-    
+
     /// <summary>Returns true if this is an Options struct.</summary>
     [JsonIgnore]
     public bool IsOptionsType =>
         Name.EndsWith("Options") || Name.EndsWith("Config") || Name.EndsWith("Params");
-    
+
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
     public int TruncationPriority
@@ -103,12 +103,12 @@ public record StructApi
             return 4;
         }
     }
-    
+
     /// <summary>Gets type names referenced in method signatures and fields.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
         var refs = new HashSet<string>();
-        
+
         foreach (var method in Methods ?? [])
         {
             foreach (var typeName in allTypeNames)
@@ -117,7 +117,7 @@ public record StructApi
                     refs.Add(typeName);
             }
         }
-        
+
         foreach (var field in Fields ?? [])
         {
             foreach (var typeName in allTypeNames)
@@ -126,7 +126,7 @@ public record StructApi
                     refs.Add(typeName);
             }
         }
-        
+
         return refs;
     }
 }

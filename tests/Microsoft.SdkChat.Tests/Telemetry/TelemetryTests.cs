@@ -156,7 +156,7 @@ public class SdkChatTelemetryTests : IDisposable
     public void RecordError_WithNullActivity_DoesNotThrow()
     {
         var exception = new Exception("Test");
-        
+
         // Should not throw
         SdkChatTelemetry.RecordError(null, exception);
     }
@@ -194,7 +194,7 @@ public class TelemetryConfigurationTests
         TelemetryConfiguration.Initialize();
         TelemetryConfiguration.Initialize();
         TelemetryConfiguration.Initialize();
-        
+
         // Clean up
         TelemetryConfiguration.Shutdown();
     }
@@ -203,7 +203,7 @@ public class TelemetryConfigurationTests
     public void Shutdown_CanBeCalledMultipleTimes()
     {
         TelemetryConfiguration.Initialize();
-        
+
         // Multiple shutdowns should not throw
         TelemetryConfiguration.Shutdown();
         TelemetryConfiguration.Shutdown();
@@ -215,7 +215,7 @@ public class TelemetryConfigurationTests
     {
         TelemetryConfiguration.Initialize();
         TelemetryConfiguration.Shutdown();
-        
+
         // Should be able to reinitialize after shutdown
         TelemetryConfiguration.Initialize();
         TelemetryConfiguration.Shutdown();

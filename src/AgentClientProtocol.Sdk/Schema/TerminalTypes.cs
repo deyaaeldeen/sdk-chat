@@ -13,19 +13,19 @@ public record CreateTerminalRequest
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
-    
+
     [JsonPropertyName("command")]
     public required string Command { get; init; }
-    
+
     [JsonPropertyName("args")]
     public string[]? Args { get; init; }
-    
+
     [JsonPropertyName("cwd")]
     public string? Cwd { get; init; }
-    
+
     [JsonPropertyName("env")]
     public EnvVariable[]? Env { get; init; }
 }
@@ -38,7 +38,7 @@ public record CreateTerminalResponse
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("terminalId")]
     public required string TerminalId { get; init; }
 }
@@ -51,10 +51,10 @@ public record TerminalOutputRequest
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
-    
+
     [JsonPropertyName("terminalId")]
     public required string TerminalId { get; init; }
 }
@@ -67,10 +67,10 @@ public record TerminalOutputResponse
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("output")]
     public required string Output { get; init; }
-    
+
     [JsonPropertyName("exitStatus")]
     public TerminalExitStatus? ExitStatus { get; init; }
 }
@@ -83,10 +83,10 @@ public record ReleaseTerminalRequest
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
-    
+
     [JsonPropertyName("terminalId")]
     public required string TerminalId { get; init; }
 }
@@ -109,10 +109,10 @@ public record WaitForTerminalExitRequest
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
-    
+
     [JsonPropertyName("terminalId")]
     public required string TerminalId { get; init; }
 }
@@ -125,10 +125,10 @@ public record WaitForTerminalExitResponse
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("exitCode")]
     public int? ExitCode { get; init; }
-    
+
     [JsonPropertyName("signal")]
     public string? Signal { get; init; }
 }
@@ -141,10 +141,10 @@ public record KillTerminalCommandRequest
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
-    
+
     [JsonPropertyName("terminalId")]
     public required string TerminalId { get; init; }
 }
@@ -166,7 +166,7 @@ public record TerminalExitStatus
 {
     [JsonPropertyName("exitCode")]
     public int? ExitCode { get; init; }
-    
+
     [JsonPropertyName("signal")]
     public string? Signal { get; init; }
 }

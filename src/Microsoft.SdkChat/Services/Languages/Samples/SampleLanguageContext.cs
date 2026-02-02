@@ -50,7 +50,7 @@ public abstract class SampleLanguageContext
     /// Language-specific contexts should call this via base.StreamContextAsync when extraction fails.
     /// </summary>
     public virtual async IAsyncEnumerable<string> StreamContextAsync(
-        IEnumerable<string> paths, 
+        IEnumerable<string> paths,
         SdkChatConfig? config = null,
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -59,8 +59,8 @@ public abstract class SampleLanguageContext
             throw new ArgumentException("At least one path must be provided", nameof(paths));
 
         // Build source inputs from paths
-        var includeExtensions = config?.IncludePatterns is { Length: > 0 } 
-            ? ExtractExtensions(config.IncludePatterns) 
+        var includeExtensions = config?.IncludePatterns is { Length: > 0 }
+            ? ExtractExtensions(config.IncludePatterns)
             : DefaultIncludeExtensions;
         var excludePatterns = config?.ExcludePatterns ?? DefaultExcludePatterns;
 
@@ -82,7 +82,7 @@ public abstract class SampleLanguageContext
             throw new ArgumentException("No valid paths found", nameof(paths));
 
         var basePath = Path.GetFullPath(paths.First());
-        
+
         // Create a single group with per-file limit to prevent any single file from consuming the budget
         var group = new SourceInputGroup(
             SectionName: "source-code",
@@ -91,7 +91,7 @@ public abstract class SampleLanguageContext
             PerFileLimit: SampleConstants.FallbackPerFileLimit,
             PriorityFunc: f => GetPriority(f)
         );
-        
+
         // Stream content directly without materialization
         await foreach (var chunk in FileHelper.StreamFilesAsync([group], basePath, ct))
         {
@@ -108,7 +108,7 @@ public abstract class SampleLanguageContext
         // Default: all files equal priority
         return 10;
     }
-    
+
     /// <summary>
     /// Analyzes existing code (samples/tests) to extract API usage patterns.
     /// Override in language-specific contexts for accurate analysis.
@@ -122,7 +122,7 @@ public abstract class SampleLanguageContext
         // Default: usage analysis not supported
         return Task.FromResult<UsageIndex?>(null);
     }
-    
+
     /// <summary>
     /// Formats usage analysis as compact context for LLM.
     /// Override in language-specific contexts.
@@ -132,20 +132,20 @@ public abstract class SampleLanguageContext
         // Default simple formatting
         var sb = new StringBuilder();
         sb.AppendLine($"Analyzed {usage.FileCount} files.");
-        
+
         if (usage.CoveredOperations.Count > 0)
         {
             sb.AppendLine($"Covered: {string.Join(", ", usage.CoveredOperations.Select(o => $"{o.ClientType}.{o.Operation}"))}");
         }
-        
+
         if (usage.UncoveredOperations.Count > 0)
         {
             sb.AppendLine($"Uncovered: {string.Join(", ", usage.UncoveredOperations.Select(o => $"{o.ClientType}.{o.Operation}"))}");
         }
-        
+
         return sb.ToString();
     }
-    
+
     /// <summary>
     /// Streams context for sample generation with optional coverage analysis.
     /// 
@@ -169,7 +169,7 @@ public abstract class SampleLanguageContext
         {
             yield return chunk;
         }
-        
+
         // Stream existing samples if available (with usage analysis if supported)
         if (!string.IsNullOrEmpty(samplesPath) && Directory.Exists(samplesPath))
         {
@@ -179,7 +179,7 @@ public abstract class SampleLanguageContext
             {
                 // Try usage analysis first
                 var usage = await AnalyzeUsageAsync(sourcePath, samplesPath, ct);
-                
+
                 if (usage != null && usage.CoveredOperations.Count > 0)
                 {
                     yield return "\n<existing-coverage>\n";
@@ -198,7 +198,7 @@ public abstract class SampleLanguageContext
                             PerFileLimit: SampleConstants.FallbackSampleFileLimit
                         )
                     };
-                    
+
                     await foreach (var chunk in FileHelper.StreamFilesAsync(groups, basePath, ct))
                     {
                         yield return chunk.Content;

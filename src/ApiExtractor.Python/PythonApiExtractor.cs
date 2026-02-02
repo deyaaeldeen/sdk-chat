@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using System.Text.Json;
 using ApiExtractor.Contracts;
 
@@ -14,7 +13,7 @@ namespace ApiExtractor.Python;
 public class PythonApiExtractor : IApiExtractor<ApiIndex>
 {
     private static readonly string ScriptPath = Path.Combine(
-        Path.GetDirectoryName(typeof(PythonApiExtractor).Assembly.Location) ?? ".",
+        AppContext.BaseDirectory,
         "extract_api.py");
 
     private static readonly string[] PythonCandidates = { "python3", "python" };
@@ -52,7 +51,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
         => pretty
-            ? JsonSerializer.Serialize(index, new JsonSerializerOptions { WriteIndented = true })
+            ? JsonSerializer.Serialize(index, JsonOptionsCache.Indented)
             : index.ToJson();
 
     /// <inheritdoc />
@@ -88,51 +87,31 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         // Get script path - embedded in assembly directory
         var scriptPath = GetScriptPath();
 
-        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(ExtractorTimeout.Value);
-        var effectiveCt = timeoutCts.Token;
-
-        using var processActivity = ExtractorTelemetry.StartProcess(python, Language);
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = python,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add(scriptPath);
-        psi.ArgumentList.Add(rootPath);
-        psi.ArgumentList.Add("--json");
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start Python");
-
-        // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
-        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
-        var output = await outputTask;
-        var error = await errorTask;
+        // Use ProcessSandbox for hardened execution with timeout and output limits
+        var result = await ProcessSandbox.ExecuteAsync(
+            python,
+            [scriptPath, rootPath, "--json"],
+            cancellationToken: ct
+        ).ConfigureAwait(false);
 
         var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTime);
-        ExtractorTelemetry.RecordProcessResult(processActivity, process.ExitCode, elapsed);
 
-        if (process.ExitCode != 0)
+        if (!result.Success)
         {
-            ExtractorTelemetry.RecordResult(activity, false, error: $"Python extractor failed: {error}");
-            throw new InvalidOperationException($"Python extractor failed: {error}");
+            var errorMsg = result.TimedOut
+                ? $"Python extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Python extractor failed: {result.StandardError}";
+            ExtractorTelemetry.RecordResult(activity, false, error: errorMsg);
+            throw new InvalidOperationException(errorMsg);
         }
 
         // Parse JSON output
-        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var raw = JsonSerializer.Deserialize<RawApiIndex>(output, options)
+        var raw = JsonSerializer.Deserialize<RawApiIndex>(result.StandardOutput, JsonOptionsCache.CaseInsensitive)
             ?? throw new InvalidOperationException("Failed to parse Python extractor output");
 
-        var result = ConvertToApiIndex(raw);
-        ExtractorTelemetry.RecordResult(activity, true, result.Modules.Count);
-        return result;
+        var apiIndex = ConvertToApiIndex(raw);
+        ExtractorTelemetry.RecordResult(activity, true, apiIndex.Modules.Count);
+        return apiIndex;
     }
 
     private static string GetScriptPath()

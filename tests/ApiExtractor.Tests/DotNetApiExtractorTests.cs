@@ -116,7 +116,7 @@ public class DotNetApiExtractorTests
             .SelectMany(t => t.Members!)
             .ToList();
         // Should not find members starting with underscore (private by convention)
-        Assert.DoesNotContain(allMembers, m => m.Name.StartsWith("_"));
+        Assert.DoesNotContain(allMembers, m => m.Name.StartsWith('_'));
     }
 
     [Fact]

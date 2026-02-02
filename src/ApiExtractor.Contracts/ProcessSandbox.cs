@@ -3,31 +3,23 @@
 
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
+using System.Text;
 
-namespace Microsoft.SdkChat.Services;
+namespace ApiExtractor.Contracts;
 
 /// <summary>
-/// Centralized, hardened process execution service.
-/// All external process invocations MUST go through this service.
+/// Centralized, hardened process execution for API extractors.
+/// All external process invocations SHOULD go through this class.
 /// 
 /// Security features:
 /// - Enforced timeouts (no runaway processes)
-/// - Argument sanitization
 /// - Output capture with size limits
-/// - Structured logging with OpenTelemetry traces
+/// - Structured telemetry
 /// </summary>
-public sealed class ProcessSandboxService
+public static class ProcessSandbox
 {
-    private readonly ILogger<ProcessSandboxService> _logger;
-    private readonly TimeSpan _defaultTimeout;
-    private const int MaxOutputBytes = 10 * 1024 * 1024; // 10MB limit per stream
-
-    public ProcessSandboxService(ILogger<ProcessSandboxService> logger, TimeSpan? defaultTimeout = null)
-    {
-        _logger = logger;
-        _defaultTimeout = defaultTimeout ?? TimeSpan.FromSeconds(60);
-    }
+    /// <summary>Maximum output size per stream (10MB).</summary>
+    public const int MaxOutputBytes = 10 * 1024 * 1024;
 
     /// <summary>
     /// Execute a process with sandboxed settings.
@@ -35,10 +27,10 @@ public sealed class ProcessSandboxService
     /// <param name="fileName">Executable path - must be validated before calling.</param>
     /// <param name="arguments">Arguments - will be passed via ArgumentList for safety.</param>
     /// <param name="workingDirectory">Optional working directory.</param>
-    /// <param name="timeout">Timeout override. Defaults to 60 seconds.</param>
+    /// <param name="timeout">Timeout override. Uses ExtractorTimeout.Value if not specified.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Process result with exit code, stdout, and stderr.</returns>
-    public async Task<ProcessResult> ExecuteAsync(
+    public static async Task<ProcessResult> ExecuteAsync(
         string fileName,
         IEnumerable<string>? arguments = null,
         string? workingDirectory = null,
@@ -47,20 +39,19 @@ public sealed class ProcessSandboxService
     {
         ValidateFileName(fileName);
 
-        var effectiveTimeout = timeout ?? _defaultTimeout;
+        var effectiveTimeout = timeout ?? ExtractorTimeout.Value;
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(effectiveTimeout);
         var effectiveCt = timeoutCts.Token;
 
-        using var activity = Telemetry.SdkChatTelemetry.StartActivity("ProcessSandbox.Execute");
-        activity?.SetTag("process.executable", Path.GetFileName(fileName));
-        activity?.SetTag("process.timeout_ms", effectiveTimeout.TotalMilliseconds);
+        using var activity = ExtractorTelemetry.StartProcess(Path.GetFileName(fileName), "sandbox");
 
         var psi = new ProcessStartInfo
         {
             FileName = fileName,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
@@ -86,12 +77,11 @@ public sealed class ProcessSandboxService
             using var process = Process.Start(psi);
             if (process == null)
             {
-                _logger.LogError("Failed to start process: {FileName}", fileName);
                 return ProcessResult.Failed(-1, "", $"Failed to start process: {fileName}");
             }
 
-            _logger.LogDebug("Started process {FileName} with PID {Pid}",
-                Path.GetFileName(fileName), process.Id);
+            // Close stdin immediately - most extractors don't need it
+            process.StandardInput.Close();
 
             // Read streams in parallel to prevent deadlocks
             var outputTask = ReadStreamWithLimitAsync(process.StandardOutput, MaxOutputBytes, effectiveCt);
@@ -106,17 +96,11 @@ public sealed class ProcessSandboxService
             activity?.SetTag("process.exit_code", process.ExitCode);
             activity?.SetTag("process.duration_ms", elapsed.TotalMilliseconds);
 
-            _logger.LogDebug("Process {FileName} exited with code {ExitCode} in {Duration}ms",
-                Path.GetFileName(fileName), process.ExitCode, elapsed.TotalMilliseconds);
-
             return new ProcessResult(process.ExitCode, output, error, elapsed);
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
             var elapsed = Stopwatch.GetElapsedTime(startTime);
-            _logger.LogWarning("Process {FileName} timed out after {Timeout}ms",
-                Path.GetFileName(fileName), effectiveTimeout.TotalMilliseconds);
-
             activity?.SetTag("process.timed_out", true);
 
             return ProcessResult.Failed(-1, "", $"Process timed out after {effectiveTimeout.TotalSeconds}s", elapsed, timedOut: true);
@@ -124,8 +108,6 @@ public sealed class ProcessSandboxService
         catch (Exception ex)
         {
             var elapsed = Stopwatch.GetElapsedTime(startTime);
-            _logger.LogError(ex, "Process {FileName} failed with exception", Path.GetFileName(fileName));
-
             activity?.SetTag("error", true);
             activity?.SetTag("error.message", ex.Message);
 
@@ -160,7 +142,7 @@ public sealed class ProcessSandboxService
         CancellationToken cancellationToken)
     {
         var buffer = new char[8192];
-        var result = new System.Text.StringBuilder();
+        var result = new StringBuilder();
         var totalRead = 0;
 
         while (!cancellationToken.IsCancellationRequested)

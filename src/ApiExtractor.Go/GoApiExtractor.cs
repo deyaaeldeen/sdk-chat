@@ -3,7 +3,6 @@
 
 using System.Diagnostics;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using ApiExtractor.Contracts;
 
@@ -18,7 +17,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     private static readonly string[] GoPaths = { "go", "/usr/local/go/bin/go", "/opt/go/bin/go" };
     private static readonly SemaphoreSlim CompileLock = new(1, 1);
     private static string? _cachedBinaryPath;
-    
+
     private string? _goPath;
     private string? _unavailableReason;
     private string? _warning;
@@ -51,7 +50,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
         => pretty
-            ? JsonSerializer.Serialize(index, new JsonSerializerOptions { WriteIndented = true })
+            ? JsonSerializer.Serialize(index, JsonOptionsCache.Indented)
             : JsonSerializer.Serialize(index);
 
     /// <inheritdoc />
@@ -75,7 +74,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             return ExtractorResult<ApiIndex>.CreateFailure($"{ex.Message}\n{ex.StackTrace}");
         }
     }
-    
+
     /// <summary>
     /// Extract API from a Go module directory.
     /// Prefers pre-compiled binary from build, falls back to runtime compilation.
@@ -83,52 +82,37 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
         var binaryPath = GetPrecompiledBinaryPath();
-        
+
         if (binaryPath == null)
         {
             // Fall back to runtime compilation if pre-compiled binary not available
-            var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version") 
+            var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version")
                 ?? throw new FileNotFoundException("Go executable not found. Pre-compiled binary also not available.");
-            
+
             binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
         }
 
-        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(ExtractorTimeout.Value);
-        var effectiveCt = timeoutCts.Token;
+        // Use ProcessSandbox for hardened execution with timeout and output limits
+        var result = await ProcessSandbox.ExecuteAsync(
+            binaryPath,
+            ["--json", rootPath],
+            cancellationToken: ct
+        ).ConfigureAwait(false);
 
-        var psi = new ProcessStartInfo
+        if (!result.Success)
         {
-            FileName = binaryPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add("--json");
-        psi.ArgumentList.Add(rootPath);
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start extractor");
-        
-        // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
-        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
-        var output = await outputTask;
-        var error = await errorTask;
-
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"Extractor failed: {error}");
+            var errorMsg = result.TimedOut
+                ? $"Go extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Extractor failed: {result.StandardError}";
+            throw new InvalidOperationException(errorMsg);
         }
 
-        if (string.IsNullOrWhiteSpace(output))
+        if (string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             return null;
         }
 
-        return JsonSerializer.Deserialize<ApiIndex>(output);
+        return JsonSerializer.Deserialize<ApiIndex>(result.StandardOutput);
     }
 
     /// <summary>
@@ -137,47 +121,32 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     public async Task<string> ExtractAsGoAsync(string rootPath, CancellationToken ct = default)
     {
         var binaryPath = GetPrecompiledBinaryPath();
-        
+
         if (binaryPath == null)
         {
             // Fall back to runtime compilation if pre-compiled binary not available
-            var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version") 
+            var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version")
                 ?? throw new FileNotFoundException("Go executable not found. Pre-compiled binary also not available.");
-            
+
             binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
         }
 
-        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(ExtractorTimeout.Value);
-        var effectiveCt = timeoutCts.Token;
-        
-        var psi = new ProcessStartInfo
-        {
-            FileName = binaryPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add("--stub");
-        psi.ArgumentList.Add(rootPath);
+        // Use ProcessSandbox for hardened execution with timeout and output limits
+        var result = await ProcessSandbox.ExecuteAsync(
+            binaryPath,
+            ["--stub", rootPath],
+            cancellationToken: ct
+        ).ConfigureAwait(false);
 
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start extractor");
-        
-        // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
-        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
-        var output = await outputTask;
-        var error = await errorTask;
-
-        if (process.ExitCode != 0)
+        if (!result.Success)
         {
-            throw new InvalidOperationException($"Extractor failed: {error}");
+            var errorMsg = result.TimedOut
+                ? $"Go extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Extractor failed: {result.StandardError}";
+            throw new InvalidOperationException(errorMsg);
         }
 
-        return output;
+        return result.StandardOutput;
     }
 
     /// <summary>
@@ -187,16 +156,16 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// <returns>Path to pre-compiled binary, or null if not available.</returns>
     private static string? GetPrecompiledBinaryPath()
     {
-        var assemblyDir = Path.GetDirectoryName(typeof(GoApiExtractor).Assembly.Location) ?? ".";
+        var assemblyDir = AppContext.BaseDirectory;
         var binaryName = OperatingSystem.IsWindows() ? "go_extractor.exe" : "go_extractor";
         var binaryPath = Path.Combine(assemblyDir, binaryName);
-        
+
         if (File.Exists(binaryPath))
         {
             _cachedBinaryPath = binaryPath;
             return binaryPath;
         }
-        
+
         return null;
     }
 
@@ -261,7 +230,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             psi.ArgumentList.Add(scriptPath);
 
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start go build");
-            
+
             var outputTask = process.StandardOutput.ReadToEndAsync(ct);
             var errorTask = process.StandardError.ReadToEndAsync(ct);
             await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(ct)).ConfigureAwait(false);
@@ -284,9 +253,9 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     private static string GetScriptPath()
     {
         // SECURITY: Only load scripts from assembly directory - no path traversal allowed
-        var assemblyDir = Path.GetDirectoryName(typeof(GoApiExtractor).Assembly.Location) ?? ".";
+        var assemblyDir = AppContext.BaseDirectory;
         var scriptPath = Path.Combine(assemblyDir, "extract_api.go");
-        
+
         if (File.Exists(scriptPath))
             return scriptPath;
 

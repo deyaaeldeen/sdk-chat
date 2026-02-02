@@ -14,11 +14,11 @@ namespace ApiExtractor.Tests;
 public class JavaExtractorFixture : IAsyncLifetime
 {
     private static readonly string TestFixturesPath = Path.Combine(AppContext.BaseDirectory, "TestFixtures", "Java");
-    
+
     public ApiIndex? Api { get; private set; }
     public string? SkipReason { get; private set; }
     public string FixturePath => TestFixturesPath;
-    
+
     public async Task InitializeAsync()
     {
         var extractor = new JavaApiExtractor();
@@ -27,7 +27,7 @@ public class JavaExtractorFixture : IAsyncLifetime
             SkipReason = extractor.UnavailableReason ?? "JBang not available";
             return;
         }
-        
+
         try
         {
             Api = await extractor.ExtractAsync(TestFixturesPath);
@@ -37,7 +37,7 @@ public class JavaExtractorFixture : IAsyncLifetime
             SkipReason = $"Java extraction failed: {ex.Message}";
         }
     }
-    
+
     public Task DisposeAsync() => Task.CompletedTask;
 }
 

@@ -20,11 +20,11 @@ public class ApiModelImmutabilityTests
             Package = "Test.Package",
             Namespaces = [new NamespaceInfo { Name = "Test" }]
         };
-        
+
         // Assert - verify it's IReadOnlyList (cannot cast to List and mutate)
         Assert.IsAssignableFrom<IReadOnlyList<NamespaceInfo>>(index.Namespaces);
     }
-    
+
     [Fact]
     public void DotNetNamespaceInfo_Types_IsIReadOnlyList()
     {
@@ -33,10 +33,10 @@ public class ApiModelImmutabilityTests
             Name = "Test.Namespace",
             Types = [new TypeInfo { Name = "TestClass", Kind = "class" }]
         };
-        
+
         Assert.IsAssignableFrom<IReadOnlyList<TypeInfo>>(ns.Types);
     }
-    
+
     [Fact]
     public void DotNetTypeInfo_Members_IsIReadOnlyList()
     {
@@ -48,12 +48,12 @@ public class ApiModelImmutabilityTests
             Interfaces = ["IDisposable"],
             Values = ["Value1", "Value2"]
         };
-        
+
         Assert.IsAssignableFrom<IReadOnlyList<MemberInfo>>(type.Members);
         Assert.IsAssignableFrom<IReadOnlyList<string>>(type.Interfaces);
         Assert.IsAssignableFrom<IReadOnlyList<string>>(type.Values);
     }
-    
+
     [Fact]
     public void DotNetApiIndex_CanBeCreatedWithArrayInitializer()
     {
@@ -61,18 +61,18 @@ public class ApiModelImmutabilityTests
         var index = new ApiIndex
         {
             Package = "Test",
-            Namespaces = 
+            Namespaces =
             [
-                new NamespaceInfo 
-                { 
+                new NamespaceInfo
+                {
                     Name = "NS1",
-                    Types = 
+                    Types =
                     [
-                        new TypeInfo 
-                        { 
-                            Name = "Class1", 
+                        new TypeInfo
+                        {
+                            Name = "Class1",
                             Kind = "class",
-                            Members = 
+                            Members =
                             [
                                 new MemberInfo { Name = "M1", Kind = "method", Signature = "void M1()" }
                             ]
@@ -81,12 +81,12 @@ public class ApiModelImmutabilityTests
                 }
             ]
         };
-        
+
         Assert.Single(index.Namespaces);
         Assert.Single(index.Namespaces[0].Types);
         Assert.Single(index.Namespaces[0].Types[0].Members!);
     }
-    
+
     [Fact]
     public void DotNetApiIndex_EmptyCollections_Work()
     {
@@ -95,54 +95,54 @@ public class ApiModelImmutabilityTests
             Package = "Empty",
             Namespaces = []
         };
-        
+
         Assert.Empty(index.Namespaces);
     }
-    
+
     [Fact]
     public void DotNetTypeInfo_GetAllTypes_WorksWithIReadOnlyList()
     {
         var index = new ApiIndex
         {
             Package = "Test",
-            Namespaces = 
+            Namespaces =
             [
-                new NamespaceInfo 
-                { 
+                new NamespaceInfo
+                {
                     Name = "NS1",
                     Types = [new TypeInfo { Name = "T1", Kind = "class" }]
                 },
-                new NamespaceInfo 
-                { 
+                new NamespaceInfo
+                {
                     Name = "NS2",
                     Types = [new TypeInfo { Name = "T2", Kind = "interface" }]
                 }
             ]
         };
-        
+
         var allTypes = index.GetAllTypes().ToList();
-        
+
         Assert.Equal(2, allTypes.Count);
         Assert.Contains(allTypes, t => t.Name == "T1");
         Assert.Contains(allTypes, t => t.Name == "T2");
     }
-    
+
     [Fact]
     public void DotNetTypeInfo_GetClientTypes_WorksWithIReadOnlyList()
     {
         var index = new ApiIndex
         {
             Package = "Test",
-            Namespaces = 
+            Namespaces =
             [
-                new NamespaceInfo 
-                { 
+                new NamespaceInfo
+                {
                     Name = "NS1",
-                    Types = 
+                    Types =
                     [
-                        new TypeInfo 
-                        { 
-                            Name = "TestClient", 
+                        new TypeInfo
+                        {
+                            Name = "TestClient",
                             Kind = "class",
                             Members = [new MemberInfo { Name = "DoSomething", Kind = "method", Signature = "Task DoSomething()" }]
                         },
@@ -151,9 +151,9 @@ public class ApiModelImmutabilityTests
                 }
             ]
         };
-        
+
         var clients = index.GetClientTypes().ToList();
-        
+
         Assert.Single(clients);
         Assert.Equal("TestClient", clients[0].Name);
     }

@@ -21,64 +21,68 @@ namespace AgentClientProtocol.Sdk;
 public class ClientSideConnection : IAgent, IAsyncDisposable
 {
     private readonly Connection _connection;
-    private readonly ILogger? _logger;
-    
+
     // O(1) method dispatch using source-generated dispatch tables
     private readonly Dictionary<string, Func<IClient, JsonElement?, Task<object?>>> _requestHandlers;
     private readonly Dictionary<string, Func<IClient, JsonElement?, Task>> _notificationHandlers;
-    
+
     public ClientSideConnection(IClient client, IAcpStream stream, ILogger? logger = null)
     {
-        _logger = logger;
         _connection = new Connection(stream, logger);
-        
+
         // Use compile-time generated dispatch tables
         _requestHandlers = IClientDispatch.CreateRequestHandlers();
         _notificationHandlers = IClientDispatch.CreateNotificationHandlers();
-        
+
         _connection.OnRequest(async (method, @params) =>
         {
-            var json = @params is JsonElement el ? el : JsonSerializer.SerializeToElement(@params);
-            
+            // Params is dynamic object - type unknown at compile time
+#pragma warning disable IL2026, IL3050 // Dynamic object serialization unavoidable
+            var json = @params is JsonElement el ? el : JsonSerializer.SerializeToElement(@params, AcpJsonContext.FlexibleOptions);
+#pragma warning restore IL2026, IL3050
+
             if (_requestHandlers.TryGetValue(method, out var handler))
                 return await handler(client, json);
-            
+
             throw RequestError.MethodNotFound(method);
         });
-        
+
         _connection.OnNotification(async (method, @params) =>
         {
-            var json = @params is JsonElement el ? el : JsonSerializer.SerializeToElement(@params);
-            
+            // Params is dynamic object - type unknown at compile time
+#pragma warning disable IL2026, IL3050 // Dynamic object serialization unavoidable
+            var json = @params is JsonElement el ? el : JsonSerializer.SerializeToElement(@params, AcpJsonContext.FlexibleOptions);
+#pragma warning restore IL2026, IL3050
+
             if (_notificationHandlers.TryGetValue(method, out var handler))
                 await handler(client, json);
         });
     }
-    
+
     /// <summary>
     /// Start processing messages.
     /// </summary>
     public Task RunAsync(CancellationToken ct = default) => _connection.RunAsync(ct);
-    
+
     // IAgent implementation - calls to the agent
-    
+
     public Task<InitializeResponse> InitializeAsync(InitializeRequest request, CancellationToken ct = default) =>
         _connection.SendRequestAsync<InitializeResponse>(AgentMethods.Initialize, request, ct)!;
-    
+
     public Task<AuthenticateResponse?> AuthenticateAsync(AuthenticateRequest request, CancellationToken ct = default) =>
         _connection.SendRequestAsync<AuthenticateResponse>(AgentMethods.Authenticate, request, ct);
-    
+
     public Task<NewSessionResponse> NewSessionAsync(NewSessionRequest request, CancellationToken ct = default) =>
         _connection.SendRequestAsync<NewSessionResponse>(AgentMethods.SessionNew, request, ct)!;
-    
+
     public Task<LoadSessionResponse?> LoadSessionAsync(LoadSessionRequest request, CancellationToken ct = default) =>
         _connection.SendRequestAsync<LoadSessionResponse>(AgentMethods.SessionLoad, request, ct);
-    
+
     public Task<PromptResponse> PromptAsync(PromptRequest request, CancellationToken ct = default) =>
         _connection.SendRequestAsync<PromptResponse>(AgentMethods.SessionPrompt, request, ct)!;
-    
+
     public Task CancelAsync(CancelNotification notification, CancellationToken ct = default) =>
         _connection.SendNotificationAsync(AgentMethods.SessionCancel, notification, ct);
-    
+
     public ValueTask DisposeAsync() => _connection.DisposeAsync();
 }

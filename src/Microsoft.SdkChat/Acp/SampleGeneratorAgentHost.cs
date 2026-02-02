@@ -1,11 +1,13 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 using AgentClientProtocol.Sdk;
 using AgentClientProtocol.Sdk.Stream;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.SdkChat.Configuration;
 using Microsoft.SdkChat.Helpers;
-using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
-using Microsoft.SdkChat.Services.Languages;
 
 namespace Microsoft.SdkChat.Acp;
 
@@ -18,30 +20,30 @@ public static class SampleGeneratorAgentHost
     {
         var services = ConfigureServices(logLevel, useOpenAi);
         var logger = services.GetRequiredService<ILogger<SampleGeneratorAgent>>();
-        
+
         // Create the agent
         var agent = new SampleGeneratorAgent(services, logger);
-        
+
         // Create stdio transport using ACP SDK
         var reader = new StreamReader(Console.OpenStandardInput());
         var writer = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
         var stream = new NdJsonStream(reader, writer);
-        
+
         // Create agent-side connection and run
         var connection = new AgentSideConnection(agent, stream);
         agent.SetConnection(connection);
-        
+
         logger.LogDebug("ACP agent starting on stdio");
-        
+
         await connection.RunAsync();
-        
+
         logger.LogDebug("ACP agent exited");
     }
-    
+
     private static IServiceProvider ConfigureServices(string logLevel, bool useOpenAi)
     {
         var services = new ServiceCollection();
-        
+
         var level = logLevel.ToLowerInvariant() switch
         {
             "debug" => LogLevel.Debug,
@@ -49,17 +51,17 @@ public static class SampleGeneratorAgentHost
             "error" => LogLevel.Error,
             _ => LogLevel.Information
         };
-        
+
         services.AddLogging(b => b.AddConsole().SetMinimumLevel(level));
-        var aiSettings = AiProviderSettings.FromEnvironment();
-        if (useOpenAi) aiSettings = aiSettings with { UseOpenAi = true };
-        services.AddSingleton(aiSettings);
+        var options = SdkChatOptions.FromEnvironment();
+        if (useOpenAi) options.UseOpenAi = true;
+        services.AddSingleton(options);
         services.AddSingleton<AiDebugLogger>();
         services.AddSingleton<AiService>();
         services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
         services.AddSingleton<FileHelper>();
         services.AddSingleton<ConfigurationHelper>();
-        
+
         return services.BuildServiceProvider();
     }
 }

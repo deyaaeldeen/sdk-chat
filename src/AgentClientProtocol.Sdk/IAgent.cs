@@ -21,39 +21,39 @@ public interface IAgent : IAsyncDisposable
     /// </summary>
     [RpcMethod(AgentMethods.Initialize)]
     Task<InitializeResponse> InitializeAsync(InitializeRequest request, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Creates a new conversation session.
     /// </summary>
     [RpcMethod(AgentMethods.SessionNew)]
     Task<NewSessionResponse> NewSessionAsync(NewSessionRequest request, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Processes a user prompt within a session.
     /// </summary>
     [RpcMethod(AgentMethods.SessionPrompt)]
     Task<PromptResponse> PromptAsync(PromptRequest request, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Handles session cancellation.
     /// </summary>
     [RpcMethod(AgentMethods.SessionCancel, IsNotification = true)]
     Task CancelAsync(CancelNotification notification, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Authenticates the client (optional).
     /// </summary>
     [RpcMethod(AgentMethods.Authenticate)]
     Task<AuthenticateResponse?> AuthenticateAsync(AuthenticateRequest request, CancellationToken ct = default) =>
         Task.FromResult<AuthenticateResponse?>(null);
-    
+
     /// <summary>
     /// Loads an existing session (optional).
     /// </summary>
     [RpcMethod(AgentMethods.SessionLoad)]
     Task<LoadSessionResponse?> LoadSessionAsync(LoadSessionRequest request, CancellationToken ct = default) =>
         Task.FromResult<LoadSessionResponse?>(null);
-    
+
     /// <summary>
     /// Default disposal implementation.
     /// </summary>

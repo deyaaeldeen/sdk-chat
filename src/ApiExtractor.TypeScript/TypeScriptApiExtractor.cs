@@ -47,7 +47,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
         => pretty
-            ? JsonSerializer.Serialize(index, new JsonSerializerOptions { WriteIndented = true })
+            ? JsonSerializer.Serialize(index, JsonOptionsCache.Indented)
             : JsonSerializer.Serialize(index);
 
     /// <inheritdoc />
@@ -90,44 +90,28 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
         }
 
-        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(ExtractorTimeout.Value);
-        var effectiveCt = timeoutCts.Token;
+        // Use ProcessSandbox for hardened execution with timeout and output limits
+        var result = await ProcessSandbox.ExecuteAsync(
+            nodePath,
+            [scriptPath, rootPath, "--json"],
+            workingDirectory: scriptDir,
+            cancellationToken: ct
+        ).ConfigureAwait(false);
 
-        var psi = new ProcessStartInfo
+        if (!result.Success)
         {
-            FileName = nodePath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = scriptDir
-        };
-        psi.ArgumentList.Add(scriptPath);
-        psi.ArgumentList.Add(rootPath);
-        psi.ArgumentList.Add("--json");
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start node");
-        
-        // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
-        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
-        var output = await outputTask;
-        var error = await errorTask;
-
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"Node failed: {error}");
+            var errorMsg = result.TimedOut
+                ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Node failed: {result.StandardError}";
+            throw new InvalidOperationException(errorMsg);
         }
 
-        if (string.IsNullOrWhiteSpace(output))
+        if (string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             return null;
         }
 
-        return JsonSerializer.Deserialize<ApiIndex>(output);
+        return JsonSerializer.Deserialize<ApiIndex>(result.StandardOutput);
     }
 
     /// <summary>
@@ -148,45 +132,29 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
         }
 
-        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(ExtractorTimeout.Value);
-        var effectiveCt = timeoutCts.Token;
+        // Use ProcessSandbox for hardened execution with timeout and output limits
+        var result = await ProcessSandbox.ExecuteAsync(
+            nodePath,
+            [scriptPath, rootPath, "--stub"],
+            workingDirectory: scriptDir,
+            cancellationToken: ct
+        ).ConfigureAwait(false);
 
-        var psi = new ProcessStartInfo
+        if (!result.Success)
         {
-            FileName = nodePath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = scriptDir
-        };
-        psi.ArgumentList.Add(scriptPath);
-        psi.ArgumentList.Add(rootPath);
-        psi.ArgumentList.Add("--stub");
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start node");
-        
-        // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
-        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
-        var output = await outputTask;
-        var error = await errorTask;
-
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"Node failed: {error}");
+            var errorMsg = result.TimedOut
+                ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Node failed: {result.StandardError}";
+            throw new InvalidOperationException(errorMsg);
         }
 
-        return output;
+        return result.StandardOutput;
     }
 
     private static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)
     {
         var nodeModules = Path.Combine(scriptDir, "node_modules");
-        
+
         // Fast path: node_modules already exists (pre-installed during build or previous run)
         if (Directory.Exists(nodeModules)) return;
 
@@ -210,7 +178,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start npm. Ensure Node.js is installed.");
             await process.WaitForExitAsync(ct);
-            
+
             if (process.ExitCode != 0)
             {
                 var error = await process.StandardError.ReadToEndAsync(ct);
@@ -226,9 +194,9 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     private static string GetScriptDir()
     {
         // SECURITY: Only load scripts from assembly directory - no path traversal allowed
-        var assemblyDir = Path.GetDirectoryName(typeof(TypeScriptApiExtractor).Assembly.Location) ?? ".";
+        var assemblyDir = AppContext.BaseDirectory;
         var scriptPath = Path.Combine(assemblyDir, "extract_api.mjs");
-        
+
         if (File.Exists(scriptPath))
             return assemblyDir;
 

@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using System.Text.Json;
 using ApiExtractor.Contracts;
 
@@ -46,7 +45,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
         => pretty
-            ? JsonSerializer.Serialize(index, new JsonSerializerOptions { WriteIndented = true })
+            ? JsonSerializer.Serialize(index, JsonOptionsCache.Indented)
             : JsonSerializer.Serialize(index);
 
     /// <inheritdoc />
@@ -61,7 +60,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         try
         {
             var result = await ExtractAsync(rootPath, ct).ConfigureAwait(false);
-            return result != null 
+            return result != null
                 ? ExtractorResult<ApiIndex>.CreateSuccess(result)
                 : ExtractorResult<ApiIndex>.CreateFailure("No API surface extracted");
         }
@@ -85,43 +84,27 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
             throw new FileNotFoundException($"ExtractApi.java not found at {scriptPath}");
         }
 
-        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(ExtractorTimeout.Value);
-        var effectiveCt = timeoutCts.Token;
+        // Use ProcessSandbox for hardened execution with timeout and output limits
+        var result = await ProcessSandbox.ExecuteAsync(
+            jbangPath,
+            [scriptPath, rootPath, "--json"],
+            cancellationToken: ct
+        ).ConfigureAwait(false);
 
-        var psi = new ProcessStartInfo
+        if (!result.Success)
         {
-            FileName = jbangPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add(scriptPath);
-        psi.ArgumentList.Add(rootPath);
-        psi.ArgumentList.Add("--json");
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start jbang");
-        
-        // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
-        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
-        var output = await outputTask;
-        var error = await errorTask;
-
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"jbang failed: {error}");
+            var errorMsg = result.TimedOut
+                ? $"Java extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"jbang failed: {result.StandardError}";
+            throw new InvalidOperationException(errorMsg);
         }
 
-        if (string.IsNullOrWhiteSpace(output))
+        if (string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             return null;
         }
 
-        return JsonSerializer.Deserialize<ApiIndex>(output);
+        return JsonSerializer.Deserialize<ApiIndex>(result.StandardOutput);
     }
 
     /// <summary>
@@ -134,46 +117,30 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 
         var scriptPath = GetScriptPath();
 
-        // Enforce configurable timeout (SDK_CHAT_EXTRACTOR_TIMEOUT, default 5 min)
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(ExtractorTimeout.Value);
-        var effectiveCt = timeoutCts.Token;
-        
-        var psi = new ProcessStartInfo
-        {
-            FileName = jbangPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add(scriptPath);
-        psi.ArgumentList.Add(rootPath);
-        psi.ArgumentList.Add("--stub");
+        // Use ProcessSandbox for hardened execution with timeout and output limits
+        var result = await ProcessSandbox.ExecuteAsync(
+            jbangPath,
+            [scriptPath, rootPath, "--stub"],
+            cancellationToken: ct
+        ).ConfigureAwait(false);
 
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start jbang");
-        
-        // Read streams in parallel to prevent deadlocks when buffer fills
-        var outputTask = process.StandardOutput.ReadToEndAsync(effectiveCt);
-        var errorTask = process.StandardError.ReadToEndAsync(effectiveCt);
-        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
-        var output = await outputTask;
-        var error = await errorTask;
-
-        if (process.ExitCode != 0)
+        if (!result.Success)
         {
-            throw new InvalidOperationException($"jbang failed: {error}");
+            var errorMsg = result.TimedOut
+                ? $"Java extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"jbang failed: {result.StandardError}";
+            throw new InvalidOperationException(errorMsg);
         }
 
-        return output;
+        return result.StandardOutput;
     }
 
     private static string GetScriptPath()
     {
         // SECURITY: Only load scripts from assembly directory - no path traversal allowed
-        var assemblyDir = Path.GetDirectoryName(typeof(JavaApiExtractor).Assembly.Location) ?? ".";
+        var assemblyDir = AppContext.BaseDirectory;
         var scriptPath = Path.Combine(assemblyDir, "ExtractApi.java");
-        
+
         if (File.Exists(scriptPath))
             return scriptPath;
 

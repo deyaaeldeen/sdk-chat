@@ -1,0 +1,27 @@
+<Project>
+  <PropertyGroup>
+    <!-- Enforce code style analyzers during build (not just in IDE) -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    
+    <!-- Enable .NET analyzers -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>All</AnalysisMode>
+    
+    <!-- Treat nullable warnings as errors for strict null safety -->
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+    
+    <!-- Trimming/AOT analyzers (great for CLI tools) -->
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    
+    <!-- Required for IDE0005 (unnecessary usings) to work during build -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    
+    <!-- Suppress documentation warnings that are not actionable right now -->
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
+
+  </PropertyGroup>
+</Project>

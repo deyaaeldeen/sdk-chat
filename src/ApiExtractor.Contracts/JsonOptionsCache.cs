@@ -18,7 +18,7 @@ public static class JsonOptionsCache
     {
         PropertyNameCaseInsensitive = true
     };
-    
+
     /// <summary>
     /// Options for human-readable indented output during serialization.
     /// </summary>
@@ -26,7 +26,7 @@ public static class JsonOptionsCache
     {
         WriteIndented = true
     };
-    
+
     /// <summary>
     /// Options combining indented output with case-insensitive reading.
     /// </summary>

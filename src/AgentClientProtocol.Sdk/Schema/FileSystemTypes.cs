@@ -13,10 +13,10 @@ public record ReadTextFileRequest
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
-    
+
     [JsonPropertyName("path")]
     public required string Path { get; init; }
 }
@@ -29,7 +29,7 @@ public record ReadTextFileResponse
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("content")]
     public required string Content { get; init; }
 }
@@ -42,13 +42,13 @@ public record WriteTextFileRequest
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
-    
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
-    
+
     [JsonPropertyName("path")]
     public required string Path { get; init; }
-    
+
     [JsonPropertyName("content")]
     public required string Content { get; init; }
 }

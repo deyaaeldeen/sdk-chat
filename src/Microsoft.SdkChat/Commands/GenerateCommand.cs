@@ -2,8 +2,6 @@ using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SdkChat.Configuration;
 using Microsoft.SdkChat.Helpers;
-using Microsoft.SdkChat.Models;
-using Microsoft.SdkChat.Services;
 using Microsoft.SdkChat.Tools.Package.Samples;
 
 namespace Microsoft.SdkChat.Commands;
@@ -40,14 +38,14 @@ public class GenerateCommand : Command
 
             var services = ServiceBuilder.Build(ctx.GetValue(useOpenAi));
             var tool = services.GetRequiredService<SampleGeneratorTool>();
-            
+
             Environment.ExitCode = await tool.ExecuteAsync(
                 ctx.GetValue(pathArg)!,
                 ctx.GetValue(output),
                 ctx.GetValue(language),
                 ctx.GetValue(prompt),
                 ctx.GetValue(count),
-                ctx.GetValue(budget), 
+                ctx.GetValue(budget),
                 ctx.GetValue(model),
                 ctx.GetValue(dryRun),
                 ct

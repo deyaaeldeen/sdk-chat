@@ -15,7 +15,7 @@ public interface IAcpStream : IAsyncDisposable
     /// Read the next message from the stream.
     /// </summary>
     ValueTask<JsonRpcMessageBase?> ReadAsync(CancellationToken ct = default);
-    
+
     /// <summary>
     /// Write a message to the stream.
     /// </summary>

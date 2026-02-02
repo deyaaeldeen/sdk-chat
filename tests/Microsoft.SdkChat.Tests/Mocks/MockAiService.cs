@@ -2,9 +2,9 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
-using Moq;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
+using Moq;
 
 namespace Microsoft.SdkChat.Tests.Mocks;
 
@@ -20,10 +20,10 @@ public static class MockAiServiceFactory
     public static Mock<IAiService> CreateWithSamples<T>(params T[] samples)
     {
         var mock = new Mock<IAiService>();
-        
+
         mock.SetupGet(x => x.IsUsingOpenAi).Returns(false);
         mock.Setup(x => x.GetEffectiveModel(It.IsAny<string?>())).Returns("mock-model");
-        
+
         mock.Setup(x => x.StreamItemsAsync<T>(
                 It.IsAny<string>(),
                 It.IsAny<IAsyncEnumerable<string>>(),
@@ -31,20 +31,20 @@ public static class MockAiServiceFactory
                 It.IsAny<ContextInfo?>(),
                 It.IsAny<CancellationToken>()))
             .Returns(samples.ToAsyncEnumerable());
-        
+
         return mock;
     }
-    
+
     /// <summary>
     /// Creates a mock that throws the specified exception.
     /// </summary>
     public static Mock<IAiService> CreateThatThrows(Exception exception)
     {
         var mock = new Mock<IAiService>();
-        
+
         mock.SetupGet(x => x.IsUsingOpenAi).Returns(false);
         mock.Setup(x => x.GetEffectiveModel(It.IsAny<string?>())).Returns("mock-model");
-        
+
         mock.Setup(x => x.StreamItemsAsync<It.IsAnyType>(
                 It.IsAny<string>(),
                 It.IsAny<IAsyncEnumerable<string>>(),
@@ -52,10 +52,10 @@ public static class MockAiServiceFactory
                 It.IsAny<ContextInfo?>(),
                 It.IsAny<CancellationToken>()))
             .Throws(exception);
-        
+
         return mock;
     }
-    
+
     /// <summary>
     /// Creates a mock with verification capabilities.
     /// </summary>
@@ -70,7 +70,7 @@ public static class MockAiServiceFactory
                 It.IsAny<CancellationToken>()))
             .Returns(samples.ToAsyncEnumerable())
             .Verifiable();
-        
+
         return mock;
     }
 }
@@ -88,18 +88,18 @@ public class MockAiService : IAiService
     private readonly List<object> _samplesToReturn = [];
     private Exception? _exceptionToThrow;
     private TimeSpan _delayBeforeResponse = TimeSpan.Zero;
-    
+
     public bool IsUsingOpenAi => false;
-    
+
     public event EventHandler<AiPromptReadyEventArgs>? PromptReady;
     public event EventHandler<AiStreamCompleteEventArgs>? StreamComplete;
 
     public string GetEffectiveModel(string? modelOverride = null) => modelOverride ?? "mock-model";
-    
+
     public string? LastSystemPrompt { get; private set; }
     public string? LastUserPrompt { get; private set; }
     public int CallCount { get; private set; }
-    
+
     /// <summary>
     /// Configure samples to return when StreamItemsAsync is called.
     /// </summary>
@@ -108,7 +108,7 @@ public class MockAiService : IAiService
         _samplesToReturn.Clear();
         _samplesToReturn.AddRange(samples.Cast<object>());
     }
-    
+
     /// <summary>
     /// Configure an exception to throw.
     /// </summary>
@@ -116,7 +116,7 @@ public class MockAiService : IAiService
     {
         _exceptionToThrow = ex;
     }
-    
+
     /// <summary>
     /// Configure a delay before returning responses (for cancellation testing).
     /// </summary>
@@ -124,7 +124,7 @@ public class MockAiService : IAiService
     {
         _delayBeforeResponse = delay;
     }
-    
+
     public async IAsyncEnumerable<T> StreamItemsAsync<T>(
         string systemPrompt,
         IAsyncEnumerable<string> userPromptStream,
@@ -134,7 +134,7 @@ public class MockAiService : IAiService
     {
         CallCount++;
         LastSystemPrompt = systemPrompt;
-        
+
         // Materialize user prompt
         var promptBuilder = new System.Text.StringBuilder();
         await foreach (var chunk in userPromptStream.WithCancellation(cancellationToken))
@@ -142,22 +142,22 @@ public class MockAiService : IAiService
             promptBuilder.Append(chunk);
         }
         LastUserPrompt = promptBuilder.ToString();
-        
+
         // Apply configured delay (for cancellation testing)
         if (_delayBeforeResponse > TimeSpan.Zero)
         {
             await Task.Delay(_delayBeforeResponse, cancellationToken);
         }
-        
+
         // Fire events
         var promptChars = systemPrompt.Length + LastUserPrompt.Length;
         PromptReady?.Invoke(this, new AiPromptReadyEventArgs(promptChars, promptChars / 4));
-        
+
         if (_exceptionToThrow != null)
         {
             throw _exceptionToThrow;
         }
-        
+
         // Yield configured samples
         foreach (var sample in _samplesToReturn)
         {
@@ -167,10 +167,10 @@ public class MockAiService : IAiService
                 yield return typedSample;
             }
         }
-        
+
         StreamComplete?.Invoke(this, new AiStreamCompleteEventArgs(1000, 250, TimeSpan.FromMilliseconds(1)));
     }
-    
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 

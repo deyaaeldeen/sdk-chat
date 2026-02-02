@@ -1,5 +1,5 @@
-using Microsoft.SdkChat.Helpers;
 using System.Text.Json;
+using Microsoft.SdkChat.Helpers;
 using Xunit;
 
 namespace Microsoft.SdkChat.Tests.Helpers;
@@ -51,7 +51,7 @@ public class NdjsonStreamParserTests
     }
 
     #region Multi-line JSON Edge Cases
-    
+
     [Fact]
     public async Task ParseAsync_MultiLineJsonObject_ParsesCorrectly()
     {
@@ -62,7 +62,7 @@ public class NdjsonStreamParserTests
               "name": "test"
             }
             """;
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItemWithName>(
             Chunks(json), Options));
 
@@ -70,7 +70,7 @@ public class NdjsonStreamParserTests
         Assert.Equal(42, items[0].Value);
         Assert.Equal("test", items[0].Name);
     }
-    
+
     [Fact]
     public async Task ParseAsync_MultiLineJsonAcrossChunks_ParsesCorrectly()
     {
@@ -81,39 +81,39 @@ public class NdjsonStreamParserTests
         Assert.Single(items);
         Assert.Equal(99, items[0].Value);
     }
-    
+
     [Fact]
     public async Task ParseAsync_NewlinesInsideStringValues_PreservesContent()
     {
         // Newlines inside JSON string values should be preserved
         var json = "{\"value\": 1, \"name\": \"line1\\nline2\\nline3\"}";
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItemWithName>(
             Chunks(json), Options));
 
         Assert.Single(items);
         Assert.Equal("line1\nline2\nline3", items[0].Name);
     }
-    
+
     [Fact]
     public async Task ParseAsync_EscapedQuotesInStrings_ParsesCorrectly()
     {
         // Escaped quotes should not break brace tracking
         var json = "{\"value\": 1, \"name\": \"say \\\"hello\\\"\"}";
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItemWithName>(
             Chunks(json), Options));
 
         Assert.Single(items);
         Assert.Equal("say \"hello\"", items[0].Name);
     }
-    
+
     [Fact]
     public async Task ParseAsync_NestedBraces_TracksDepthCorrectly()
     {
         // Nested objects with multiple brace levels
         var json = "{\"value\": 1, \"nested\": {\"inner\": {\"deep\": 42}}}";
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItemWithNested>(
             Chunks(json), Options));
 
@@ -121,20 +121,20 @@ public class NdjsonStreamParserTests
         Assert.Equal(1, items[0].Value);
         Assert.Equal(42, items[0].Nested?.Inner?.Deep);
     }
-    
+
     [Fact]
     public async Task ParseAsync_BracesInsideStrings_DoesNotConfuseParser()
     {
         // Braces inside string values should not affect depth tracking
         var json = "{\"value\": 1, \"name\": \"contains {braces} inside\"}";
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItemWithName>(
             Chunks(json), Options));
 
         Assert.Single(items);
         Assert.Equal("contains {braces} inside", items[0].Name);
     }
-    
+
     [Fact]
     public async Task ParseAsync_MultipleMultiLineObjects_ParsesAll()
     {
@@ -149,39 +149,39 @@ public class NdjsonStreamParserTests
               "value": 3
             }
             """;
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItem>(
             Chunks(json), Options));
 
         Assert.Equal(3, items.Count);
         Assert.Equal([1, 2, 3], items.Select(i => i.Value).ToArray());
     }
-    
+
     [Fact]
     public async Task ParseAsync_BackslashEscapeSequences_HandlesAllTypes()
     {
         // Various escape sequences: \n, \t, \\, \"
         var json = "{\"value\": 1, \"name\": \"tab\\there\\nnew\\\\slash\"}";
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItemWithName>(
             Chunks(json), Options));
 
         Assert.Single(items);
         Assert.Equal("tab\there\nnew\\slash", items[0].Name);
     }
-    
+
     [Fact]
     public async Task ParseAsync_UnicodeInStrings_ParsesCorrectly()
     {
         var json = "{\"value\": 1, \"name\": \"emoji: 🚀 and ñ\"}";
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItemWithName>(
             Chunks(json), Options));
 
         Assert.Single(items);
         Assert.Equal("emoji: 🚀 and ñ", items[0].Name);
     }
-    
+
     [Fact]
     public async Task ParseAsync_WhitespaceOnlyBetweenObjects_Skipped()
     {
@@ -191,7 +191,7 @@ public class NdjsonStreamParserTests
         Assert.Equal(2, items.Count);
         Assert.Equal([1, 2], items.Select(i => i.Value).ToArray());
     }
-    
+
     [Fact]
     public async Task ParseAsync_IncompleteJsonAtEnd_SkipsGracefully()
     {
@@ -203,7 +203,7 @@ public class NdjsonStreamParserTests
         Assert.Single(items);
         Assert.Equal(1, items[0].Value);
     }
-    
+
     [Fact]
     public async Task ParseAsync_RealWorldAiResponse_ParsesCorrectly()
     {
@@ -224,7 +224,7 @@ public class NdjsonStreamParserTests
             }
             ```
             """;
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<SampleItem>(
             Chunks(response), Options));
 
@@ -233,19 +233,19 @@ public class NdjsonStreamParserTests
         Assert.Equal("samples/hello.cs", items[0].FilePath);
         Assert.Equal("Sample2", items[1].Name);
     }
-    
+
     [Fact]
     public async Task ParseAsync_ArraysInObjects_ParsesCorrectly()
     {
         var json = "{\"value\": 1, \"items\": [1, 2, 3]}";
-        
+
         var items = await CollectAsync(NdjsonStreamParser.ParseAsync<TestItemWithArray>(
             Chunks(json), Options));
 
         Assert.Single(items);
         Assert.Equal([1, 2, 3], items[0].Items ?? []);
     }
-    
+
     #endregion
 
     private static async Task<List<T>> CollectAsync<T>(IAsyncEnumerable<T> stream)

@@ -2,9 +2,9 @@
 // Licensed under the MIT License.
 
 using ApiExtractor.DotNet;
-using ApiExtractor.Python;
-using ApiExtractor.Java;
 using ApiExtractor.Go;
+using ApiExtractor.Java;
+using ApiExtractor.Python;
 using ApiExtractor.TypeScript;
 using Xunit;
 
@@ -27,14 +27,14 @@ public class SmartTruncationTests
             Kind = "class",
             Members = [new MemberInfo { Name = "SendAsync", Kind = "method", Signature = "() -> Task" }]
         };
-        
+
         var modelType = new DotNet.TypeInfo
         {
             Name = "ChatMessage",
             Kind = "class",
             Members = [new MemberInfo { Name = "Content", Kind = "property", Signature = "string" }]
         };
-        
+
         Assert.True(clientType.IsClientType);
         Assert.False(modelType.IsClientType);
     }
@@ -48,14 +48,14 @@ public class SmartTruncationTests
             Kind = "class",
             Members = [new MemberInfo { Name = "Content", Kind = "property", Signature = "string" }]
         };
-        
+
         var clientType = new DotNet.TypeInfo
         {
             Name = "ChatClient",
             Kind = "class",
             Members = [new MemberInfo { Name = "SendAsync", Kind = "method", Signature = "() -> Task" }]
         };
-        
+
         Assert.True(modelType.IsModelType);
         Assert.False(clientType.IsModelType);
     }
@@ -69,21 +69,21 @@ public class SmartTruncationTests
             Kind = "class",
             Members = [new MemberInfo { Name = "SendAsync", Kind = "method", Signature = "() -> Task" }]
         };
-        
+
         var optionsType = new DotNet.TypeInfo
         {
             Name = "ChatOptions",
             Kind = "class",
             Members = [new MemberInfo { Name = "MaxTokens", Kind = "property", Signature = "int" }]
         };
-        
+
         var modelType = new DotNet.TypeInfo
         {
             Name = "ChatMessage",
             Kind = "class",
             Members = [new MemberInfo { Name = "Content", Kind = "property", Signature = "string" }]
         };
-        
+
         Assert.True(clientType.TruncationPriority < optionsType.TruncationPriority);
         Assert.True(optionsType.TruncationPriority < modelType.TruncationPriority);
     }
@@ -96,16 +96,16 @@ public class SmartTruncationTests
             Name = "ChatClient",
             Kind = "class",
             Base = "BaseClient",
-            Members = 
+            Members =
             [
                 new MemberInfo { Name = "SendAsync", Kind = "method", Signature = "(ChatMessage message) -> Task<ChatResponse>" },
                 new MemberInfo { Name = "Options", Kind = "property", Signature = "ChatOptions" }
             ]
         };
-        
+
         var allTypes = new HashSet<string> { "ChatClient", "BaseClient", "ChatMessage", "ChatResponse", "ChatOptions", "UnrelatedType" };
         var refs = clientType.GetReferencedTypes(allTypes);
-        
+
         Assert.Contains("BaseClient", refs);
         Assert.Contains("ChatMessage", refs);
         Assert.Contains("ChatResponse", refs);
@@ -117,10 +117,10 @@ public class SmartTruncationTests
     public void DotNet_CSharpFormatter_Format_WithBudget_TruncatesAtLimit()
     {
         var api = CreateLargeDotNetApi(50); // 50 types
-        
+
         // Format with a small budget
         var result = CSharpFormatter.Format(api, 2000);
-        
+
         Assert.True(result.Length <= 2100); // Allow some margin for truncation message
         Assert.Contains("truncated", result);
     }
@@ -129,10 +129,10 @@ public class SmartTruncationTests
     public void DotNet_CSharpFormatter_Format_WithBudget_PrioritizesClients()
     {
         var api = CreateDotNetApiWithClientAndModels();
-        
+
         // Small budget - should include client but truncate models
         var result = CSharpFormatter.Format(api, 1000);
-        
+
         Assert.Contains("ChatClient", result);
     }
 
@@ -140,10 +140,10 @@ public class SmartTruncationTests
     public void DotNet_CSharpFormatter_Format_IncludesClientDependencies()
     {
         var api = CreateDotNetApiWithClientAndDependency();
-        
+
         // Budget enough for client + one dependency
         var result = CSharpFormatter.Format(api, 1500);
-        
+
         // Should include both client and its dependency
         Assert.Contains("ChatClient", result);
         Assert.Contains("ChatMessage", result);
@@ -152,7 +152,7 @@ public class SmartTruncationTests
     private static DotNet.ApiIndex CreateLargeDotNetApi(int typeCount)
     {
         var types = new List<DotNet.TypeInfo>();
-        
+
         // Add one client
         types.Add(new DotNet.TypeInfo
         {
@@ -160,7 +160,7 @@ public class SmartTruncationTests
             Kind = "class",
             Members = [new MemberInfo { Name = "DoSomething", Kind = "method", Signature = "() -> void" }]
         });
-        
+
         // Add many model types
         for (int i = 0; i < typeCount - 1; i++)
         {
@@ -171,7 +171,7 @@ public class SmartTruncationTests
                 Members = [new MemberInfo { Name = "Property", Kind = "property", Signature = "string" }]
             });
         }
-        
+
         return new DotNet.ApiIndex
         {
             Package = "TestPackage",
@@ -184,10 +184,10 @@ public class SmartTruncationTests
         return new DotNet.ApiIndex
         {
             Package = "TestPackage",
-            Namespaces = [new NamespaceInfo 
-            { 
-                Name = "TestNamespace", 
-                Types = 
+            Namespaces = [new NamespaceInfo
+            {
+                Name = "TestNamespace",
+                Types =
                 [
                     new DotNet.TypeInfo
                     {
@@ -217,10 +217,10 @@ public class SmartTruncationTests
         return new DotNet.ApiIndex
         {
             Package = "TestPackage",
-            Namespaces = [new NamespaceInfo 
-            { 
-                Name = "TestNamespace", 
-                Types = 
+            Namespaces = [new NamespaceInfo
+            {
+                Name = "TestNamespace",
+                Types =
                 [
                     new DotNet.TypeInfo
                     {
@@ -253,7 +253,7 @@ public class SmartTruncationTests
             Methods: [new Python.MethodInfo("send", "self, message", null, null, null, null)],
             Properties: null
         );
-        
+
         var modelClass = new Python.ClassInfo(
             Name: "ChatMessage",
             Base: null,
@@ -261,7 +261,7 @@ public class SmartTruncationTests
             Methods: null,
             Properties: [new Python.PropertyInfo("content", "str", null)]
         );
-        
+
         Assert.True(clientClass.IsClientType);
         Assert.False(modelClass.IsClientType);
     }
@@ -276,7 +276,7 @@ public class SmartTruncationTests
             Methods: [new Python.MethodInfo("send", "self", null, null, null, null)],
             Properties: null
         );
-        
+
         var modelClass = new Python.ClassInfo(
             Name: "ChatMessage",
             Base: null,
@@ -284,7 +284,7 @@ public class SmartTruncationTests
             Methods: null,
             Properties: [new Python.PropertyInfo("content", "str", null)]
         );
-        
+
         Assert.True(clientClass.TruncationPriority < modelClass.TruncationPriority);
     }
 
@@ -298,10 +298,10 @@ public class SmartTruncationTests
             Methods: [new Python.MethodInfo("send", "self, message: ChatMessage -> ChatResponse", null, null, null, null)],
             Properties: null
         );
-        
+
         var allTypes = new HashSet<string> { "ChatClient", "BaseClient", "ChatMessage", "ChatResponse", "Unrelated" };
         var refs = clientClass.GetReferencedTypes(allTypes);
-        
+
         Assert.Contains("BaseClient", refs);
         Assert.Contains("ChatMessage", refs);
         Assert.Contains("ChatResponse", refs);
@@ -312,9 +312,9 @@ public class SmartTruncationTests
     public void Python_PythonFormatter_Format_WithBudget_TruncatesAtLimit()
     {
         var api = CreateLargePythonApi(50);
-        
+
         var result = PythonFormatter.Format(api, 2000);
-        
+
         Assert.True(result.Length <= 2100);
         Assert.Contains("truncated", result);
     }
@@ -322,7 +322,7 @@ public class SmartTruncationTests
     private static Python.ApiIndex CreateLargePythonApi(int classCount)
     {
         var classes = new List<Python.ClassInfo>();
-        
+
         classes.Add(new Python.ClassInfo(
             Name: "SampleClient",
             Base: null,
@@ -330,7 +330,7 @@ public class SmartTruncationTests
             Methods: [new Python.MethodInfo("do_something", "self, param1: str, param2: int", null, null, null, null)],
             Properties: null
         ));
-        
+
         for (int i = 0; i < classCount - 1; i++)
         {
             // Create more substantial model classes to trigger truncation
@@ -346,7 +346,7 @@ public class SmartTruncationTests
                 ]
             ));
         }
-        
+
         return new Python.ApiIndex(
             Package: "test_package",
             Modules: [new Python.ModuleInfo("test_module", classes, null)]
@@ -365,13 +365,13 @@ public class SmartTruncationTests
             Name = "ChatClient",
             Methods = [new Java.MethodInfo { Name = "send", Sig = "()", Ret = "void" }]
         };
-        
+
         var builderClass = new Java.ClassInfo
         {
             Name = "ChatClientBuilder",
             Methods = [new Java.MethodInfo { Name = "build", Sig = "()", Ret = "ChatClient" }]
         };
-        
+
         Assert.True(clientClass.IsClientType);
         Assert.True(builderClass.IsClientType); // Java includes Builder pattern
     }
@@ -385,10 +385,10 @@ public class SmartTruncationTests
             Extends = "BaseClient",
             Methods = [new Java.MethodInfo { Name = "send", Sig = "(ChatMessage message)", Ret = "ChatResponse" }]
         };
-        
+
         var allTypes = new HashSet<string> { "ChatClient", "BaseClient", "ChatMessage", "ChatResponse" };
         var refs = clientClass.GetReferencedTypes(allTypes);
-        
+
         Assert.Contains("BaseClient", refs);
         Assert.Contains("ChatMessage", refs);
         Assert.Contains("ChatResponse", refs);
@@ -398,9 +398,9 @@ public class SmartTruncationTests
     public void Java_JavaFormatter_Format_WithBudget_TruncatesAtLimit()
     {
         var api = CreateLargeJavaApi(50);
-        
+
         var result = JavaFormatter.Format(api, 2000);
-        
+
         Assert.True(result.Length <= 2100);
         Assert.Contains("truncated", result);
     }
@@ -408,13 +408,13 @@ public class SmartTruncationTests
     private static Java.ApiIndex CreateLargeJavaApi(int classCount)
     {
         var classes = new List<Java.ClassInfo>();
-        
+
         classes.Add(new Java.ClassInfo
         {
             Name = "SampleClient",
             Methods = [new Java.MethodInfo { Name = "doSomething", Sig = "(String param1, int param2)", Ret = "void" }]
         });
-        
+
         for (int i = 0; i < classCount - 1; i++)
         {
             // Create more substantial model classes to trigger truncation
@@ -429,7 +429,7 @@ public class SmartTruncationTests
                 ]
             });
         }
-        
+
         return new Java.ApiIndex
         {
             Package = "com.test",
@@ -449,13 +449,13 @@ public class SmartTruncationTests
             Name = "ChatClient",
             Methods = [new Go.FuncApi { Name = "Send", Sig = "(ctx context.Context)", Ret = "error" }]
         };
-        
+
         var modelStruct = new Go.StructApi
         {
             Name = "ChatMessage",
             Fields = [new Go.FieldApi { Name = "Content", Type = "string" }]
         };
-        
+
         Assert.True(clientStruct.IsClientType);
         Assert.False(modelStruct.IsClientType);
     }
@@ -468,13 +468,13 @@ public class SmartTruncationTests
             Name = "ChatClient",
             Methods = [new Go.FuncApi { Name = "Send", Sig = "()", Ret = "error" }]
         };
-        
+
         var optionsStruct = new Go.StructApi
         {
             Name = "ChatClientOptions",
             Fields = [new Go.FieldApi { Name = "MaxTokens", Type = "int" }]
         };
-        
+
         Assert.True(clientStruct.TruncationPriority < optionsStruct.TruncationPriority);
     }
 
@@ -482,9 +482,9 @@ public class SmartTruncationTests
     public void Go_GoFormatter_Format_WithBudget_TruncatesAtLimit()
     {
         var api = CreateLargeGoApi(50);
-        
+
         var result = GoFormatter.Format(api, 2000);
-        
+
         Assert.True(result.Length <= 2100);
         Assert.Contains("truncated", result);
     }
@@ -492,13 +492,13 @@ public class SmartTruncationTests
     private static Go.ApiIndex CreateLargeGoApi(int structCount)
     {
         var structs = new List<Go.StructApi>();
-        
+
         structs.Add(new Go.StructApi
         {
             Name = "SampleClient",
             Methods = [new Go.FuncApi { Name = "DoSomething", Sig = "()", Ret = "error" }]
         });
-        
+
         for (int i = 0; i < structCount - 1; i++)
         {
             structs.Add(new Go.StructApi
@@ -507,7 +507,7 @@ public class SmartTruncationTests
                 Fields = [new Go.FieldApi { Name = "Prop", Type = "string" }]
             });
         }
-        
+
         return new Go.ApiIndex
         {
             Package = "testpkg",
@@ -527,13 +527,13 @@ public class SmartTruncationTests
             Name = "ChatClient",
             Methods = [new TypeScript.MethodInfo { Name = "send", Sig = "message: string", Ret = "Promise<void>" }]
         };
-        
+
         var modelClass = new TypeScript.ClassInfo
         {
             Name = "ChatMessage",
             Properties = [new TypeScript.PropertyInfo { Name = "content", Type = "string" }]
         };
-        
+
         Assert.True(clientClass.IsClientType);
         Assert.False(modelClass.IsClientType);
     }
@@ -547,10 +547,10 @@ public class SmartTruncationTests
             Extends = "BaseClient",
             Methods = [new TypeScript.MethodInfo { Name = "send", Sig = "message: ChatMessage", Ret = "Promise<ChatResponse>" }]
         };
-        
+
         var allTypes = new HashSet<string> { "ChatClient", "BaseClient", "ChatMessage", "ChatResponse" };
         var refs = clientClass.GetReferencedTypes(allTypes);
-        
+
         Assert.Contains("BaseClient", refs);
         Assert.Contains("ChatMessage", refs);
         Assert.Contains("ChatResponse", refs);
@@ -560,9 +560,9 @@ public class SmartTruncationTests
     public void TypeScript_TypeScriptFormatter_Format_WithBudget_TruncatesAtLimit()
     {
         var api = CreateLargeTypeScriptApi(50);
-        
+
         var result = TypeScriptFormatter.Format(api, 2000);
-        
+
         Assert.True(result.Length <= 2100);
         Assert.Contains("truncated", result);
     }
@@ -570,13 +570,13 @@ public class SmartTruncationTests
     private static TypeScript.ApiIndex CreateLargeTypeScriptApi(int classCount)
     {
         var classes = new List<TypeScript.ClassInfo>();
-        
+
         classes.Add(new TypeScript.ClassInfo
         {
             Name = "SampleClient",
             Methods = [new TypeScript.MethodInfo { Name = "doSomething", Sig = "", Ret = "void" }]
         });
-        
+
         for (int i = 0; i < classCount - 1; i++)
         {
             classes.Add(new TypeScript.ClassInfo
@@ -585,7 +585,7 @@ public class SmartTruncationTests
                 Properties = [new TypeScript.PropertyInfo { Name = "prop", Type = "string" }]
             });
         }
-        
+
         return new TypeScript.ApiIndex
         {
             Package = "@test/package",
@@ -601,14 +601,14 @@ public class SmartTruncationTests
     public void AllLanguages_ClientPatternDetection_ConsistentAcrossLanguages()
     {
         // All languages should detect *Client, *Service, *Manager as client types
-        
+
         var dotnetClient = new DotNet.TypeInfo
         {
             Name = "ChatService",
             Kind = "class",
             Members = [new MemberInfo { Name = "Send", Kind = "method", Signature = "() -> void" }]
         };
-        
+
         var pythonClient = new Python.ClassInfo(
             Name: "ChatManager",
             Base: null,
@@ -616,25 +616,25 @@ public class SmartTruncationTests
             Methods: [new Python.MethodInfo("send", "self", null, null, null, null)],
             Properties: null
         );
-        
+
         var javaClient = new Java.ClassInfo
         {
             Name = "ChatClient",
             Methods = [new Java.MethodInfo { Name = "send", Sig = "()", Ret = "void" }]
         };
-        
+
         var goClient = new Go.StructApi
         {
             Name = "ChatClient",
             Methods = [new Go.FuncApi { Name = "Send", Sig = "()", Ret = "error" }]
         };
-        
+
         var tsClient = new TypeScript.ClassInfo
         {
             Name = "ChatClient",
             Methods = [new TypeScript.MethodInfo { Name = "send", Sig = "", Ret = "void" }]
         };
-        
+
         Assert.True(dotnetClient.IsClientType);
         Assert.True(pythonClient.IsClientType);
         Assert.True(javaClient.IsClientType);
@@ -646,13 +646,13 @@ public class SmartTruncationTests
     public void AllLanguages_TruncationMessage_ConsistentFormat()
     {
         // All formatters should include "truncated" in their output when over budget
-        
+
         var dotnetResult = CSharpFormatter.Format(CreateLargeDotNetApi(50), 1000);
         var pythonResult = PythonFormatter.Format(CreateLargePythonApi(50), 1000);
         var javaResult = JavaFormatter.Format(CreateLargeJavaApi(50), 1000);
         var goResult = GoFormatter.Format(CreateLargeGoApi(50), 1000);
         var tsResult = TypeScriptFormatter.Format(CreateLargeTypeScriptApi(50), 1000);
-        
+
         Assert.Contains("truncated", dotnetResult);
         Assert.Contains("truncated", pythonResult);
         Assert.Contains("truncated", javaResult);

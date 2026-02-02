@@ -11,13 +11,13 @@ public static class AgentMethods
     // Core methods (implemented)
     public const string Initialize = "initialize";
     public const string Authenticate = "authenticate";
-    
+
     // Session methods (implemented)
     public const string SessionNew = "session/new";
     public const string SessionLoad = "session/load";
     public const string SessionPrompt = "session/prompt";
     public const string SessionCancel = "session/cancel";
-    
+
     // Session methods (reserved - not yet implemented)
     // Agents should return MethodNotFound for these until implemented
     public const string SessionList = "session/list";

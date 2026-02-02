@@ -8,31 +8,31 @@ using ApiExtractor.Contracts;
 namespace ApiExtractor.TypeScript;
 
 /// <summary>Root container for extracted TypeScript API.</summary>
-public record ApiIndex : IApiIndex
+public sealed record ApiIndex : IApiIndex
 {
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
     [JsonPropertyName("modules")]
     public IReadOnlyList<ModuleInfo> Modules { get; init; } = [];
-    
+
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
         Modules.SelectMany(m => m.Classes ?? []);
-    
+
     /// <summary>Gets client classes (entry points for SDK operations).</summary>
     public IEnumerable<ClassInfo> GetClientClasses() =>
         GetAllClasses().Where(c => c.IsClientType);
-    
+
     public string ToJson(bool pretty = false) => pretty
-        ? JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })
+        ? JsonSerializer.Serialize(this, JsonOptionsCache.Indented)
         : JsonSerializer.Serialize(this);
-    
+
     public string ToStubs() => TypeScriptFormatter.Format(this);
 }
 
 /// <summary>A TypeScript module/file.</summary>
-public record ModuleInfo
+public sealed record ModuleInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -54,7 +54,7 @@ public record ModuleInfo
 }
 
 /// <summary>A class declaration.</summary>
-public record ClassInfo
+public sealed record ClassInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -79,18 +79,18 @@ public record ClassInfo
 
     [JsonPropertyName("properties")]
     public IReadOnlyList<PropertyInfo>? Properties { get; init; }
-    
+
     /// <summary>Returns true if this is a client class (SDK entry point).</summary>
     [JsonIgnore]
     public bool IsClientType =>
         (Name.EndsWith("Client") || Name.EndsWith("Service") || Name.EndsWith("Manager")) &&
         (Methods?.Any() ?? false);
-    
+
     /// <summary>Returns true if this is a model/DTO class.</summary>
     [JsonIgnore]
     public bool IsModelType =>
         !(Methods?.Any() ?? false) && (Properties?.Any() ?? false);
-    
+
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
     public int TruncationPriority
@@ -104,26 +104,26 @@ public record ClassInfo
             return 4;
         }
     }
-    
+
     /// <summary>Gets type names referenced in method signatures and properties.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
         var refs = new HashSet<string>();
-        
+
         if (!string.IsNullOrEmpty(Extends))
         {
             var baseName = Extends.Split('<')[0];
             if (allTypeNames.Contains(baseName))
                 refs.Add(baseName);
         }
-        
+
         foreach (var iface in Implements ?? [])
         {
             var ifaceName = iface.Split('<')[0];
             if (allTypeNames.Contains(ifaceName))
                 refs.Add(ifaceName);
         }
-        
+
         foreach (var method in Methods ?? [])
         {
             foreach (var typeName in allTypeNames)
@@ -132,7 +132,7 @@ public record ClassInfo
                     refs.Add(typeName);
             }
         }
-        
+
         foreach (var prop in Properties ?? [])
         {
             foreach (var typeName in allTypeNames)
@@ -141,7 +141,7 @@ public record ClassInfo
                     refs.Add(typeName);
             }
         }
-        
+
         return refs;
     }
 }

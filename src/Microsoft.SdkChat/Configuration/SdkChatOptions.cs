@@ -20,7 +20,7 @@ public sealed class SdkChatOptions : IValidatableObject
     /// Default model for GitHub Copilot provider.
     /// </summary>
     public const string DefaultCopilotModel = "claude-sonnet-4.5";
-    
+
     /// <summary>
     /// Default model for OpenAI-compatible provider.
     /// </summary>
@@ -114,7 +114,7 @@ public sealed class SdkChatOptions : IValidatableObject
         var useOpenAi = Environment.GetEnvironmentVariable("SDK_CLI_USE_OPENAI");
         var debug = Environment.GetEnvironmentVariable("SDK_CLI_DEBUG");
         var timeoutStr = Environment.GetEnvironmentVariable("SDK_CLI_TIMEOUT");
-        
+
         return new SdkChatOptions
         {
             UseOpenAi = string.Equals(useOpenAi, "true", StringComparison.OrdinalIgnoreCase) ||
@@ -127,7 +127,7 @@ public sealed class SdkChatOptions : IValidatableObject
             DebugDirectory = Environment.GetEnvironmentVariable("SDK_CLI_DEBUG_DIR"),
             TimeoutSeconds = int.TryParse(timeoutStr, out var timeout) ? timeout : DefaultTimeoutSeconds,
             CopilotCliPath = Environment.GetEnvironmentVariable("COPILOT_CLI_PATH") ?? "copilot",
-            GitHubToken = Environment.GetEnvironmentVariable("GH_TOKEN") 
+            GitHubToken = Environment.GetEnvironmentVariable("GH_TOKEN")
                        ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
         };
     }

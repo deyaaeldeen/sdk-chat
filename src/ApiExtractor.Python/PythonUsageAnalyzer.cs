@@ -15,7 +15,7 @@ namespace ApiExtractor.Python;
 public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 {
     private static readonly string ScriptPath = Path.Combine(
-        Path.GetDirectoryName(typeof(PythonUsageAnalyzer).Assembly.Location) ?? ".",
+        AppContext.BaseDirectory,
         "extract_api.py");
 
     /// <inheritdoc />
@@ -25,7 +25,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {
         var normalizedPath = Path.GetFullPath(codePath);
-        
+
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
 
@@ -105,10 +105,10 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     public string Format(UsageIndex index)
     {
         var sb = new StringBuilder();
-        
+
         sb.AppendLine($"Analyzed {index.FileCount} files.");
         sb.AppendLine();
-        
+
         if (index.CoveredOperations.Count > 0)
         {
             sb.AppendLine("COVERED OPERATIONS (already have examples):");

@@ -12,7 +12,7 @@ public static class Program
     public static async Task<int> Main(string[] args)
     {
         TelemetryConfiguration.Initialize();
-        
+
         try
         {
             var rootCommand = new RootCommand("SDK Chat - Sample generation and SDK utilities")
@@ -22,7 +22,7 @@ public static class Program
                 new PackageCommand(),
                 new DoctorCommand()
             };
-            
+
             return await rootCommand.Parse(args).InvokeAsync();
         }
         finally

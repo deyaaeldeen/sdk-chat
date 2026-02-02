@@ -14,11 +14,11 @@ namespace ApiExtractor.Tests;
 public class GoExtractorFixture : IAsyncLifetime
 {
     private static readonly string TestFixturesPath = Path.Combine(AppContext.BaseDirectory, "TestFixtures", "Go");
-    
+
     public ApiIndex? Api { get; private set; }
     public string? SkipReason { get; private set; }
     public string FixturePath => TestFixturesPath;
-    
+
     public async Task InitializeAsync()
     {
         var extractor = new GoApiExtractor();
@@ -27,7 +27,7 @@ public class GoExtractorFixture : IAsyncLifetime
             SkipReason = extractor.UnavailableReason ?? "Go not available";
             return;
         }
-        
+
         try
         {
             Api = await extractor.ExtractAsync(TestFixturesPath);
@@ -37,7 +37,7 @@ public class GoExtractorFixture : IAsyncLifetime
             SkipReason = $"Go extraction failed: {ex.Message}";
         }
     }
-    
+
     public Task DisposeAsync() => Task.CompletedTask;
 }
 

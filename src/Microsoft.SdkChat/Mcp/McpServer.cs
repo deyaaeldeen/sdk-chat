@@ -1,14 +1,13 @@
-using ModelContextProtocol.Server;
-using ModelContextProtocol.AspNetCore;
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.SdkChat.Configuration;
 using Microsoft.SdkChat.Helpers;
-using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
-using Microsoft.SdkChat.Services.Languages;
 
 namespace Microsoft.SdkChat.Mcp;
 
@@ -26,7 +25,7 @@ public static class McpServer
         "stdio",
         "sse"
     };
-    
+
     public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false, CancellationToken cancellationToken = default)
     {
         // Validate transport type - fail fast if unsupported
@@ -35,13 +34,13 @@ public static class McpServer
             throw new NotSupportedException(
                 $"Transport '{transport}' is not supported. Supported transports: {string.Join(", ", SupportedTransports)}.");
         }
-        
+
         // For SSE transport, use WebApplication for HTTP/SSE support
         if (transport.Equals("sse", StringComparison.OrdinalIgnoreCase))
         {
             var builder = WebApplication.CreateBuilder();
             ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
-            
+
             // Configure MCP server with SSE transport
             builder.Services.AddMcpServer(options =>
             {
@@ -49,13 +48,13 @@ public static class McpServer
             })
             .WithHttpTransport()
             .WithToolsFromAssembly();
-            
+
             var app = builder.Build();
-            
+
             // Configure endpoint - clear default URLs and set only the requested port
             app.Urls.Clear();
             app.Urls.Add($"http://localhost:{port}");
-            
+
             app.MapMcp();
             await app.RunAsync(cancellationToken);
         }
@@ -63,7 +62,7 @@ public static class McpServer
         {
             var builder = Host.CreateApplicationBuilder();
             ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
-            
+
             // Configure MCP server with stdio transport
             builder.Services.AddMcpServer(options =>
             {
@@ -71,21 +70,21 @@ public static class McpServer
             })
             .WithStdioServerTransport()
             .WithToolsFromAssembly();
-            
+
             var host = builder.Build();
             await host.RunAsync(cancellationToken);
         }
     }
-    
+
     private static void ConfigureLoggingAndServices(ILoggingBuilder logging, IServiceCollection services, string logLevel, bool useOpenAi)
     {
         // Configure logging
         logging.AddConsole().SetMinimumLevel(ParseLogLevel(logLevel));
-        
+
         // Configure centralized options - fail fast on validation errors
         var options = SdkChatOptions.FromEnvironment();
         if (useOpenAi) options.UseOpenAi = true;
-        
+
         // Validate configuration at startup
         var validationResults = options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options));
         var errors = validationResults.ToList();
@@ -94,21 +93,9 @@ public static class McpServer
             throw new InvalidOperationException(
                 $"Configuration validation failed: {string.Join("; ", errors.Select(e => e.ErrorMessage))}");
         }
-        
+
         services.AddSingleton(options);
-        
-        // Legacy compatibility - create AiProviderSettings from SdkChatOptions
-        var aiSettings = new AiProviderSettings
-        {
-            UseOpenAi = options.UseOpenAi,
-            Endpoint = options.Endpoint,
-            ApiKey = options.ApiKey,
-            Model = options.Model,
-            DebugEnabled = options.DebugEnabled,
-            DebugDirectory = options.DebugDirectory
-        };
-        services.AddSingleton(aiSettings);
-        
+
         // Register services
         services.AddSingleton<ProcessSandboxService>();
         services.AddSingleton<AiDebugLogger>();
@@ -117,7 +104,7 @@ public static class McpServer
         services.AddSingleton<FileHelper>();
         services.AddSingleton<ConfigurationHelper>();
     }
-    
+
     private static LogLevel ParseLogLevel(string level) => level.ToLowerInvariant() switch
     {
         "debug" => LogLevel.Debug,

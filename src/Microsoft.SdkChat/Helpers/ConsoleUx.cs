@@ -8,10 +8,10 @@ public static class ConsoleUx
 {
     private static readonly string[] SpinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     private static readonly object _lock = new();
-    
-    private static bool _supportsAnsi = !Console.IsOutputRedirected && 
+
+    private static bool _supportsAnsi = !Console.IsOutputRedirected &&
         Environment.GetEnvironmentVariable("NO_COLOR") == null;
-    
+
     // Colors
     public static string Dim(string text) => _supportsAnsi ? $"\x1b[90m{text}\x1b[0m" : text;
     public static string Green(string text) => _supportsAnsi ? $"\x1b[32m{text}\x1b[0m" : text;
@@ -19,7 +19,7 @@ public static class ConsoleUx
     public static string Cyan(string text) => _supportsAnsi ? $"\x1b[36m{text}\x1b[0m" : text;
     public static string Bold(string text) => _supportsAnsi ? $"\x1b[1m{text}\x1b[0m" : text;
     public static string Red(string text) => _supportsAnsi ? $"\x1b[31m{text}\x1b[0m" : text;
-    
+
     public static async Task<T> SpinnerAsync<T>(string message, Func<Task<T>> action, CancellationToken ct = default)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -41,10 +41,10 @@ public static class ConsoleUx
                 throw;
             }
         }
-        
+
         var spinnerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var spinnerTask = RunSpinnerAsync(message, spinnerCts.Token);
-        
+
         try
         {
             var result = await action();
@@ -65,31 +65,31 @@ public static class ConsoleUx
             throw;
         }
     }
-    
+
     public static async Task SpinnerAsync(string message, Func<Task> action, CancellationToken ct = default)
     {
         await SpinnerAsync(message, async () => { await action(); return 0; }, ct);
     }
-    
+
     public static StreamingProgress StartStreaming(string message)
     {
         return new StreamingProgress(message, _supportsAnsi);
     }
-    
+
     public static void Success(string message) => Console.WriteLine($"  {Green("✓")} {message}");
-    
+
     public static void Error(string message) => Console.WriteLine($"  {Red("✗")} {message}");
-    
+
     public static void Info(string message) => Console.WriteLine($"  {Dim(message)}");
-    
+
     public static void Header(string message) => Console.WriteLine($"\n{Bold(message)}");
-    
+
     public static void TreeItem(string text, bool isLast = false)
     {
         var prefix = isLast ? "└" : "├";
         Console.WriteLine($"    {Dim(prefix)} {text}");
     }
-    
+
     /// <summary>
     /// Writes a numbered item during streaming.
     /// </summary>
@@ -97,7 +97,7 @@ public static class ConsoleUx
     {
         Console.WriteLine($"    {Dim($"[{number}]")} {Green("✓")} {text}");
     }
-    
+
     private static async Task RunSpinnerAsync(string message, CancellationToken ct)
     {
         var frame = 0;
@@ -116,7 +116,7 @@ public static class ConsoleUx
         }
         catch (OperationCanceledException) { }
     }
-    
+
     private static void ClearLine()
     {
         if (_supportsAnsi)
@@ -135,7 +135,7 @@ public static class ConsoleUx
         if (duration < TimeSpan.FromSeconds(1)) return $"{duration.TotalMilliseconds:F0}ms";
         return $"{duration.TotalSeconds:F1}s";
     }
-    
+
     public class StreamingProgress : IDisposable
     {
         private readonly string _message;
@@ -143,15 +143,14 @@ public static class ConsoleUx
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _spinnerTask;
         private int _count;
-        private string? _currentItem;
         private string? _lastQueuedItem;
         private readonly System.Collections.Concurrent.ConcurrentQueue<string> _pendingItems = new();
-        
+
         internal StreamingProgress(string message, bool supportsAnsi)
         {
             _message = message;
             _supportsAnsi = supportsAnsi;
-            
+
             if (_supportsAnsi)
             {
                 _spinnerTask = RunAsync();
@@ -162,14 +161,13 @@ public static class ConsoleUx
                 _spinnerTask = Task.CompletedTask;
             }
         }
-        
+
         /// <summary>
         /// Updates the progress with a new item.
         /// </summary>
         public void Update(string item)
         {
             Interlocked.Increment(ref _count);
-            _currentItem = item;
 
             // Queue the item for printing. This avoids losing updates when the operation
             // completes before the next spinner tick, and also allows printing in
@@ -180,12 +178,12 @@ public static class ConsoleUx
                 _pendingItems.Enqueue(item);
             }
         }
-        
+
         /// <summary>
         /// Gets the current count.
         /// </summary>
         public int Count => _count;
-        
+
         private async Task RunAsync()
         {
             var frame = 0;
@@ -194,7 +192,7 @@ public static class ConsoleUx
                 while (!_cts.IsCancellationRequested)
                 {
                     var countStr = _count > 0 ? $" ({_count})" : "";
-                    
+
                     lock (_lock)
                     {
                         while (_pendingItems.TryDequeue(out var nextItem))
@@ -202,7 +200,7 @@ public static class ConsoleUx
                             ClearLine();
                             Console.WriteLine($"    {Dim("→")} {nextItem}");
                         }
-                        
+
                         ClearLine();
                         Console.Write($"  {Cyan(SpinnerFrames[frame])} {_message}{Dim(countStr)}");
                     }
@@ -212,7 +210,7 @@ public static class ConsoleUx
             }
             catch (OperationCanceledException) { }
         }
-        
+
         /// <summary>
         /// Completes the progress with success.
         /// </summary>
@@ -220,7 +218,7 @@ public static class ConsoleUx
         {
             _cts.Cancel();
             try { _spinnerTask.Wait(100); } catch { } // 100ms timeout
-            
+
             if (_supportsAnsi) ClearLine();
 
             lock (_lock)
@@ -230,11 +228,11 @@ public static class ConsoleUx
                     Console.WriteLine($"    {Dim("→")} {nextItem}");
                 }
             }
-            
+
             var text = summary ?? $"{_message} ({_count})";
             Console.WriteLine($"  {Green("✓")} {text}");
         }
-        
+
         /// <summary>
         /// Completes the progress with failure.
         /// </summary>
@@ -242,7 +240,7 @@ public static class ConsoleUx
         {
             _cts.Cancel();
             try { _spinnerTask.Wait(100); } catch { } // 100ms timeout
-            
+
             if (_supportsAnsi) ClearLine();
 
             lock (_lock)
@@ -254,7 +252,7 @@ public static class ConsoleUx
             }
             Console.WriteLine($"  {Red("✗")} {message ?? _message}");
         }
-        
+
         public void Dispose()
         {
             _cts.Cancel();

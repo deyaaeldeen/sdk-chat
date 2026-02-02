@@ -210,13 +210,13 @@ docker run --rm sdk-chat:latest doctor
 | Image | Dockerfile | Size | Purpose |
 |-------|------------|------|--------|
 | `sdk-chat-dev` | `Dockerfile` | ~1.5GB | Development/testing |
-| `sdk-chat-demo` | `Dockerfile.demo` | ~2GB | Demo recording (VHS) |
+| `sdk-chat-demo` | `demo/Dockerfile` | ~2GB | Demo recording (VHS) |
 | `sdk-chat:latest` | `Dockerfile.release` | ~800MB | Production |
 
 ```bash
 # Build images
 docker build -t sdk-chat-dev .                          # Dev
-docker build -f Dockerfile.demo -t sdk-chat-demo .      # Demo
+docker build -f demo/Dockerfile -t sdk-chat-demo .      # Demo
 docker build -f Dockerfile.release -t sdk-chat:latest . # Production
 ```
 

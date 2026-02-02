@@ -15,17 +15,17 @@ public static class SdkChatTelemetry
     /// Activity source name for SDK Chat operations.
     /// </summary>
     public const string SourceName = "Microsoft.SdkChat";
-    
+
     /// <summary>
     /// Activity source version.
     /// </summary>
     public const string SourceVersion = "1.0.0";
-    
+
     /// <summary>
     /// Shared ActivitySource for all SDK Chat operations.
     /// </summary>
     public static readonly ActivitySource Source = new(SourceName, SourceVersion);
-    
+
     /// <summary>
     /// Starts an activity for AI prompt operations.
     /// </summary>
@@ -37,7 +37,7 @@ public static class SdkChatTelemetry
             activity?.SetTag("ai.model", model);
         return activity;
     }
-    
+
     /// <summary>
     /// Starts an activity for SDK scanning operations.
     /// </summary>
@@ -47,7 +47,7 @@ public static class SdkChatTelemetry
         activity?.SetTag("sdk.path", path);
         return activity;
     }
-    
+
     /// <summary>
     /// Starts an activity for API extraction operations.
     /// </summary>
@@ -58,7 +58,7 @@ public static class SdkChatTelemetry
         activity?.SetTag("sdk.path", path);
         return activity;
     }
-    
+
     /// <summary>
     /// Starts an activity for sample generation operations.
     /// </summary>
@@ -70,7 +70,7 @@ public static class SdkChatTelemetry
             activity?.SetTag("language", language);
         return activity;
     }
-    
+
     /// <summary>
     /// Starts an activity for MCP tool invocation.
     /// </summary>
@@ -80,7 +80,7 @@ public static class SdkChatTelemetry
         activity?.SetTag("mcp.tool", toolName);
         return activity;
     }
-    
+
     /// <summary>
     /// Starts an activity for ACP session operations.
     /// </summary>
@@ -91,26 +91,26 @@ public static class SdkChatTelemetry
         activity?.SetTag("acp.operation", operation);
         return activity;
     }
-    
+
     /// <summary>
     /// Records an error on the current activity.
     /// </summary>
     public static void RecordError(Activity? activity, Exception ex)
     {
         if (activity == null) return;
-        
+
         activity.SetStatus(ActivityStatusCode.Error, ex.Message);
         activity.SetTag("error.type", ex.GetType().FullName);
         activity.SetTag("error.message", ex.Message);
     }
-    
+
     /// <summary>
     /// Records sample generation metrics.
     /// </summary>
     public static void RecordSampleMetrics(Activity? activity, int sampleCount, int promptTokens, int responseTokens)
     {
         if (activity == null) return;
-        
+
         activity.SetTag("samples.count", sampleCount);
         activity.SetTag("ai.tokens.prompt", promptTokens);
         activity.SetTag("ai.tokens.response", responseTokens);

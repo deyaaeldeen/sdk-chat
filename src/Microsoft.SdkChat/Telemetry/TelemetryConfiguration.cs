@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using OpenTelemetry.Trace;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace Microsoft.SdkChat.Telemetry;
 
@@ -47,7 +47,7 @@ public static class TelemetryConfiguration
             // Check for explicit console export request
             var consoleExport = Environment.GetEnvironmentVariable("SDK_CLI_TELEMETRY_CONSOLE");
             var tracesExporter = Environment.GetEnvironmentVariable("OTEL_TRACES_EXPORTER");
-            
+
             if (string.Equals(consoleExport, "true", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(tracesExporter, "console", StringComparison.OrdinalIgnoreCase))
             {

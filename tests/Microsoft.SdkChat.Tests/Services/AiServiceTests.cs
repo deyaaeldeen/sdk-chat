@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.SdkChat.Helpers;
+using Microsoft.SdkChat.Configuration;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
 using Xunit;
@@ -21,12 +20,12 @@ public class AiServiceTests : IDisposable
 
     public AiServiceTests()
     {
-        var settings = new AiProviderSettings
+        var options = new SdkChatOptions
         {
             UseOpenAi = false,
             Model = "test-model"
         };
-        _service = new AiService(NullLogger<AiService>.Instance, settings);
+        _service = new AiService(NullLogger<AiService>.Instance, options);
     }
 
     public void Dispose()
@@ -47,8 +46,8 @@ public class AiServiceTests : IDisposable
     {
         Assert.False(_service.IsUsingOpenAi);
 
-        var openAiSettings = new AiProviderSettings { UseOpenAi = true };
-        var openAiService = new AiService(NullLogger<AiService>.Instance, openAiSettings);
+        var openAiOptions = new SdkChatOptions { UseOpenAi = true, ApiKey = "test-key" };
+        var openAiService = new AiService(NullLogger<AiService>.Instance, openAiOptions);
         Assert.True(openAiService.IsUsingOpenAi);
         await openAiService.DisposeAsync();
     }
@@ -124,8 +123,8 @@ public class AiServiceSchemaTests
     public void GeneratedSample_HasExpectedSchema()
     {
         // This tests the schema caching indirectly - running twice should use cache
-        var settings = new AiProviderSettings { UseOpenAi = false, Model = "test" };
-        var service = new AiService(NullLogger<AiService>.Instance, settings);
+        var options = new SdkChatOptions { UseOpenAi = false, Model = "test" };
+        var service = new AiService(NullLogger<AiService>.Instance, options);
         _ = service; // Use the variable
 
         // The schema is generated during StreamItemsAsync, but we can verify
@@ -141,9 +140,9 @@ public class AiServiceSchemaTests
 }
 
 /// <summary>
-/// Tests for AiProviderSettings configuration.
+/// Tests for SdkChatOptions configuration.
 /// </summary>
-public class AiProviderSettingsTests
+public class SdkChatOptionsTests
 {
     [Fact]
     public void FromEnvironment_ReadsVariables()
@@ -157,9 +156,9 @@ public class AiProviderSettingsTests
             Environment.SetEnvironmentVariable("SDK_CLI_USE_OPENAI", "false");
             Environment.SetEnvironmentVariable("SDK_CLI_MODEL", "env-test-model");
 
-            var settings = AiProviderSettings.FromEnvironment();
+            var options = SdkChatOptions.FromEnvironment();
 
-            Assert.Equal("env-test-model", settings.Model);
+            Assert.Equal("env-test-model", options.Model);
         }
         finally
         {
@@ -170,12 +169,12 @@ public class AiProviderSettingsTests
     }
 
     [Fact]
-    public void GetModel_WithOverride_PrefersOverride()
+    public void GetEffectiveModel_WithOverride_PrefersOverride()
     {
-        var settings = new AiProviderSettings { Model = "default-model" };
-        
-        Assert.Equal("override", settings.GetModel("override"));
-        Assert.Equal("default-model", settings.GetModel(null));
-        Assert.Equal("default-model", settings.GetModel(""));
+        var options = new SdkChatOptions { Model = "default-model" };
+
+        Assert.Equal("override", options.GetEffectiveModel("override"));
+        Assert.Equal("default-model", options.GetEffectiveModel(null));
+        Assert.Equal("default-model", options.GetEffectiveModel(""));
     }
 }

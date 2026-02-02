@@ -2,10 +2,10 @@
 // Licensed under the MIT License.
 
 using System.Text;
+using ApiExtractor.Contracts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using ApiExtractor.Contracts;
 
 namespace ApiExtractor.DotNet;
 
@@ -22,7 +22,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {
         var normalizedPath = Path.GetFullPath(codePath);
-        
+
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
 
@@ -33,7 +33,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
         // Find all C# files in the code path (exclude bin/obj)
         var files = Directory.EnumerateFiles(normalizedPath, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains("/obj/") && !f.Contains("\\obj\\") 
+            .Where(f => !f.Contains("/obj/") && !f.Contains("\\obj\\")
                      && !f.Contains("/bin/") && !f.Contains("\\bin\\"))
             .ToList();
 
@@ -43,7 +43,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         foreach (var file in files)
         {
             ct.ThrowIfCancellationRequested();
-            
+
             var code = await File.ReadAllTextAsync(file, ct);
             var tree = CSharpSyntaxTree.ParseText(code, cancellationToken: ct);
             var root = await tree.GetRootAsync(ct);
@@ -51,7 +51,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
             // Use Roslyn to find all method invocations
             var invocations = root.DescendantNodes().OfType<InvocationExpressionSyntax>();
-            
+
             foreach (var invocation in invocations)
             {
                 var (clientType, methodName) = ExtractMethodCall(invocation, clientMethods);
@@ -88,10 +88,10 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     public string Format(UsageIndex index)
     {
         var sb = new StringBuilder();
-        
+
         sb.AppendLine($"Analyzed {index.FileCount} files.");
         sb.AppendLine();
-        
+
         if (index.CoveredOperations.Count > 0)
         {
             sb.AppendLine("COVERED OPERATIONS (already have examples):");
@@ -153,7 +153,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         {
             var methodName = memberAccess.Name.Identifier.Text;
             var receiverName = GetReceiverName(memberAccess.Expression);
-            
+
             if (receiverName != null)
             {
                 // Try to match receiver to a known client type
@@ -163,22 +163,22 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                         .Replace("Client", "")
                         .Replace("Service", "")
                         .Replace("Manager", "");
-                    
+
                     // Match patterns: chatClient, _client, client, service
-                    var isClientReceiver = 
+                    var isClientReceiver =
                         receiverName.Contains(clientBaseName, StringComparison.OrdinalIgnoreCase) ||
                         receiverName.EndsWith("client", StringComparison.OrdinalIgnoreCase) ||
                         receiverName.EndsWith("service", StringComparison.OrdinalIgnoreCase) ||
-                        receiverName.StartsWith("_", StringComparison.Ordinal);
-                    
+                        receiverName.StartsWith('_');
+
                     if (isClientReceiver)
                     {
                         // Check if method matches (with or without Async suffix)
                         if (methods.Contains(methodName))
                             return (clientType, methodName);
-                        
-                        var withoutAsync = methodName.EndsWith("Async") 
-                            ? methodName[..^5] 
+
+                        var withoutAsync = methodName.EndsWith("Async")
+                            ? methodName[..^5]
                             : methodName;
                         if (methods.Contains(withoutAsync))
                             return (clientType, methodName);
@@ -191,7 +191,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             {
                 if (methods.Contains(methodName))
                     return (clientType, methodName);
-                
+
                 var withoutAsync = methodName.EndsWith("Async") ? methodName[..^5] : methodName;
                 if (methods.Contains(withoutAsync))
                     return (clientType, methodName);
@@ -230,7 +230,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             {
                 var key = $"{clientType}.{method}";
                 var keyAsync = $"{clientType}.{method}Async";
-                
+
                 if (!seenOperations.Contains(key) && !seenOperations.Contains(keyAsync))
                 {
                     uncovered.Add(new UncoveredOperation

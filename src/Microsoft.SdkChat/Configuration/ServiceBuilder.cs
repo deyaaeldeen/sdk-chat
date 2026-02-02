@@ -1,7 +1,9 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.SdkChat.Helpers;
-using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
 using Microsoft.SdkChat.Tools.Package.Samples;
 
@@ -15,12 +17,12 @@ public static class ServiceBuilder
 
         services.AddLogging(builder => builder.AddConsole());
 
-        var aiSettings = AiProviderSettings.FromEnvironment();
+        var options = SdkChatOptions.FromEnvironment();
         if (useOpenAi)
         {
-            aiSettings = aiSettings with { UseOpenAi = true };
+            options.UseOpenAi = true;
         }
-        services.AddSingleton(aiSettings);
+        services.AddSingleton(options);
 
         services.AddSingleton<AiDebugLogger>();
         services.AddSingleton<AiService>();

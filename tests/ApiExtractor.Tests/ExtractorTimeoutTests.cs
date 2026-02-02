@@ -97,10 +97,10 @@ public class ExtractorTimeoutTests : IDisposable
         ExtractorTimeout.Reset();
 
         var first = ExtractorTimeout.Value;
-        
+
         // Change env var after first read
         Environment.SetEnvironmentVariable(ExtractorTimeout.EnvVarName, "999");
-        
+
         var second = ExtractorTimeout.Value;
 
         // Should still be cached value

@@ -11,12 +11,12 @@ public static class ClientMethods
     // File system methods
     public const string FsReadTextFile = "fs/read_text_file";
     public const string FsWriteTextFile = "fs/write_text_file";
-    
+
     // Session methods
     public const string SessionRequestPermission = "session/request_permission";
     public const string SessionRequestInput = "session/request_input";
     public const string SessionUpdate = "session/update";
-    
+
     // Terminal methods
     public const string TerminalCreate = "terminal/create";
     public const string TerminalOutput = "terminal/output";

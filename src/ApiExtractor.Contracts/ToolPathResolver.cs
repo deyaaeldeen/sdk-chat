@@ -18,14 +18,14 @@ public static partial class ToolPathResolver
     /// Example: SDK_CHAT_PYTHON_PATH=/usr/local/bin/python3
     /// </summary>
     private const string EnvVarPrefix = "SDK_CHAT_";
-    
+
     /// <summary>
     /// Regex pattern for validating tool names. Only alphanumeric, hyphen, underscore, and dot allowed.
     /// This prevents command injection attacks when the tool name is used in process arguments.
     /// </summary>
     [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")]
     private static partial Regex SafeToolNamePattern();
-    
+
     /// <summary>
     /// Regex pattern for validating command paths. Allows path separators in addition to safe chars.
     /// Permits paths starting with /, ~, or drive letters (C:\).
@@ -33,7 +33,7 @@ public static partial class ToolPathResolver
     /// </summary>
     [GeneratedRegex(@"^[a-zA-Z0-9/~.][a-zA-Z0-9._\-/\\:~]*$")]
     private static partial Regex SafePathPattern();
-    
+
     /// <summary>
     /// Validates that a tool name or command contains only safe characters.
     /// Throws ArgumentException if validation fails.
@@ -46,7 +46,7 @@ public static partial class ToolPathResolver
     {
         if (string.IsNullOrWhiteSpace(value))
             throw new ArgumentException("Value cannot be null or whitespace.", paramName);
-        
+
         var pattern = allowPath ? SafePathPattern() : SafeToolNamePattern();
         if (!pattern.IsMatch(value))
         {
@@ -68,11 +68,11 @@ public static partial class ToolPathResolver
     {
         // SECURITY: Validate tool name to prevent command injection
         ValidateSafeInput(toolName, nameof(toolName), allowPath: false);
-        
+
         // 1. Check environment variable override first
         var envVar = $"{EnvVarPrefix}{toolName.ToUpperInvariant()}_PATH";
         var envPath = Environment.GetEnvironmentVariable(envVar);
-        
+
         if (!string.IsNullOrEmpty(envPath))
         {
             // SECURITY: Validate environment path before use
@@ -95,7 +95,7 @@ public static partial class ToolPathResolver
             // SECURITY: Skip candidates with unsafe characters
             if (!SafePathPattern().IsMatch(candidate))
                 continue;
-                
+
             if (ValidateExecutable(candidate, versionArgs))
             {
                 return candidate;
@@ -110,26 +110,26 @@ public static partial class ToolPathResolver
     /// Use this method instead of Resolve() when you need warning information.
     /// </summary>
     public static ToolResolutionResult ResolveWithDetails(
-        string toolName, 
-        string[] defaultCandidates, 
+        string toolName,
+        string[] defaultCandidates,
         string versionArgs = "--version")
     {
         // SECURITY: Validate tool name to prevent command injection
         ValidateSafeInput(toolName, nameof(toolName), allowPath: false);
-        
+
         // 1. Check environment variable override first
         var envVar = $"{EnvVarPrefix}{toolName.ToUpperInvariant()}_PATH";
         var envPath = Environment.GetEnvironmentVariable(envVar);
-        
+
         if (!string.IsNullOrEmpty(envPath))
         {
             // SECURITY: Validate environment path before use
             if (!SafePathPattern().IsMatch(envPath))
             {
-                return new ToolResolutionResult(null, null, false, 
+                return new ToolResolutionResult(null, null, false,
                     $"{envVar}={envPath} contains invalid characters and was rejected for security");
             }
-            
+
             if (ValidateExecutable(envPath, versionArgs))
             {
                 var absPath = GetAbsolutePath(envPath);
@@ -137,7 +137,7 @@ public static partial class ToolPathResolver
                 return new ToolResolutionResult(envPath, absPath, true, warning);
             }
             // Return detailed error for invalid env override
-            return new ToolResolutionResult(null, null, false, 
+            return new ToolResolutionResult(null, null, false,
                 $"{envVar}={envPath} is not a valid {toolName} executable");
         }
 
@@ -147,7 +147,7 @@ public static partial class ToolPathResolver
             // SECURITY: Skip candidates with unsafe characters
             if (!SafePathPattern().IsMatch(candidate))
                 continue;
-                
+
             if (ValidateExecutable(candidate, versionArgs))
             {
                 var absolutePath = GetAbsolutePath(candidate);
@@ -178,7 +178,7 @@ public static partial class ToolPathResolver
 
             using var process = Process.Start(psi);
             if (process == null) return false;
-            
+
             process.WaitForExit(3000);
             return process.ExitCode == 0;
         }
@@ -198,7 +198,7 @@ public static partial class ToolPathResolver
         // but we verify here as well since this method uses shell commands
         if (string.IsNullOrWhiteSpace(command) || !SafePathPattern().IsMatch(command))
             return null;
-        
+
         try
         {
             var whichCmd = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "where" : "which";
@@ -213,10 +213,10 @@ public static partial class ToolPathResolver
 
             using var process = Process.Start(psi);
             if (process == null) return null;
-            
+
             var output = process.StandardOutput.ReadToEnd();
             process.WaitForExit(1000);
-            
+
             return process.ExitCode == 0 ? output.Trim().Split('\n')[0].Trim() : null;
         }
         catch
@@ -233,21 +233,21 @@ public static partial class ToolPathResolver
         if (string.IsNullOrEmpty(absolutePath)) return null;
 
         var trustedPrefixes = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new[] { 
-                @"C:\Program Files", 
-                @"C:\Program Files (x86)", 
+            ? new[] {
+                @"C:\Program Files",
+                @"C:\Program Files (x86)",
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 @"C:\Windows"
               }
-            : new[] { 
-                "/usr/bin", 
-                "/usr/local/bin", 
-                "/opt", 
+            : new[] {
+                "/usr/bin",
+                "/usr/local/bin",
+                "/opt",
                 "/home",
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
               };
 
-        var isTrusted = trustedPrefixes.Any(prefix => 
+        var isTrusted = trustedPrefixes.Any(prefix =>
             absolutePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
         return isTrusted ? null : $"{toolName} found at non-standard location: {absolutePath}";

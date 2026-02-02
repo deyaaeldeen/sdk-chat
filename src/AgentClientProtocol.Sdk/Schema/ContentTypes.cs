@@ -23,7 +23,7 @@ public record TextContent : ContentBlock
 {
     [JsonPropertyName("text")]
     public required string Text { get; init; }
-    
+
     [JsonPropertyName("annotations")]
     public Annotations? Annotations { get; init; }
 }
@@ -35,10 +35,10 @@ public record ImageContent : ContentBlock
 {
     [JsonPropertyName("data")]
     public required string Data { get; init; }
-    
+
     [JsonPropertyName("mimeType")]
     public required string MimeType { get; init; }
-    
+
     [JsonPropertyName("annotations")]
     public Annotations? Annotations { get; init; }
 }
@@ -50,10 +50,10 @@ public record AudioContent : ContentBlock
 {
     [JsonPropertyName("data")]
     public required string Data { get; init; }
-    
+
     [JsonPropertyName("mimeType")]
     public required string MimeType { get; init; }
-    
+
     [JsonPropertyName("annotations")]
     public Annotations? Annotations { get; init; }
 }
@@ -65,7 +65,7 @@ public record EmbeddedResource : ContentBlock
 {
     [JsonPropertyName("resource")]
     public required ResourceContents Resource { get; init; }
-    
+
     [JsonPropertyName("annotations")]
     public Annotations? Annotations { get; init; }
 }
@@ -80,7 +80,7 @@ public abstract record ResourceContents
 {
     [JsonPropertyName("uri")]
     public required string Uri { get; init; }
-    
+
     [JsonPropertyName("mimeType")]
     public string? MimeType { get; init; }
 }
@@ -104,10 +104,10 @@ public record Annotations
 {
     [JsonPropertyName("audience")]
     public string[]? Audience { get; init; }
-    
+
     [JsonPropertyName("priority")]
     public double? Priority { get; init; }
-    
+
     [JsonPropertyName("lastModified")]
     public string? LastModified { get; init; }
 }
@@ -119,7 +119,7 @@ public record SessionNotification
 {
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
-    
+
     [JsonPropertyName("update")]
     public required SessionUpdate Update { get; init; }
 }
@@ -145,19 +145,19 @@ public record ToolCallUpdate : SessionUpdate
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
-    
+
     [JsonPropertyName("name")]
     public required string Name { get; init; }
-    
+
     [JsonPropertyName("kind")]
     public string? Kind { get; init; }
-    
+
     [JsonPropertyName("status")]
     public required string Status { get; init; }
-    
+
     [JsonPropertyName("arguments")]
     public JsonElement? Arguments { get; init; }
-    
+
     [JsonPropertyName("content")]
     public ContentBlock[]? Content { get; init; }
 }
@@ -166,10 +166,10 @@ public record ToolCallStatusUpdate : SessionUpdate
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
-    
+
     [JsonPropertyName("status")]
     public required string Status { get; init; }
-    
+
     [JsonPropertyName("content")]
     public ContentBlock[]? Content { get; init; }
 }
@@ -184,10 +184,10 @@ public record PlanEntry
 {
     [JsonPropertyName("title")]
     public required string Title { get; init; }
-    
+
     [JsonPropertyName("status")]
     public required string Status { get; init; }
-    
+
     [JsonPropertyName("priority")]
     public string? Priority { get; init; }
 }
@@ -227,10 +227,10 @@ public record Diff
 {
     [JsonPropertyName("path")]
     public required string Path { get; init; }
-    
+
     [JsonPropertyName("oldText")]
     public string? OldText { get; init; }
-    
+
     [JsonPropertyName("newText")]
     public required string NewText { get; init; }
 }

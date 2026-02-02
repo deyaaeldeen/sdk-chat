@@ -18,20 +18,14 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
     private readonly ILogger? _logger;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private int _disposed;
-    
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-    };
-    
+
     public NdJsonStream(TextReader input, TextWriter output, ILogger? logger = null)
     {
         _input = input;
         _output = output;
         _logger = logger;
     }
-    
+
     /// <summary>
     /// Create stream from stdin/stdout.
     /// </summary>
@@ -41,7 +35,7 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
         var output = new StreamWriter(Console.OpenStandardOutput(), Encoding.UTF8) { AutoFlush = true };
         return new NdJsonStream(input, output, logger);
     }
-    
+
     /// <summary>
     /// Create stream from arbitrary streams.
     /// </summary>
@@ -51,7 +45,7 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
         var writer = new StreamWriter(output, Encoding.UTF8) { AutoFlush = true };
         return new NdJsonStream(reader, writer, logger);
     }
-    
+
     public async ValueTask<JsonRpcMessageBase?> ReadAsync(CancellationToken ct = default)
     {
         // Resilient read loop: skip malformed lines instead of terminating connection
@@ -60,32 +54,32 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
             var line = await _input.ReadLineAsync(ct).ConfigureAwait(false);
             if (line == null) return null; // End of stream
             if (string.IsNullOrWhiteSpace(line)) continue; // Skip empty lines
-            
+
             _logger?.LogTrace("ACP recv: {Message}", line);
-            
+
             try
             {
                 using var doc = JsonDocument.Parse(line);
                 var root = doc.RootElement;
-                
+
                 // Check if it's a response (has result or error)
                 if (root.TryGetProperty("result", out _) || root.TryGetProperty("error", out _))
                 {
-                    return JsonSerializer.Deserialize<JsonRpcResponse>(line, JsonOptions);
+                    return JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcResponse);
                 }
-                
+
                 // Check if it's a request (has id and method)
                 if (root.TryGetProperty("id", out _) && root.TryGetProperty("method", out _))
                 {
-                    return JsonSerializer.Deserialize<JsonRpcRequest>(line, JsonOptions);
+                    return JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcRequest);
                 }
-                
+
                 // Otherwise it's a notification (method only)
                 if (root.TryGetProperty("method", out _))
                 {
-                    return JsonSerializer.Deserialize<JsonRpcNotification>(line, JsonOptions);
+                    return JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcNotification);
                 }
-                
+
                 _logger?.LogWarning("Unknown message format, skipping: {Message}", line);
                 // Continue reading instead of returning null
             }
@@ -95,14 +89,14 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
                 // Continue reading instead of returning null - connection stays alive
             }
         }
-        
+
         return null;
     }
-    
+
     public async ValueTask WriteAsync(JsonRpcMessageBase message, CancellationToken ct = default)
     {
-        var json = JsonSerializer.Serialize(message, message.GetType(), JsonOptions);
-        
+        var json = JsonSerializer.Serialize(message, message.GetType(), AcpJsonContext.Default);
+
         await _writeLock.WaitAsync(ct);
         try
         {
@@ -114,12 +108,12 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
             _writeLock.Release();
         }
     }
-    
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
-        
+
         // Wait for any in-flight writes to complete before disposing
         try
         {
@@ -129,7 +123,7 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
         {
             // Already disposed, that's fine
         }
-        
+
         try
         {
             _input.Dispose();

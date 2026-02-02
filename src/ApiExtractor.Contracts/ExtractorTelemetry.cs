@@ -14,12 +14,12 @@ public static class ExtractorTelemetry
     /// Activity source name for API extractor operations.
     /// </summary>
     public const string SourceName = "ApiExtractor";
-    
+
     /// <summary>
     /// Activity source version.
     /// </summary>
     public const string SourceVersion = "1.0.0";
-    
+
     /// <summary>
     /// Shared ActivitySource for all extractor operations.
     /// </summary>
@@ -78,7 +78,7 @@ public static class ExtractorTelemetry
         activity.SetTag("exit_code", exitCode);
         activity.SetTag("duration_ms", duration.TotalMilliseconds);
         activity.SetTag("timed_out", timedOut);
-        
+
         if (exitCode != 0 || timedOut)
         {
             activity.SetStatus(ActivityStatusCode.Error, timedOut ? "Process timed out" : $"Exit code: {exitCode}");

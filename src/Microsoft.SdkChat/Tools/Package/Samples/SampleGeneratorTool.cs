@@ -1,14 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Runtime.CompilerServices;
 using System.Diagnostics;
-using System.Text;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
-using Microsoft.SdkChat.Services.Languages;
 using Microsoft.SdkChat.Services.Languages.Samples;
 
 namespace Microsoft.SdkChat.Tools.Package.Samples;
@@ -18,8 +16,7 @@ public class SampleGeneratorTool
     private readonly IAiService _aiService;
     private readonly FileHelper _fileHelper;
     private readonly ConfigurationHelper _configHelper;
-    private readonly ILogger<SampleGeneratorTool> _logger;
-    
+
     public SampleGeneratorTool(
         IAiService aiService,
         FileHelper fileHelper,
@@ -29,9 +26,9 @@ public class SampleGeneratorTool
         _aiService = aiService;
         _fileHelper = fileHelper;
         _configHelper = configHelper;
-        _logger = logger;
+        // logger available for future debugging if needed
     }
-    
+
     public async Task<int> ExecuteAsync(
         string sdkPath,
         string? outputPath,
@@ -52,9 +49,9 @@ public class SampleGeneratorTool
             ConsoleUx.Error($"SDK path does not exist: {sdkPath}");
             return 1;
         }
-        
+
         Console.WriteLine();
-        
+
         // Auto-detect source and samples folders with spinner
         var scanStopwatch = Stopwatch.StartNew();
         var sdkInfo = await ConsoleUx.SpinnerAsync("Scanning SDK...", async () =>
@@ -63,7 +60,7 @@ public class SampleGeneratorTool
             return SdkInfo.Scan(sdkPath);
         }, cancellationToken);
         scanStopwatch.Stop();
-        
+
         // Existing samples are always read from the SDK's detected samples folder (for context)
         // Output is written to the user-specified path or the SDK's samples folder
         var existingSamplesPath = sdkInfo.SamplesFolder;
@@ -71,12 +68,12 @@ public class SampleGeneratorTool
         var existingCount = existingSamplesPath is not null && Directory.Exists(existingSamplesPath)
             ? SdkInfo.CountFilesSafely(existingSamplesPath, "*" + (sdkInfo.FileExtension ?? ".*"))
             : 0;
-        
+
         ConsoleUx.Info($"Detected {ConsoleUx.Bold(sdkInfo.LanguageName ?? "unknown")} SDK");
         ConsoleUx.Info($"Source: {sdkInfo.SourceFolder}");
         if (existingCount > 0)
             ConsoleUx.Info($"Existing samples: {existingCount}");
-        
+
         // Detect or parse language
         SdkLanguage? detectedLanguage;
         if (!string.IsNullOrEmpty(language))
@@ -89,49 +86,49 @@ public class SampleGeneratorTool
         {
             detectedLanguage = sdkInfo.Language;
         }
-        
+
         if (detectedLanguage is null)
         {
             ConsoleUx.Error("Could not detect language. Use --language to specify.");
             return 1;
         }
-        
+
         // Load config if present
         var config = await _configHelper.LoadConfigAsync(sdkPath, cancellationToken);
-        
+
         // Get language context
         var context = CreateLanguageContext(detectedLanguage.Value);
-        
+
         // Use specified budget or default (128K tokens = 512K chars)
         var contextBudget = budget ?? SampleConstants.DefaultContextCharacters;
-        
+
         // Count existing samples
         var filesStopwatch = Stopwatch.StartNew();
         var existingSamplesCount = await ConsoleUx.SpinnerAsync(
-            "Scanning files...", 
+            "Scanning files...",
             () => CountExistingSamplesAsync(existingSamplesPath, context),
             cancellationToken);
         filesStopwatch.Stop();
-        
+
         // Build system prompt with SDK name for clarity
         var systemPrompt = BuildSystemPrompt(context, sdkInfo.SdkName);
-        
+
         // Determine output folder
         var outputDir = outputPath ?? sdkInfo.SuggestedSamplesFolder;
         if (!dryRun)
         {
             Directory.CreateDirectory(outputDir);
         }
-        
+
         // Show output folder
         ConsoleUx.Info($"Output: {outputDir}");
-        
+
         // Show which AI provider is being used
         var providerName = _aiService.IsUsingOpenAi ? "OpenAI" : "GitHub Copilot";
         var effectiveModel = _aiService.GetEffectiveModel(model);
-        
+
         Console.WriteLine();
-        
+
         // Spinners are staged: prompt prep (materialization) then generation.
         ConsoleUx.StreamingProgress? preparingProgress = null;
         ConsoleUx.StreamingProgress? progress = null;
@@ -140,11 +137,11 @@ public class SampleGeneratorTool
         var promptTokens = (int?)null;
         var promptPrepStopwatch = Stopwatch.StartNew();
         promptPrepStopwatch.Stop();
-        
+
         // Named event handlers for proper cleanup (prevents memory leaks)
         int? responseTokens = null;
         TimeSpan? generationDuration = null;
-        
+
         void OnPromptReady(object? sender, AiPromptReadyEventArgs args)
         {
             promptTokens = args.EstimatedTokens;
@@ -166,158 +163,158 @@ public class SampleGeneratorTool
                     ? $"Generating with {providerName} ({modelName})..."
                     : $"Generating with {providerName}...");
         }
-        
+
         void OnStreamComplete(object? sender, AiStreamCompleteEventArgs args)
         {
             responseTokens = args.EstimatedResponseTokens;
             generationDuration = args.Duration;
         }
-        
+
         // Register event handlers - PromptReady fires during materialization inside StreamItemsAsync
         _aiService.PromptReady += OnPromptReady;
         _aiService.StreamComplete += OnStreamComplete;
-        
-        try
-        {
-        // Create streaming user prompt (materialization happens inside AiService)
-        var userPromptStream = StreamUserPromptAsync(prompt, count ?? 5, existingSamplesCount > 0, sdkInfo.SourceFolder, existingSamplesPath, outputDir, context, config, contextBudget, cancellationToken);
-        
-        List<GeneratedSample> samples = [];
-
-        // Start a spinner while AiService materializes the streamed user prompt.
-        preparingProgress = ConsoleUx.StartStreaming("Preparing prompt...");
-        promptPrepStopwatch.Restart();
-
-        var generationStopwatch = Stopwatch.StartNew();
 
         try
         {
-            // Stream parsed samples as they complete
-            await foreach (var sample in _aiService.StreamItemsAsync<GeneratedSample>(
-                systemPrompt, userPromptStream, model, null, cancellationToken))
+            // Create streaming user prompt (materialization happens inside AiService)
+            var userPromptStream = StreamUserPromptAsync(prompt, count ?? 5, existingSamplesCount > 0, sdkInfo.SourceFolder, existingSamplesPath, outputDir, context, config, contextBudget, cancellationToken);
+
+            List<GeneratedSample> samples = [];
+
+            // Start a spinner while AiService materializes the streamed user prompt.
+            preparingProgress = ConsoleUx.StartStreaming("Preparing prompt...");
+            promptPrepStopwatch.Restart();
+
+            var generationStopwatch = Stopwatch.StartNew();
+
+            try
             {
-                if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
+                // Stream parsed samples as they complete
+                await foreach (var sample in _aiService.StreamItemsAsync<GeneratedSample>(
+                    systemPrompt, userPromptStream, model, null, cancellationToken))
                 {
-                    samples.Add(sample);
-                    // Use FilePath if provided, otherwise generate from Name
+                    if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
+                    {
+                        samples.Add(sample);
+                        // Use FilePath if provided, otherwise generate from Name
+                        var relativePath = !string.IsNullOrEmpty(sample.FilePath)
+                            ? SanitizePath(sample.FilePath, context.FileExtension)
+                            : SanitizeName(sample.Name) + context.FileExtension;
+                        var fullPath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
+                        progress?.Update(fullPath);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Propagate cancellation - don't swallow it
+                preparingProgress?.Dispose();
+                progress?.Dispose();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                if (promptPrepStopwatch.IsRunning)
+                {
+                    promptPrepStopwatch.Stop();
+                }
+
+                preparingProgress?.Fail("Preparing prompt failed");
+                preparingProgress?.Dispose();
+                preparingProgress = null;
+
+                progress?.Fail("Generation failed");
+                progress?.Dispose();
+                ConsoleUx.Error(ex.Message);
+                return 1;
+            }
+
+            generationStopwatch.Stop();
+
+            // Complete the spinner
+            if (samples.Count > 0)
+            {
+                var effectiveGenerationDuration = generationDuration;
+                if (effectiveGenerationDuration is null || effectiveGenerationDuration == TimeSpan.Zero)
+                {
+                    effectiveGenerationDuration = generationStopwatch.Elapsed;
+                }
+
+                progress?.Complete($"Generated {samples.Count} sample(s) ({FormatDuration(effectiveGenerationDuration.Value)})");
+            }
+            else
+            {
+                progress?.Fail("No samples generated");
+                progress?.Dispose();
+                return 1;
+            }
+
+            progress?.Dispose();
+
+            // Show response token usage
+            if (responseTokens != null)
+            {
+                ConsoleUx.Info($"Response: {FormatTokenEstimate(responseTokens.Value)}");
+            }
+
+            // Write samples with visual feedback (skip tree for dry-run since we already showed during streaming)
+            if (!dryRun)
+            {
+                Console.WriteLine();
+                var outputFolder = Path.GetFullPath(outputDir);
+                for (var i = 0; i < samples.Count; i++)
+                {
+                    var sample = samples[i];
                     var relativePath = !string.IsNullOrEmpty(sample.FilePath)
                         ? SanitizePath(sample.FilePath, context.FileExtension)
                         : SanitizeName(sample.Name) + context.FileExtension;
-                    var fullPath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
-                    progress?.Update(fullPath);
+                    var isLast = i == samples.Count - 1;
+
+                    var filePath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
+
+                    // SECURITY: Ensure path stays within output directory (defense-in-depth)
+                    if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        && !filePath.Equals(outputFolder, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine($"  {ConsoleUx.Yellow("⚠")} Skipping file that would escape output directory: {relativePath}");
+                        continue;
+                    }
+
+                    var fileDir = Path.GetDirectoryName(filePath);
+                    if (!string.IsNullOrEmpty(fileDir))
+                    {
+                        Directory.CreateDirectory(fileDir);
+                    }
+                    await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken);
+                    ConsoleUx.TreeItem($"{ConsoleUx.Green("✓")} {filePath}", isLast);
                 }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Propagate cancellation - don't swallow it
-            preparingProgress?.Dispose();
-            progress?.Dispose();
-            throw;
-        }
-        catch (Exception ex)
-        {
-            if (promptPrepStopwatch.IsRunning)
-            {
-                promptPrepStopwatch.Stop();
-            }
 
-            preparingProgress?.Fail("Preparing prompt failed");
-            preparingProgress?.Dispose();
-            preparingProgress = null;
-
-            progress?.Fail("Generation failed");
-            progress?.Dispose();
-            ConsoleUx.Error(ex.Message);
-            return 1;
-        }
-
-        generationStopwatch.Stop();
-        
-        // Complete the spinner
-        if (samples.Count > 0)
-        {
-            var effectiveGenerationDuration = generationDuration;
-            if (effectiveGenerationDuration is null || effectiveGenerationDuration == TimeSpan.Zero)
-            {
-                effectiveGenerationDuration = generationStopwatch.Elapsed;
-            }
-
-            progress?.Complete($"Generated {samples.Count} sample(s) ({FormatDuration(effectiveGenerationDuration.Value)})");
-        }
-        else
-        {
-            progress?.Fail("No samples generated");
-            progress?.Dispose();
-            return 1;
-        }
-        
-        progress?.Dispose();
-        
-        // Show response token usage
-        if (responseTokens != null)
-        {
-            ConsoleUx.Info($"Response: {FormatTokenEstimate(responseTokens.Value)}");
-        }
-        
-        // Write samples with visual feedback (skip tree for dry-run since we already showed during streaming)
-        if (!dryRun)
-        {
             Console.WriteLine();
-            var outputFolder = Path.GetFullPath(outputDir);
-            for (var i = 0; i < samples.Count; i++)
+            if (dryRun)
             {
-                var sample = samples[i];
-                var relativePath = !string.IsNullOrEmpty(sample.FilePath) 
-                    ? SanitizePath(sample.FilePath, context.FileExtension)
-                    : SanitizeName(sample.Name) + context.FileExtension;
-                var isLast = i == samples.Count - 1;
-                
-                var filePath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
-                
-                // SECURITY: Ensure path stays within output directory (defense-in-depth)
-                if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) 
-                    && !filePath.Equals(outputFolder, StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"  {ConsoleUx.Yellow("⚠")} Skipping file that would escape output directory: {relativePath}");
-                    continue;
-                }
-                
-                var fileDir = Path.GetDirectoryName(filePath);
-                if (!string.IsNullOrEmpty(fileDir))
-                {
-                    Directory.CreateDirectory(fileDir);
-                }
-                await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken);
-                ConsoleUx.TreeItem($"{ConsoleUx.Green("✓")} {filePath}", isLast);
+                ConsoleUx.Info($"[DRY RUN] Would write to: {outputDir}");
             }
-        }
-        
-        Console.WriteLine();
-        if (dryRun)
-        {
-            ConsoleUx.Info($"[DRY RUN] Would write to: {outputDir}");
-        }
-        else
-        {
-            ConsoleUx.Success($"Wrote {samples.Count} sample(s) to {outputDir}");
-        }
+            else
+            {
+                ConsoleUx.Success($"Wrote {samples.Count} sample(s) to {outputDir}");
+            }
 
-        totalStopwatch.Stop();
+            totalStopwatch.Stop();
 
-        // Compact final summary
-        if (promptTokens is { } pt && responseTokens is { } rt)
-        {
-            Console.WriteLine();
-            ConsoleUx.Info($"Summary: tokens {FormatTokenCount(pt)} + {FormatTokenCount(rt)} = {FormatTokenCount(pt + rt)}");
-        }
+            // Compact final summary
+            if (promptTokens is { } pt && responseTokens is { } rt)
+            {
+                Console.WriteLine();
+                ConsoleUx.Info($"Summary: tokens {FormatTokenCount(pt)} + {FormatTokenCount(rt)} = {FormatTokenCount(pt + rt)}");
+            }
 
-        var promptPrepDuration = promptPrepStopwatch.Elapsed;
-        var genDuration = generationDuration is { } gd && gd > TimeSpan.Zero ? gd : generationStopwatch.Elapsed;
-        ConsoleUx.Info(
-            $"Summary: time scan {FormatDuration(scanStopwatch.Elapsed)}, files {FormatDuration(filesStopwatch.Elapsed)}, prompt {FormatDuration(promptPrepDuration)}, generate {FormatDuration(genDuration)}, total {FormatDuration(totalStopwatch.Elapsed)}");
-        
-        return 0;
+            var promptPrepDuration = promptPrepStopwatch.Elapsed;
+            var genDuration = generationDuration is { } gd && gd > TimeSpan.Zero ? gd : generationStopwatch.Elapsed;
+            ConsoleUx.Info(
+                $"Summary: time scan {FormatDuration(scanStopwatch.Elapsed)}, files {FormatDuration(filesStopwatch.Elapsed)}, prompt {FormatDuration(promptPrepDuration)}, generate {FormatDuration(genDuration)}, total {FormatDuration(totalStopwatch.Elapsed)}");
+
+            return 0;
         }
         finally
         {
@@ -363,9 +360,9 @@ public class SampleGeneratorTool
 
         return $"~{tokens / 1000}K tokens";
     }
-    
+
     private static string SanitizeName(string name) => PathSanitizer.SanitizeFileName(name);
-    
+
     private static string SanitizePath(string path, string ext) => PathSanitizer.SanitizeFilePath(path, ext);
 
     private SampleLanguageContext CreateLanguageContext(SdkLanguage language) => language switch
@@ -378,11 +375,11 @@ public class SampleGeneratorTool
         SdkLanguage.Go => new GoSampleLanguageContext(_fileHelper),
         _ => throw new NotSupportedException($"Language {language} not supported")
     };
-    
+
     private static string BuildSystemPrompt(SampleLanguageContext context, string sdkName) =>
         $"Generate runnable SDK samples for the '{sdkName}' SDK. " +
         $"{context.GetInstructions()}";
-    
+
     /// <summary>
     /// Gets the prefix part of the user prompt (before the file context).
     /// </summary>
@@ -393,7 +390,7 @@ public class SampleGeneratorTool
             var dupeWarning = hasExistingSamples ? " Avoid duplicating <existing-samples>." : "";
             return $"{customPrompt}{dupeWarning} Generate {count} samples.\n\n";
         }
-        
+
         if (!hasExistingSamples)
         {
             return $"Generate {count} samples covering: init/auth, CRUD, async, error handling, advanced features.\n\n";
@@ -403,12 +400,12 @@ public class SampleGeneratorTool
             return $"Generate {count} NEW samples for uncovered APIs. Avoid duplicating <existing-samples>.\n\n";
         }
     }
-    
+
     /// <summary>
     /// Gets the suffix part of the user prompt (after the file context).
     /// </summary>
     private static string GetUserPromptSuffix() => "";
-    
+
     /// <summary>
     /// Streams the complete user prompt including prefix, context, and suffix.
     /// Uses budget tracking to enforce limits and prevent overflow.
@@ -429,19 +426,19 @@ public class SampleGeneratorTool
         // Overhead includes: prefix (~200), output folder (~100), example sample XML tags (~200)
         const int OverheadReserve = 500;
         var budgetTracker = new PromptBudgetTracker(contextBudget, OverheadReserve);
-        
+
         // Yield the prompt prefix (always included, counted against budget)
         var prefix = GetUserPromptPrefix(customPrompt, count, hasExistingSamples);
         budgetTracker.TryConsume(prefix.Length);
         yield return prefix;
-        
+
         // Add samples folder context so AI knows where files go
         var outputFolderTag = $"<output-folder>{Path.GetFileName(outputFolder)}</output-folder>\n";
         var outputInstruction = "Generate filePath relative to the output folder above (e.g., 'Chat/CreateCompletion.cs' not 'src/...').\n\n";
         budgetTracker.TryConsume(outputFolderTag.Length + outputInstruction.Length);
         yield return outputFolderTag;
         yield return outputInstruction;
-        
+
         // Include an example existing sample with full content if available
         // Budget-aware: truncate example to fit, skip if no room
         if (!string.IsNullOrEmpty(samplesFolder) && Directory.Exists(samplesFolder) && !budgetTracker.IsExhausted)
@@ -453,11 +450,11 @@ public class SampleGeneratorTool
             {
                 var relativePath = Path.GetRelativePath(samplesFolder, exampleFile);
                 var content = await File.ReadAllTextAsync(exampleFile, cancellationToken);
-                
+
                 // Calculate how much budget remains for example sample
                 // Reserve at least 50% of remaining budget for actual source context
                 var exampleBudget = Math.Min(5000, budgetTracker.Remaining / 2);
-                
+
                 if (exampleBudget > 500) // Only include if meaningful space available
                 {
                     // Truncate content to fit within example budget (leaving room for XML tags)
@@ -466,20 +463,20 @@ public class SampleGeneratorTool
                     {
                         content = content[..maxContentLength] + "\n// ... (truncated)";
                     }
-                    
+
                     var exampleHeader = "<example-sample>\n";
                     var filePathTag = $"<filePath>{relativePath}</filePath>\n";
                     var codeOpen = $"<code>\n";
                     var codeClose = "</code>\n";
                     var exampleFooter = "</example-sample>\n";
                     var followInstruction = "Follow this exact structure and style for new samples.\n\n";
-                    
-                    var totalExample = exampleHeader.Length + filePathTag.Length + codeOpen.Length + 
-                                       content.Length + codeClose.Length + exampleFooter.Length + 
+
+                    var totalExample = exampleHeader.Length + filePathTag.Length + codeOpen.Length +
+                                       content.Length + codeClose.Length + exampleFooter.Length +
                                        followInstruction.Length;
-                    
+
                     budgetTracker.TryConsume(totalExample);
-                    
+
                     yield return exampleHeader;
                     yield return filePathTag;
                     yield return codeOpen;
@@ -491,7 +488,7 @@ public class SampleGeneratorTool
                 }
             }
         }
-        
+
         // Stream context (source code and samples) with remaining budget
         var remainingBudget = budgetTracker.Remaining;
         if (remainingBudget > 0)
@@ -501,7 +498,7 @@ public class SampleGeneratorTool
                 yield return chunk;
             }
         }
-        
+
         // Yield the suffix (currently empty but kept for flexibility)
         var suffix = GetUserPromptSuffix();
         if (!string.IsNullOrEmpty(suffix))
@@ -509,31 +506,31 @@ public class SampleGeneratorTool
             yield return suffix;
         }
     }
-    
+
     /// <summary>
     /// Counts existing sample files in the samples folder.
     /// Uses safe enumeration to avoid scanning dangerous folders like node_modules.
     /// </summary>
     private static async Task<int> CountExistingSamplesAsync(
-        string? samplesFolder, 
+        string? samplesFolder,
         SampleLanguageContext languageContext)
     {
         await Task.Yield(); // Allow spinner to start
-        
+
         if (string.IsNullOrEmpty(samplesFolder) || !Directory.Exists(samplesFolder))
             return 0;
-        
+
         // SAFETY: Use safe enumeration to avoid scanning node_modules, .git, etc.
         return SdkInfo.CountFilesSafely(samplesFolder, $"*{languageContext.FileExtension}");
     }
-    
+
     /// <summary>
     /// Streams context from source code and samples without materializing in memory.
     /// Uses language-specific API extraction with coverage-aware formatting for ~70% token reduction.
     /// </summary>
     private async IAsyncEnumerable<string> StreamContextAsync(
         string sourceFolder,
-        string? samplesFolder, 
+        string? samplesFolder,
         SampleLanguageContext languageContext,
         SdkChatConfig? config,
         int contextBudget,

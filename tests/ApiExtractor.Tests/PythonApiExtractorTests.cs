@@ -13,11 +13,11 @@ namespace ApiExtractor.Tests;
 public class PythonExtractorFixture : IAsyncLifetime
 {
     private static readonly string TestFixturesPath = Path.Combine(AppContext.BaseDirectory, "TestFixtures", "Python");
-    
+
     public ApiIndex? Api { get; private set; }
     public string? SkipReason { get; private set; }
     public string FixturePath => TestFixturesPath;
-    
+
     public async Task InitializeAsync()
     {
         var extractor = new PythonApiExtractor();
@@ -26,7 +26,7 @@ public class PythonExtractorFixture : IAsyncLifetime
             SkipReason = extractor.UnavailableReason ?? "Python not available";
             return;
         }
-        
+
         try
         {
             Api = await extractor.ExtractAsync(TestFixturesPath);
@@ -36,7 +36,7 @@ public class PythonExtractorFixture : IAsyncLifetime
             SkipReason = $"Python extraction failed: {ex.Message}";
         }
     }
-    
+
     public Task DisposeAsync() => Task.CompletedTask;
 }
 
@@ -168,7 +168,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
             .ToList();
         // Private methods (start with _) should be excluded, but __init__ and __dunder__ are allowed
         var privateMethods = allMethods.Where(m =>
-            m.Name.StartsWith("_") && !m.Name.StartsWith("__"));
+            m.Name.StartsWith('_') && !m.Name.StartsWith("__"));
         Assert.Empty(privateMethods);
     }
 

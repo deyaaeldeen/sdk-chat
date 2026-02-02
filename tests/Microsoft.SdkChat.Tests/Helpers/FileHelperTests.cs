@@ -527,7 +527,7 @@ public class FileHelperTests : IDisposable
         // Assert
         var contentChunks = chunks.Where(c => !c.IsHeader && !c.IsFooter && !c.IsTruncated).ToList();
         Assert.True(contentChunks.Count >= 6); // 50KB / 8KB = at least 6 chunks
-        Assert.All(contentChunks, c => Assert.True(c.Content.Length <= 8192, 
+        Assert.All(contentChunks, c => Assert.True(c.Content.Length <= 8192,
             $"Chunk size {c.Content.Length} exceeds 8KB limit"));
     }
 

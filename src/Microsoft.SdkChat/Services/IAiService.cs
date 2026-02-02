@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Runtime.CompilerServices;
 using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services;
@@ -15,12 +14,12 @@ public interface IAiService : IAsyncDisposable
     /// Whether using OpenAI-compatible API instead of Copilot.
     /// </summary>
     bool IsUsingOpenAi { get; }
-    
+
     /// <summary>
     /// Raised when the prompt is ready to send (after materialization).
     /// </summary>
     event EventHandler<AiPromptReadyEventArgs>? PromptReady;
-    
+
     /// <summary>
     /// Raised when streaming completes with usage statistics.
     /// </summary>
@@ -31,7 +30,7 @@ public interface IAiService : IAsyncDisposable
     /// environment defaults and provider-specific configuration.
     /// </summary>
     string GetEffectiveModel(string? modelOverride = null);
-    
+
     /// <summary>
     /// Stream AI response and yield parsed items as they complete.
     ///

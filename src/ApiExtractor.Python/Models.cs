@@ -8,26 +8,26 @@ using ApiExtractor.Contracts;
 namespace ApiExtractor.Python;
 
 // Reuse the same output models for consistency across languages
-public record ApiIndex(string Package, IReadOnlyList<ModuleInfo> Modules) : IApiIndex
+public sealed record ApiIndex(string Package, IReadOnlyList<ModuleInfo> Modules) : IApiIndex
 {
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
         Modules.SelectMany(m => m.Classes ?? []);
-    
+
     /// <summary>Gets client classes (entry points for SDK operations).</summary>
     public IEnumerable<ClassInfo> GetClientClasses() =>
         GetAllClasses().Where(c => c.IsClientType);
-    
+
     public string ToJson(bool pretty = false) => pretty
-        ? JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })
+        ? JsonSerializer.Serialize(this, JsonOptionsCache.Indented)
         : JsonSerializer.Serialize(this);
-    
+
     public string ToStubs() => PythonFormatter.Format(this);
 }
 
-public record ModuleInfo(string Name, IReadOnlyList<ClassInfo>? Classes, IReadOnlyList<FunctionInfo>? Functions);
+public sealed record ModuleInfo(string Name, IReadOnlyList<ClassInfo>? Classes, IReadOnlyList<FunctionInfo>? Functions);
 
-public record ClassInfo(
+public sealed record ClassInfo(
     string Name,
     string? Base,
     string? Doc,
@@ -39,12 +39,12 @@ public record ClassInfo(
     public bool IsClientType =>
         (Name.EndsWith("Client") || Name.EndsWith("Service") || Name.EndsWith("Manager")) &&
         (Methods?.Any() ?? false);
-    
+
     /// <summary>Returns true if this is a model/DTO class.</summary>
     [JsonIgnore]
     public bool IsModelType =>
         !(Methods?.Any() ?? false) && (Properties?.Any() ?? false);
-    
+
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
     public int TruncationPriority
@@ -58,19 +58,19 @@ public record ClassInfo(
             return 4;
         }
     }
-    
+
     /// <summary>Gets type names referenced in method signatures.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
         var refs = new HashSet<string>();
-        
+
         if (!string.IsNullOrEmpty(Base))
         {
             var baseName = Base.Split('[')[0];
             if (allTypeNames.Contains(baseName))
                 refs.Add(baseName);
         }
-        
+
         foreach (var method in Methods ?? [])
         {
             foreach (var typeName in allTypeNames)
@@ -79,7 +79,7 @@ public record ClassInfo(
                     refs.Add(typeName);
             }
         }
-        
+
         foreach (var prop in Properties ?? [])
         {
             if (!string.IsNullOrEmpty(prop.Type))
@@ -91,7 +91,7 @@ public record ClassInfo(
                 }
             }
         }
-        
+
         return refs;
     }
 }

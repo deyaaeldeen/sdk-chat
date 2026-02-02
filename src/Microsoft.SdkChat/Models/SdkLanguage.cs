@@ -32,7 +32,7 @@ public static class SdkLanguageHelpers
     {
         if (string.IsNullOrWhiteSpace(language))
             return SdkLanguage.Unknown;
-            
+
         return language.ToLowerInvariant() switch
         {
             ".net" or "dotnet" or "c#" or "csharp" => SdkLanguage.DotNet,
@@ -44,7 +44,7 @@ public static class SdkLanguageHelpers
             _ => SdkLanguage.Unknown
         };
     }
-    
+
     /// <summary>
     /// Get file extension for language.
     /// </summary>
@@ -58,7 +58,7 @@ public static class SdkLanguageHelpers
         SdkLanguage.Go => ".go",
         _ => ".txt"
     };
-    
+
     /// <summary>
     /// Get language ID for code blocks.
     /// </summary>

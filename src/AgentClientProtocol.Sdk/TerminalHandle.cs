@@ -19,16 +19,16 @@ public class TerminalHandle : IAsyncDisposable
     private readonly AgentSideConnection _connection;
     private readonly string _sessionId;
     private readonly string _terminalId;
-    
+
     public string TerminalId => _terminalId;
-    
+
     internal TerminalHandle(AgentSideConnection connection, string sessionId, string terminalId)
     {
         _connection = connection;
         _sessionId = sessionId;
         _terminalId = terminalId;
     }
-    
+
     /// <summary>
     /// Create a terminal and return a handle.
     /// </summary>
@@ -49,10 +49,10 @@ public class TerminalHandle : IAsyncDisposable
             Cwd = cwd,
             Env = env
         }, ct);
-        
+
         return new TerminalHandle(connection, sessionId, response.TerminalId);
     }
-    
+
     /// <summary>
     /// Get current output without waiting.
     /// </summary>
@@ -63,10 +63,10 @@ public class TerminalHandle : IAsyncDisposable
             SessionId = _sessionId,
             TerminalId = _terminalId
         }, ct).ConfigureAwait(false);
-        
+
         return (response.Output, response.ExitStatus);
     }
-    
+
     /// <summary>
     /// Wait for terminal command to exit.
     /// </summary>
@@ -78,7 +78,7 @@ public class TerminalHandle : IAsyncDisposable
             TerminalId = _terminalId
         }, ct).ConfigureAwait(false);
     }
-    
+
     /// <summary>
     /// Kill the running command.
     /// </summary>
@@ -90,7 +90,7 @@ public class TerminalHandle : IAsyncDisposable
             TerminalId = _terminalId
         }, ct).ConfigureAwait(false);
     }
-    
+
     /// <summary>
     /// Release terminal resources.
     /// </summary>
@@ -102,7 +102,7 @@ public class TerminalHandle : IAsyncDisposable
             TerminalId = _terminalId
         }, ct).ConfigureAwait(false);
     }
-    
+
     public async ValueTask DisposeAsync()
     {
         try

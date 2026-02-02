@@ -41,7 +41,7 @@ public class SensitiveDataScrubberTests
     {
         var input = $"Using API key: {key}";
         var result = SensitiveDataScrubber.Scrub(input);
-        
+
         Assert.DoesNotContain(key, result);
         Assert.Contains("[REDACTED]", result);
     }
@@ -56,7 +56,7 @@ public class SensitiveDataScrubberTests
     {
         var input = $"GITHUB_TOKEN={token}";
         var result = SensitiveDataScrubber.Scrub(input);
-        
+
         Assert.DoesNotContain(token, result);
         Assert.Contains("[REDACTED]", result);
     }
@@ -66,7 +66,7 @@ public class SensitiveDataScrubberTests
     {
         var input = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0";
         var result = SensitiveDataScrubber.Scrub(input);
-        
+
         Assert.DoesNotContain("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", result);
         Assert.Contains("Bearer [REDACTED]", result);
     }
@@ -77,7 +77,7 @@ public class SensitiveDataScrubberTests
     public void Scrub_GenericKeyPattern_IsRedacted(string input)
     {
         var result = SensitiveDataScrubber.Scrub(input);
-        
+
         Assert.Contains("[REDACTED]", result);
     }
 
@@ -92,7 +92,7 @@ public class SensitiveDataScrubberTests
     {
         var input = $"Config: {pattern}";
         var result = SensitiveDataScrubber.Scrub(input);
-        
+
         Assert.Contains("[REDACTED]", result);
     }
 
@@ -105,13 +105,13 @@ public class SensitiveDataScrubberTests
             - GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz1234567890
             - Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
             """;
-        
+
         var result = SensitiveDataScrubber.Scrub(input);
-        
+
         Assert.DoesNotContain("sk-1234567890abcdef", result);
         Assert.DoesNotContain("ghp_abcdefghijklmnopqrstuvwxyz", result);
         Assert.DoesNotContain("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", result);
-        
+
         // Should have multiple redactions
         var redactionCount = result.Split("[REDACTED]").Length - 1;
         Assert.True(redactionCount >= 3, $"Expected at least 3 redactions, got {redactionCount}");
@@ -122,7 +122,7 @@ public class SensitiveDataScrubberTests
     {
         var input = "User prompt: Generate code for api_key=sk_test_secret123456789 endpoint";
         var result = SensitiveDataScrubber.Scrub(input);
-        
+
         Assert.Contains("User prompt:", result);
         Assert.Contains("Generate code for", result);
         Assert.Contains("endpoint", result);

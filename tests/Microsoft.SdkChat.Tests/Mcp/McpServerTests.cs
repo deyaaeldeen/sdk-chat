@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Net.Sockets;
 using Microsoft.SdkChat.Mcp;
 using Xunit;
-using System.Net.Sockets;
 
 namespace Microsoft.SdkChat.Tests.Mcp;
 
@@ -35,7 +35,7 @@ public class McpServerTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<NotSupportedException>(() =>
             McpServer.RunAsync(transport, 8080, "info", useOpenAi: false));
-        
+
         Assert.Contains("not supported", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -48,7 +48,7 @@ public class McpServerTests
         // Arrange
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMilliseconds(500));
-        
+
         // Use an ephemeral port to avoid conflicts
         var port = GetAvailablePort();
 
@@ -72,7 +72,7 @@ public class McpServerTests
         // Assert - Server should not complete immediately (delay completes first)
         Assert.Equal(delayTask, completedTask);
         Assert.False(serverTask.IsCompleted, $"SSE server with transport '{transport}' should not complete immediately");
-        
+
         // Ensure cleanup - wait for server to shut down
         try
         {
@@ -92,11 +92,11 @@ public class McpServerTests
     {
         // Note: stdio transport will exit immediately when stdin is unavailable (test environment)
         // This is expected behavior - we just verify it doesn't throw an exception
-        
+
         // Arrange
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMilliseconds(500));
-        
+
         var port = GetAvailablePort(); // Port not used for stdio, but required by API
 
         // Act - Start the stdio server
@@ -150,7 +150,7 @@ public class McpServerTests
         HttpResponseMessage? response = null;
         var attempts = 0;
         var maxAttempts = 10;
-        
+
         while (attempts < maxAttempts && !cts.Token.IsCancellationRequested)
         {
             attempts++;
@@ -177,11 +177,11 @@ public class McpServerTests
                 throw;
             }
         }
-        
+
         // Assert - Verify the server is accessible via HTTP and responds with success
         Assert.NotNull(response);
         Assert.True(response.IsSuccessStatusCode, $"SSE endpoint should return success status code, but got {response.StatusCode}");
-        
+
         // Ensure cleanup - wait for server to shut down
         try
         {
@@ -233,13 +233,13 @@ public class McpServerTests
 
         // Wait for both servers to initialize with retry logic
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-        
+
         // Helper function to wait for server
         async Task<HttpResponseMessage> WaitForServerAsync(int port, CancellationToken cancellationToken)
         {
             var attempts = 0;
             var maxAttempts = 10;
-            
+
             while (attempts < maxAttempts && !cancellationToken.IsCancellationRequested)
             {
                 attempts++;
@@ -261,10 +261,10 @@ public class McpServerTests
                     }
                 }
             }
-            
+
             throw new TimeoutException($"Server on port {port} did not become ready in time");
         }
-        
+
         var response1 = await WaitForServerAsync(port1, cts1.Token);
         var response2 = await WaitForServerAsync(port2, cts2.Token);
 
@@ -272,7 +272,7 @@ public class McpServerTests
         Assert.True(response1.IsSuccessStatusCode, $"Server 1 should return success status code, but got {response1.StatusCode}");
         Assert.NotNull(response2);
         Assert.True(response2.IsSuccessStatusCode, $"Server 2 should return success status code, but got {response2.StatusCode}");
-        
+
         // Ensure cleanup - wait for both servers to shut down
         try
         {
@@ -293,10 +293,10 @@ public class McpServerTests
     {
         // Test that transport names are case-insensitive for SSE transport
         // (stdio transport is tested separately due to stdin dependency)
-        
+
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMilliseconds(500));
-        
+
         var port = GetAvailablePort();
 
         // Test lowercase
@@ -313,10 +313,10 @@ public class McpServerTests
         });
 
         await Task.Delay(200);
-        
+
         // Assert - Verify lowercase transport name is accepted and server keeps running
         Assert.False(taskLower.IsCompleted, $"Transport '{transport.ToLower()}' should be accepted");
-        
+
         // Ensure cleanup
         try
         {
@@ -326,12 +326,12 @@ public class McpServerTests
         {
             // Server didn't shut down cleanly, but test already passed
         }
-        
+
         // Test uppercase with new cancellation token and port
         using var cts2 = new CancellationTokenSource();
         cts2.CancelAfter(TimeSpan.FromMilliseconds(500));
         var port2 = GetAvailablePort();
-        
+
         var taskUpper = Task.Run(async () =>
         {
             try
@@ -345,10 +345,10 @@ public class McpServerTests
         });
 
         await Task.Delay(200);
-        
+
         // Assert - Verify uppercase transport name is accepted and server keeps running
         Assert.False(taskUpper.IsCompleted, $"Transport '{transport.ToUpper()}' should be accepted");
-        
+
         // Ensure cleanup
         try
         {
@@ -368,10 +368,10 @@ public class McpServerTests
     {
         // Verify that stdio transport accepts case-insensitive names
         // Note: stdio may exit immediately when stdin is unavailable (expected in tests)
-        
+
         var port = GetAvailablePort();
         Exception? caughtException = null;
-        
+
         var serverTask = Task.Run(async () =>
         {
             try

@@ -47,14 +47,14 @@ public static class NdjsonStreamParser
                     {
                         continue;
                     }
-                    
+
                     // Skip code fence markers
                     if (ch == '`')
                     {
                         // Consume until end of line
                         continue;
                     }
-                    
+
                     if (ch != '{')
                     {
                         // Skip non-JSON lines before first object
@@ -106,13 +106,13 @@ public static class NdjsonStreamParser
                     else if (ch == '}')
                     {
                         braceDepth--;
-                        
+
                         if (braceDepth == 0)
                         {
                             // Complete JSON object
                             var jsonText = objectBuilder.ToString().Trim();
                             objectBuilder.Clear();
-                            
+
                             if (TryParseObject<T>(jsonText, jsonOptions, out var item))
                             {
                                 seenAnyItem = true;

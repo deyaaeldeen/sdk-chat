@@ -14,11 +14,11 @@ namespace ApiExtractor.Tests;
 public class TypeScriptExtractorFixture : IAsyncLifetime
 {
     private static readonly string TestFixturesPath = Path.Combine(AppContext.BaseDirectory, "TestFixtures", "TypeScript");
-    
+
     public ApiIndex? Api { get; private set; }
     public string? SkipReason { get; private set; }
     public string FixturePath => TestFixturesPath;
-    
+
     public async Task InitializeAsync()
     {
         if (!CheckNodeInstalled())
@@ -26,7 +26,7 @@ public class TypeScriptExtractorFixture : IAsyncLifetime
             SkipReason = "Node.js not installed";
             return;
         }
-        
+
         try
         {
             Api = await new TypeScriptApiExtractor().ExtractAsync(TestFixturesPath);
@@ -36,9 +36,9 @@ public class TypeScriptExtractorFixture : IAsyncLifetime
             SkipReason = $"TypeScript extraction failed: {ex.Message}";
         }
     }
-    
+
     public Task DisposeAsync() => Task.CompletedTask;
-    
+
     private static bool CheckNodeInstalled()
     {
         try
@@ -203,7 +203,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
             .SelectMany(m => m.Classes ?? [])
             .SelectMany(c => c.Methods ?? [])
             .ToList();
-        Assert.DoesNotContain(allMethods, m => m.Name.StartsWith("#"));
+        Assert.DoesNotContain(allMethods, m => m.Name.StartsWith('#'));
     }
 
     [SkippableFact]

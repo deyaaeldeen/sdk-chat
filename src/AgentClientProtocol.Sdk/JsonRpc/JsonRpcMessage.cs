@@ -22,10 +22,10 @@ public record JsonRpcRequest : JsonRpcMessageBase
 {
     [JsonPropertyName("id")]
     public object? Id { get; init; }
-    
+
     [JsonPropertyName("method")]
     public required string Method { get; init; }
-    
+
     [JsonPropertyName("params")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Params { get; init; }
@@ -38,19 +38,19 @@ public record JsonRpcResponse : JsonRpcMessageBase
 {
     [JsonPropertyName("id")]
     public object? Id { get; init; }
-    
+
     [JsonPropertyName("result")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public object? Result { get; init; }
-    
+
     [JsonPropertyName("error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonRpcError? Error { get; init; }
-    
-    public static JsonRpcResponse Success(object? id, object? result) => 
+
+    public static JsonRpcResponse Success(object? id, object? result) =>
         new() { Id = id, Result = result };
-    
-    public static JsonRpcResponse Failure(object? id, JsonRpcError error) => 
+
+    public static JsonRpcResponse Failure(object? id, JsonRpcError error) =>
         new() { Id = id, Error = error };
 }
 
@@ -61,10 +61,10 @@ public record JsonRpcError
 {
     [JsonPropertyName("code")]
     public required int Code { get; init; }
-    
+
     [JsonPropertyName("message")]
     public required string Message { get; init; }
-    
+
     [JsonPropertyName("data")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public object? Data { get; init; }
@@ -77,7 +77,7 @@ public record JsonRpcNotification : JsonRpcMessageBase
 {
     [JsonPropertyName("method")]
     public required string Method { get; init; }
-    
+
     [JsonPropertyName("params")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Params { get; init; }
