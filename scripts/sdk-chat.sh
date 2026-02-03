@@ -56,9 +56,10 @@ DOCKER_ARGS=(
 )
 
 # Mount Copilot credentials if available (for auth fallback)
-# Mount at both /root/.copilot (for root) and user's home (for -u flag)
+# Note: NOT read-only because copilot CLI needs to extract its bundled package
+# on first run to ~/.copilot/pkg/
 if [[ -d "${HOME}/.copilot" ]]; then
-    DOCKER_ARGS+=(-v "${HOME}/.copilot:${HOME}/.copilot:ro")
+    DOCKER_ARGS+=(-v "${HOME}/.copilot:${HOME}/.copilot")
     DOCKER_ARGS+=(-e "HOME=${HOME}")
 fi
 

@@ -59,19 +59,14 @@ RUN dotnet restore src/Microsoft.SdkChat/Microsoft.SdkChat.csproj -r linux-x64 &
         -p:TreatWarningsAsErrors=false -o /app
 
 # ============================================================================
-# Stage 2: Build Go extractor (glibc-linked)
+# Stage 2: Build Go extractor (fully static, no glibc/musl dependency)
 # ============================================================================
-FROM golang:1.22-bookworm AS build-go
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
+FROM golang:1.22-alpine AS build-go
 
 WORKDIR /src
 COPY src/ApiExtractor.Go/extract_api.go .
-# Force external linking to produce glibc-linked binary
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
-    -ldflags='-s -w -linkmode=external -extldflags=-Wl,-z,relro,-z,now' \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-s -w' \
     -o /go_extractor extract_api.go
 
 # ============================================================================
