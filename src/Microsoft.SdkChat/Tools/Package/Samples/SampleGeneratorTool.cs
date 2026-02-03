@@ -214,124 +214,124 @@ public class SampleGeneratorTool
             if (progress != null) await progress.DisposeAsync();
             throw;
         }
-            catch (Exception ex)
+        catch (Exception ex)
+        {
+            if (promptPrepStopwatch.IsRunning)
             {
-                if (promptPrepStopwatch.IsRunning)
-                {
-                    promptPrepStopwatch.Stop();
-                }
-
-                if (preparingProgress != null)
-                {
-                    await preparingProgress.FailAsync("Preparing prompt failed");
-                    await preparingProgress.DisposeAsync();
-                    preparingProgress = null;
-                }
-
-                if (progress != null)
-                {
-                    await progress.FailAsync("Generation failed");
-                    await progress.DisposeAsync();
-                }
-                ConsoleUx.Error(ex.Message);
-                return 1;
+                promptPrepStopwatch.Stop();
             }
 
-            generationStopwatch.Stop();
-
-            // Complete the spinner
-            if (samples.Count > 0)
+            if (preparingProgress != null)
             {
-                var effectiveGenerationDuration = generationDuration;
-                if (effectiveGenerationDuration is null || effectiveGenerationDuration == TimeSpan.Zero)
-                {
-                    effectiveGenerationDuration = generationStopwatch.Elapsed;
-                }
-
-                if (progress != null)
-                {
-                    await progress.CompleteAsync($"Generated {samples.Count} sample(s) ({FormatDuration(effectiveGenerationDuration.Value)})");
-                }
-            }
-            else
-            {
-                if (progress != null)
-                {
-                    await progress.FailAsync("No samples generated");
-                    await progress.DisposeAsync();
-                }
-                return 1;
+                await preparingProgress.FailAsync("Preparing prompt failed");
+                await preparingProgress.DisposeAsync();
+                preparingProgress = null;
             }
 
             if (progress != null)
             {
+                await progress.FailAsync("Generation failed");
                 await progress.DisposeAsync();
             }
+            ConsoleUx.Error(ex.Message);
+            return 1;
+        }
 
-            // Show response token usage
-            if (responseTokens != null)
+        generationStopwatch.Stop();
+
+        // Complete the spinner
+        if (samples.Count > 0)
+        {
+            var effectiveGenerationDuration = generationDuration;
+            if (effectiveGenerationDuration is null || effectiveGenerationDuration == TimeSpan.Zero)
             {
-                ConsoleUx.Info($"Response: {FormatTokenEstimate(responseTokens.Value)}");
+                effectiveGenerationDuration = generationStopwatch.Elapsed;
             }
 
-            // Write samples with visual feedback (skip tree for dry-run since we already showed during streaming)
-            if (!dryRun)
+            if (progress != null)
             {
-                Console.WriteLine();
-                var outputFolder = Path.GetFullPath(outputDir);
-                for (var i = 0; i < samples.Count; i++)
-                {
-                    var sample = samples[i];
-                    var relativePath = !string.IsNullOrEmpty(sample.FilePath)
-                        ? SanitizePath(sample.FilePath, context.FileExtension)
-                        : SanitizeName(sample.Name) + context.FileExtension;
-                    var isLast = i == samples.Count - 1;
-
-                    var filePath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
-
-                    // SECURITY: Ensure path stays within output directory (defense-in-depth)
-                    if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                        && !filePath.Equals(outputFolder, StringComparison.OrdinalIgnoreCase))
-                    {
-                        Console.WriteLine($"  {ConsoleUx.Yellow("⚠")} Skipping file that would escape output directory: {relativePath}");
-                        continue;
-                    }
-
-                    var fileDir = Path.GetDirectoryName(filePath);
-                    if (!string.IsNullOrEmpty(fileDir))
-                    {
-                        Directory.CreateDirectory(fileDir);
-                    }
-                    await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken);
-                    ConsoleUx.TreeItem($"{ConsoleUx.Green("✓")} {filePath}", isLast);
-                }
+                await progress.CompleteAsync($"Generated {samples.Count} sample(s) ({FormatDuration(effectiveGenerationDuration.Value)})");
             }
+        }
+        else
+        {
+            if (progress != null)
+            {
+                await progress.FailAsync("No samples generated");
+                await progress.DisposeAsync();
+            }
+            return 1;
+        }
 
+        if (progress != null)
+        {
+            await progress.DisposeAsync();
+        }
+
+        // Show response token usage
+        if (responseTokens != null)
+        {
+            ConsoleUx.Info($"Response: {FormatTokenEstimate(responseTokens.Value)}");
+        }
+
+        // Write samples with visual feedback (skip tree for dry-run since we already showed during streaming)
+        if (!dryRun)
+        {
             Console.WriteLine();
-            if (dryRun)
+            var outputFolder = Path.GetFullPath(outputDir);
+            for (var i = 0; i < samples.Count; i++)
             {
-                ConsoleUx.Info($"[DRY RUN] Would write to: {outputDir}");
+                var sample = samples[i];
+                var relativePath = !string.IsNullOrEmpty(sample.FilePath)
+                    ? SanitizePath(sample.FilePath, context.FileExtension)
+                    : SanitizeName(sample.Name) + context.FileExtension;
+                var isLast = i == samples.Count - 1;
+
+                var filePath = Path.GetFullPath(Path.Combine(outputDir, relativePath));
+
+                // SECURITY: Ensure path stays within output directory (defense-in-depth)
+                if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    && !filePath.Equals(outputFolder, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"  {ConsoleUx.Yellow("⚠")} Skipping file that would escape output directory: {relativePath}");
+                    continue;
+                }
+
+                var fileDir = Path.GetDirectoryName(filePath);
+                if (!string.IsNullOrEmpty(fileDir))
+                {
+                    Directory.CreateDirectory(fileDir);
+                }
+                await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken);
+                ConsoleUx.TreeItem($"{ConsoleUx.Green("✓")} {filePath}", isLast);
             }
-            else
-            {
-                ConsoleUx.Success($"Wrote {samples.Count} sample(s) to {outputDir}");
-            }
+        }
 
-            totalStopwatch.Stop();
+        Console.WriteLine();
+        if (dryRun)
+        {
+            ConsoleUx.Info($"[DRY RUN] Would write to: {outputDir}");
+        }
+        else
+        {
+            ConsoleUx.Success($"Wrote {samples.Count} sample(s) to {outputDir}");
+        }
 
-            // Compact final summary
-            if (promptTokens is { } pt && responseTokens is { } rt)
-            {
-                Console.WriteLine();
-                ConsoleUx.Info($"Summary: tokens {FormatTokenCount(pt)} + {FormatTokenCount(rt)} = {FormatTokenCount(pt + rt)}");
-            }
+        totalStopwatch.Stop();
 
-            var promptPrepDuration = promptPrepStopwatch.Elapsed;
-            var genDuration = generationDuration is { } gd && gd > TimeSpan.Zero ? gd : generationStopwatch.Elapsed;
-            ConsoleUx.Info(
-                $"Summary: time scan {FormatDuration(scanStopwatch.Elapsed)}, files {FormatDuration(filesStopwatch.Elapsed)}, prompt {FormatDuration(promptPrepDuration)}, generate {FormatDuration(genDuration)}, total {FormatDuration(totalStopwatch.Elapsed)}");
+        // Compact final summary
+        if (promptTokens is { } pt && responseTokens is { } rt)
+        {
+            Console.WriteLine();
+            ConsoleUx.Info($"Summary: tokens {FormatTokenCount(pt)} + {FormatTokenCount(rt)} = {FormatTokenCount(pt + rt)}");
+        }
 
-            return 0;
+        var promptPrepDuration = promptPrepStopwatch.Elapsed;
+        var genDuration = generationDuration is { } gd && gd > TimeSpan.Zero ? gd : generationStopwatch.Elapsed;
+        ConsoleUx.Info(
+            $"Summary: time scan {FormatDuration(scanStopwatch.Elapsed)}, files {FormatDuration(filesStopwatch.Elapsed)}, prompt {FormatDuration(promptPrepDuration)}, generate {FormatDuration(genDuration)}, total {FormatDuration(totalStopwatch.Elapsed)}");
+
+        return 0;
     }
 
     private static string FormatDuration(TimeSpan duration)

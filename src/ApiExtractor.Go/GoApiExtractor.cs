@@ -33,6 +33,13 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public bool IsAvailable()
     {
+        // Check for precompiled binary first (used in release container)
+        if (GetPrecompiledBinaryPath() != null)
+        {
+            return true;
+        }
+
+        // Fall back to Go runtime for compilation
         var result = ToolPathResolver.ResolveWithDetails("go", GoPaths, "version");
         if (!result.IsAvailable)
         {

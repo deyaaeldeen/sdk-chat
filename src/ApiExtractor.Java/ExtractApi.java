@@ -1,7 +1,7 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
-//DEPS com.github.javaparser:javaparser-core:3.25.5
+//DEPS com.github.javaparser:javaparser-core:3.26.3
 //DEPS com.google.code.gson:gson:2.10.1
-//NATIVE_OPTIONS -O3 --no-fallback
+//NATIVE_OPTIONS -O3 --no-fallback --initialize-at-build-time=com.github.javaparser --initialize-at-run-time=
 
 import com.github.javaparser.*;
 import com.github.javaparser.ast.*;

@@ -85,17 +85,17 @@ ENV PATH="$PATH:/opt/jbang/bin"
 
 WORKDIR /src
 COPY src/ApiExtractor.Java/ExtractApi.java .
-# Build glibc-linked native image
+# Build glibc-linked native image with initialization options
 RUN jbang export native --fresh --force -O java_extractor ExtractApi.java
 
 # ============================================================================
 # Stage 4: Build Python extractor (PyInstaller, glibc-linked)
 # ============================================================================
-FROM python:3.12-slim AS build-python
+FROM debian:bookworm-slim AS build-python
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    binutils \
-    && pip install --no-cache-dir pyinstaller \
+    python3 python3-pip python3-venv python3-dev binutils libpython3.11 \
+    && pip3 install --break-system-packages --no-cache-dir pyinstaller \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -111,9 +111,16 @@ RUN cp dist/python_extractor /python_extractor
 FROM oven/bun:1-debian AS build-typescript
 
 WORKDIR /src
-COPY src/ApiExtractor.TypeScript/extract_api.mjs .
+
+# Copy package files and source
+COPY src/ApiExtractor.TypeScript/package.json src/ApiExtractor.TypeScript/package-lock.json* ./
 COPY src/ApiExtractor.TypeScript/src/ ./src/
-RUN bun build --compile --minify ./extract_api.mjs --outfile ts_extractor
+
+# Install dependencies and build TypeScript
+RUN bun install && bun run build
+
+# Compile to native binary
+RUN bun build --compile --minify ./dist/extract_api.js --outfile ts_extractor
 
 # ============================================================================
 # Stage 6: Download Copilot CLI
@@ -128,12 +135,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://gh.io/copilot-install | bash
 
 # ============================================================================
-# Stage 7: Runtime (distroless with glibc - .NET AOT requires glibc)
+# Stage 7: Runtime (debian slim - compatible glibc for all native extractors)
 # ============================================================================
-FROM gcr.io/distroless/cc-debian12 AS runtime
+FROM debian:bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/deyaaeldeen/sdk-chat"
 LABEL org.opencontainers.image.description="SDK Chat (Native AOT)"
+
+# Install minimal runtime dependencies (libstdc++ for C++ code in extractors)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libstdc++6 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -144,6 +156,9 @@ COPY --from=build-java /src/java_extractor /app/java_extractor
 COPY --from=build-python /python_extractor /app/python_extractor
 COPY --from=build-typescript /src/ts_extractor /app/ts_extractor
 COPY --from=build-copilot /usr/local/bin/copilot /usr/local/bin/copilot
+
+# Copy CA certificates for HTTPS
+COPY --from=build-dotnet /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 ENV PATH="/usr/local/bin:$PATH"
 

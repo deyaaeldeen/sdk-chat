@@ -46,6 +46,13 @@ docker build -f Dockerfile.release -t sdk-chat:latest .
 
 # Test it
 docker run --rm sdk-chat:latest --help
+```
+
+> **Important:** After making code changes, you must rebuild the release image before running integration tests or the release container. The release image is a self-contained AOT binary that doesn't mount source code.
+
+```bash
+# Rebuild after code changes
+docker build -f Dockerfile.release -t sdk-chat:latest .
 
 # Generate samples with GitHub token (recommended)
 # Note: -u flag ensures correct file ownership

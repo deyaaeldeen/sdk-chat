@@ -30,6 +30,13 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public bool IsAvailable()
     {
+        // Check for precompiled binary first (used in release container)
+        if (GetPrecompiledBinaryPath() != null)
+        {
+            return true;
+        }
+
+        // Fall back to Node.js runtime
         var result = ToolPathResolver.ResolveWithDetails("node", NodeCandidates);
         if (!result.IsAvailable)
         {
@@ -74,11 +81,40 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 
     /// <summary>
     /// Extract API from a TypeScript package directory.
+    /// Prefers pre-compiled binary from build, falls back to Node.js runtime.
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        var binaryPath = GetPrecompiledBinaryPath();
+
+        if (binaryPath != null)
+        {
+            // Use precompiled native binary (bun-compiled)
+            var result = await ProcessSandbox.ExecuteAsync(
+                binaryPath,
+                [rootPath, "--json"],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            if (!result.Success)
+            {
+                var errorMsg = result.TimedOut
+                    ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"TypeScript extractor failed: {result.StandardError}";
+                throw new InvalidOperationException(errorMsg);
+            }
+
+            if (string.IsNullOrWhiteSpace(result.StandardOutput))
+            {
+                return null;
+            }
+
+            return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+        }
+
+        // Fall back to Node.js runtime
         var nodePath = _nodePath ?? ToolPathResolver.Resolve("node", NodeCandidates)
-            ?? throw new InvalidOperationException("Node.js not found");
+            ?? throw new InvalidOperationException("Node.js not found and precompiled binary not available");
 
         var scriptDir = GetScriptDir();
         await EnsureDependenciesAsync(scriptDir, ct).ConfigureAwait(false);
@@ -91,27 +127,27 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         }
 
         // Use ProcessSandbox for hardened execution with timeout and output limits
-        var result = await ProcessSandbox.ExecuteAsync(
+        var nodeResult = await ProcessSandbox.ExecuteAsync(
             nodePath,
             [scriptPath, rootPath, "--json"],
             workingDirectory: scriptDir,
             cancellationToken: ct
         ).ConfigureAwait(false);
 
-        if (!result.Success)
+        if (!nodeResult.Success)
         {
-            var errorMsg = result.TimedOut
+            var errorMsg = nodeResult.TimedOut
                 ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Node failed: {result.StandardError}";
+                : $"Node failed: {nodeResult.StandardError}";
             throw new InvalidOperationException(errorMsg);
         }
 
-        if (string.IsNullOrWhiteSpace(result.StandardOutput))
+        if (string.IsNullOrWhiteSpace(nodeResult.StandardOutput))
         {
             return null;
         }
 
-        return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+        return JsonSerializer.Deserialize(nodeResult.StandardOutput, SourceGenerationContext.Default.ApiIndex);
     }
 
     /// <summary>
@@ -119,8 +155,31 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsTypeScriptAsync(string rootPath, CancellationToken ct = default)
     {
+        var binaryPath = GetPrecompiledBinaryPath();
+
+        if (binaryPath != null)
+        {
+            // Use precompiled native binary
+            var result = await ProcessSandbox.ExecuteAsync(
+                binaryPath,
+                [rootPath, "--stub"],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            if (!result.Success)
+            {
+                var errorMsg = result.TimedOut
+                    ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"TypeScript extractor failed: {result.StandardError}";
+                throw new InvalidOperationException(errorMsg);
+            }
+
+            return result.StandardOutput;
+        }
+
+        // Fall back to Node.js runtime
         var nodePath = _nodePath ?? ToolPathResolver.Resolve("node", NodeCandidates)
-            ?? throw new InvalidOperationException("Node.js not found");
+            ?? throw new InvalidOperationException("Node.js not found and precompiled binary not available");
 
         var scriptDir = GetScriptDir();
         await EnsureDependenciesAsync(scriptDir, ct).ConfigureAwait(false);
@@ -133,22 +192,22 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         }
 
         // Use ProcessSandbox for hardened execution with timeout and output limits
-        var result = await ProcessSandbox.ExecuteAsync(
+        var nodeResult = await ProcessSandbox.ExecuteAsync(
             nodePath,
             [scriptPath, rootPath, "--stub"],
             workingDirectory: scriptDir,
             cancellationToken: ct
         ).ConfigureAwait(false);
 
-        if (!result.Success)
+        if (!nodeResult.Success)
         {
-            var errorMsg = result.TimedOut
+            var errorMsg = nodeResult.TimedOut
                 ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Node failed: {result.StandardError}";
+                : $"Node failed: {nodeResult.StandardError}";
             throw new InvalidOperationException(errorMsg);
         }
 
-        return result.StandardOutput;
+        return nodeResult.StandardOutput;
     }
 
     private static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)
@@ -208,5 +267,18 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         throw new FileNotFoundException(
             $"Corrupt installation: extract_api.mjs not found at {scriptPath}. " +
             "Reinstall the application to resolve this issue.");
+    }
+
+    /// <summary>
+    /// Gets the path to the pre-compiled TypeScript extractor binary if it exists.
+    /// The binary is compiled during Docker build using Bun.
+    /// </summary>
+    private static string? GetPrecompiledBinaryPath()
+    {
+        var assemblyDir = AppContext.BaseDirectory;
+        var binaryName = OperatingSystem.IsWindows() ? "ts_extractor.exe" : "ts_extractor";
+        var binaryPath = Path.Combine(assemblyDir, binaryName);
+
+        return File.Exists(binaryPath) ? binaryPath : null;
     }
 }

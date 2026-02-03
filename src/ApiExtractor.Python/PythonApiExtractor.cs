@@ -34,6 +34,13 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     /// <inheritdoc />
     public bool IsAvailable()
     {
+        // Check for precompiled binary first (used in release container)
+        if (GetPrecompiledBinaryPath() != null)
+        {
+            return true;
+        }
+
+        // Fall back to Python runtime
         var result = ToolPathResolver.ResolveWithDetails("python", PythonCandidates);
         if (!result.IsAvailable)
         {
@@ -79,20 +86,32 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
         var startTime = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        // Find python executable
-        var python = _pythonPath ?? ToolPathResolver.Resolve("python", PythonCandidates);
-        if (python == null)
-            throw new InvalidOperationException("Python 3 not found. Install Python 3.9+ and ensure it's in PATH.");
+        var binaryPath = GetPrecompiledBinaryPath();
+        ProcessResult result;
 
-        // Get script path - embedded in assembly directory
-        var scriptPath = GetScriptPath();
+        if (binaryPath != null)
+        {
+            // Use precompiled native binary
+            result = await ProcessSandbox.ExecuteAsync(
+                binaryPath,
+                [rootPath, "--json"],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+        }
+        else
+        {
+            // Fall back to Python runtime
+            var python = _pythonPath ?? ToolPathResolver.Resolve("python", PythonCandidates)
+                ?? throw new InvalidOperationException("Python 3 not found and precompiled binary not available.");
 
-        // Use ProcessSandbox for hardened execution with timeout and output limits
-        var result = await ProcessSandbox.ExecuteAsync(
-            python,
-            [scriptPath, rootPath, "--json"],
-            cancellationToken: ct
-        ).ConfigureAwait(false);
+            var scriptPath = GetScriptPath();
+
+            result = await ProcessSandbox.ExecuteAsync(
+                python,
+                [scriptPath, rootPath, "--json"],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+        }
 
         var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTime);
 
@@ -123,6 +142,19 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         throw new FileNotFoundException(
             $"Corrupt installation: extract_api.py not found at {ScriptPath}. " +
             "Reinstall the application to resolve this issue.");
+    }
+
+    /// <summary>
+    /// Gets the path to the pre-compiled Python extractor binary if it exists.
+    /// The binary is compiled during Docker build using PyInstaller.
+    /// </summary>
+    private static string? GetPrecompiledBinaryPath()
+    {
+        var assemblyDir = AppContext.BaseDirectory;
+        var binaryName = OperatingSystem.IsWindows() ? "python_extractor.exe" : "python_extractor";
+        var binaryPath = Path.Combine(assemblyDir, binaryName);
+
+        return File.Exists(binaryPath) ? binaryPath : null;
     }
 
     private static ApiIndex ConvertToApiIndex(RawPythonApiIndex raw)

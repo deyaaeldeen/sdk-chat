@@ -198,8 +198,8 @@ public class AiService : IAiService
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL2067:UnrecognizedReflectionPattern",
         Justification = "Schema generation uses reflection on user-provided types; callers must preserve metadata")]
     private static string GenerateObjectSchema(
-        [System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] Type type, 
-        int indentLevel, 
+        [System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] Type type,
+        int indentLevel,
         HashSet<Type> visitedTypes)
     {
         const int MaxRecursionDepth = 10;

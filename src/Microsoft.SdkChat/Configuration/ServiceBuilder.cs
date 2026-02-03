@@ -29,7 +29,7 @@ public static class ServiceBuilder
         services.AddSingleton<AiService>();
         services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
         services.AddSingleton<FileHelper>();
-        
+
         // Sample generation (SamplePromptBuilder and SampleWriter are created internally)
         services.AddSingleton<SampleGeneratorTool>();
 
