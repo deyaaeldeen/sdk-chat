@@ -204,6 +204,22 @@ public class MyFeatureTests
 
 ## Architecture
 
+### How It Works
+
+```
+SDK Source → API Extractor → Minimal Context → AI → Samples
+   10MB           ↓              ~100KB        ↓     5 files
+             Roslyn/ast/                   Claude/
+             ts-morph/etc                 GPT/Copilot
+```
+
+1. **Detect** — Language from project files
+2. **Extract** — Public API surface (~95% smaller than source)
+3. **Generate** — AI creates samples with focused context
+4. **Write** — Idiomatic, runnable code with proper patterns
+
+### Component Diagram
+
 ```
 +---------------------------------------------------------------+
 |                       Microsoft.SdkChat                       |
