@@ -5,7 +5,7 @@
 ![SDK Chat Demo](demo/demo.gif)
 
 ```bash
-./scripts/sdk-chat.sh package sample generate /path/to/sdk
+./scripts/sdk-chat.sh package samples generate /path/to/sdk
 ```
 
 ## Installation
@@ -43,17 +43,17 @@ The wrapper scripts (`scripts/sdk-chat.sh` for Linux/macOS, `scripts/sdk-chat.ps
 export GH_TOKEN="ghp_..."
 
 # Generate 5 samples (default)
-./scripts/sdk-chat.sh package sample generate /path/to/openai-dotnet
+./scripts/sdk-chat.sh package samples generate /path/to/openai-dotnet
 
 # Use OpenAI instead of GitHub Copilot
 export OPENAI_API_KEY="sk-..."
-./scripts/sdk-chat.sh package sample generate /path/to/sdk --use-openai
+./scripts/sdk-chat.sh package samples generate /path/to/sdk --use-openai
 
 # Custom count + prompt
-./scripts/sdk-chat.sh package sample generate /path/to/sdk --count 10 --prompt "streaming examples"
+./scripts/sdk-chat.sh package samples generate /path/to/sdk --count 10 --prompt "streaming examples"
 
 # Preview without writing
-./scripts/sdk-chat.sh package sample generate /path/to/sdk --dry-run
+./scripts/sdk-chat.sh package samples generate /path/to/sdk --dry-run
 ```
 
 **Windows PowerShell:**
@@ -62,7 +62,7 @@ export OPENAI_API_KEY="sk-..."
 $env:GH_TOKEN = "ghp_..."
 
 # Generate samples
-.\scripts\sdk-chat.ps1 package sample generate C:\path\to\sdk
+.\scripts\sdk-chat.ps1 package samples generate C:\path\to\sdk
 ```
 
 ## Supported Languages
@@ -82,29 +82,97 @@ All language extractors are included in the Docker image with no additional setu
 
 ## Commands
 
-### `package sample generate`
+Commands follow an entity-based structure: `package <entity> <action>`.
 
-Generate code samples for an SDK.
+### `package source detect`
+
+Auto-detect the source folder (src/, lib/) and programming language (.NET, Python, Java, TypeScript, Go).
 
 ```bash
-./scripts/sdk-chat.sh package sample generate <path> [options]
+./scripts/sdk-chat.sh package source detect <path> [options]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--output <dir>` | Auto | Output directory for samples |
-| `--language <lang>` | Auto | Force language: `dotnet`, `python`, `java`, `typescript`, `javascript`, `go` |
+| `--language <lang>` | Auto | Override detection: `dotnet`, `python`, `java`, `typescript`, `javascript`, `go` |
+| `--json` | `false` | Output as JSON for scripting |
+
+**Example output:**
+```
+SDK: openai-dotnet
+Language: dotnet
+Source: /path/to/openai-dotnet/src
+Extension: .cs
+```
+
+### `package samples detect`
+
+Find existing samples folder (samples/, examples/, demo/).
+
+```bash
+./scripts/sdk-chat.sh package samples detect <path> [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--json` | `false` | Output as JSON for scripting |
+
+### `package samples generate`
+
+Generate production-ready code samples using AI. Requires authentication (`GH_TOKEN` or `OPENAI_API_KEY`).
+
+```bash
+./scripts/sdk-chat.sh package samples generate <path> [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--output <dir>` | Auto | Output directory (auto-detected samples/ or examples/) |
+| `--language <lang>` | Auto | Override detection: `dotnet`, `python`, `java`, `typescript`, `go` |
 | `--count <n>` | `5` | Number of samples to generate |
-| `--prompt <text>` | — | Custom generation prompt |
+| `--prompt <text>` | — | Guide generation: `"streaming examples"`, `"error handling"`, `"authentication"` |
 | `--model <name>` | `claude-sonnet-4.5` | AI model override |
-| `--budget <chars>` | `512K` | Max context size |
+| `--budget <chars>` | `512K` | Max context (128K tokens). Reduce for faster/cheaper. |
 | `--dry-run` | `false` | Preview without writing files |
 | `--use-openai` | `false` | Use OpenAI API instead of GitHub Copilot |
 | `--load-dotenv` | `false` | Load `.env` from current directory |
 
-### `mcp`
+### `package api extract`
 
-Start MCP server for AI agent integration.
+Extract all public types, methods, and properties from SDK source. Uses language-specific analyzers (Roslyn, ast, ts-morph, JavaParser, go/parser).
+
+```bash
+./scripts/sdk-chat.sh package api extract <path> [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--language <lang>` | Auto | Override detection |
+| `--json` | `false` | Structured JSON (default: human-readable stubs) |
+| `--output <file>` | stdout | Write to file |
+
+### `package api coverage`
+
+Find which API operations are missing from samples (documentation gaps).
+
+```bash
+./scripts/sdk-chat.sh package api coverage <path> [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--samples <dir>` | Auto | Custom samples folder path |
+| `--language <lang>` | Auto | Override detection |
+| `--json` | `false` | Output as JSON for CI/automation |
+| `--uncovered-only` | `false` | Only show operations that need samples |
+
+---
+
+## MCP Server
+
+The Model Context Protocol (MCP) server exposes SDK Chat's capabilities to AI agents like VS Code Copilot, Claude Desktop, and other MCP clients.
+
+### Starting the Server
 
 ```bash
 ./scripts/sdk-chat.sh mcp [options]
@@ -118,7 +186,26 @@ Start MCP server for AI agent integration.
 | `--use-openai` | `false` | Use OpenAI API |
 | `--load-dotenv` | `false` | Load `.env` file |
 
-#### Configuring MCP Clients
+### Available MCP Tools
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| `detect_source` | Find source folder and detect language | First step - verify SDK is recognized |
+| `detect_samples` | Find existing samples folder | Before generating to avoid duplicates |
+| `extract_api` | Get public API signatures | Understand what operations exist |
+| `analyze_coverage` | Find documentation gaps | Identify which APIs need samples |
+| `generate_samples` | Create code samples with AI | Generate examples for documentation |
+
+#### Tool Workflow
+
+```
+1. detect_source    → Verify SDK is recognized
+2. detect_samples   → Check for existing examples
+3. analyze_coverage → Find gaps in documentation
+4. generate_samples → Create samples for uncovered APIs
+```
+
+### Configuring MCP Clients
 
 **VS Code** (`.vscode/mcp.json`) - Recommended:
 
@@ -249,7 +336,7 @@ Choose one of the following:
 
 ```bash
 # Force rebuild with --build flag
-./scripts/sdk-chat.sh --build package sample generate /path/to/sdk
+./scripts/sdk-chat.sh --build package samples generate /path/to/sdk
 
 # Or rebuild manually
 docker build -f Dockerfile.release -t sdk-chat:latest .
@@ -264,7 +351,7 @@ Alternative approach for complex workflows:
 ```bash
 # Generate samples
 export GH_TOKEN="ghp_..."
-SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package sample generate /sdk
+SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package samples generate /sdk
 
 # Start MCP server with SSE on port 8080
 docker compose up mcp-sse
@@ -285,7 +372,7 @@ For users who prefer direct Docker commands without wrapper scripts.
 docker run --rm \
   -v "/path/to/your-sdk:/sdk" \
   -e GH_TOKEN="ghp_..." \
-  sdk-chat:latest package sample generate /sdk --count 5
+  sdk-chat:latest package samples generate /sdk --count 5
 ```
 
 ### With Copilot Credentials
@@ -294,7 +381,7 @@ docker run --rm \
 docker run --rm \
   -v "$HOME/.copilot:/root/.copilot:ro" \
   -v "/path/to/your-sdk:/sdk" \
-  sdk-chat:latest package sample generate /sdk --count 5
+  sdk-chat:latest package samples generate /sdk --count 5
 ```
 
 ### With OpenAI
@@ -303,7 +390,7 @@ docker run --rm \
 docker run --rm \
   -v "/path/to/your-sdk:/sdk" \
   -e OPENAI_API_KEY="sk-..." \
-  sdk-chat:latest package sample generate /sdk --use-openai --count 5
+  sdk-chat:latest package samples generate /sdk --use-openai --count 5
 ```
 
 ### Using a .env File
@@ -312,7 +399,7 @@ docker run --rm \
 docker run --rm \
   -v "/path/to/your-sdk:/sdk" \
   -v "$PWD/.env:/app/.env:ro" \
-  sdk-chat:latest package sample generate /sdk --use-openai --load-dotenv
+  sdk-chat:latest package samples generate /sdk --use-openai --load-dotenv
 ```
 
 ### MCP Server (stdio)
@@ -436,7 +523,7 @@ dotnet tool install --global Microsoft.SdkChat
 git clone https://github.com/deyaaeldeen/sdk-chat
 cd sdk-chat
 dotnet build
-dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/sdk
+dotnet run --project src/Microsoft.SdkChat -- package samples generate /path/to/sdk
 ```
 
 ---

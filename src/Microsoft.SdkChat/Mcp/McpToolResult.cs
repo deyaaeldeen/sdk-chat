@@ -187,17 +187,3 @@ public sealed record ResultData
     [JsonPropertyName("language")]
     public string? Language { get; init; }
 }
-
-/// <summary>
-/// Source-generated JSON serialization context for MCP types.
-/// </summary>
-[JsonSourceGenerationOptions(
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    WriteIndented = false)]
-[JsonSerializable(typeof(McpToolResult))]
-[JsonSerializable(typeof(ErrorDetails))]
-[JsonSerializable(typeof(ResultData))]
-internal sealed partial class McpJsonContext : JsonSerializerContext
-{
-}

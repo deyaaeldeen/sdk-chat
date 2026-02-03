@@ -1,8 +1,7 @@
 {
-  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/specification/main/schema/mcp-server.json",
   "name": "sdk-chat",
   "version": "0.1.0",
-  "description": "SDK Chat - Generate production-quality SDK code samples with 70% less AI token usage",
+  "description": "SDK Chat - Analyze SDKs, extract APIs, and generate production-quality code samples using AI",
   "author": "Microsoft",
   "license": "MIT",
   "homepage": "https://github.com/deyaaeldeen/sdk-chat",
@@ -13,22 +12,115 @@
   },
   "tools": [
     {
-      "name": "generate_samples",
-      "description": "Generate production-quality SDK samples with 70% less AI token usage than raw source. Uses semantic API extraction to understand operations and coverage analysis to avoid duplicates. Supports .NET/C#, Python, Java, JavaScript, TypeScript, and Go SDKs. Auto-detects project structure, locates source folders, and creates samples in the appropriate output directory.",
+      "name": "detect_source",
+      "description": "Detect the source folder and programming language of an SDK. WHEN TO USE: First step to verify SDK is recognized. RETURNS: Source folder path, language, file extension, SDK name.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "packagePath": {
             "type": "string",
-            "description": "Absolute path to the SDK package root directory. The tool will automatically detect source folders (src/, lib/, etc.) and sample output locations (samples/, examples/, etc.)."
+            "description": "Absolute path to SDK root (e.g., /home/user/azure-sdk-for-python)"
+          },
+          "language": {
+            "type": "string",
+            "description": "Force language: dotnet, python, java, javascript, typescript, go"
+          }
+        },
+        "required": ["packagePath"]
+      }
+    },
+    {
+      "name": "detect_samples",
+      "description": "Find existing samples/examples folder. WHEN TO USE: Before generating samples to avoid duplicates. RETURNS: Samples path, suggested path, all candidates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packagePath": {
+            "type": "string",
+            "description": "Absolute path to SDK root directory"
+          }
+        },
+        "required": ["packagePath"]
+      }
+    },
+    {
+      "name": "extract_api",
+      "description": "Extract complete public API surface from SDK. WHEN TO USE: To understand SDK operations or prepare context. RETURNS: Compact API signatures (70% smaller than source).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packagePath": {
+            "type": "string",
+            "description": "Absolute path to SDK root directory"
+          },
+          "language": {
+            "type": "string",
+            "description": "Force language: dotnet, python, java, javascript, typescript, go"
+          },
+          "format": {
+            "type": "string",
+            "description": "'stubs' for readable signatures, 'json' for structured data",
+            "enum": ["stubs", "json"]
+          }
+        },
+        "required": ["packagePath"]
+      }
+    },
+    {
+      "name": "analyze_coverage",
+      "description": "Find which SDK operations have sample coverage and which are missing. WHEN TO USE: To identify documentation gaps. RETURNS: Coverage %, covered/uncovered operations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packagePath": {
+            "type": "string",
+            "description": "Absolute path to SDK root directory"
+          },
+          "samplesPath": {
+            "type": "string",
+            "description": "Path to samples folder (auto-detected if omitted)"
+          },
+          "language": {
+            "type": "string",
+            "description": "Force language: dotnet, python, java, javascript, typescript, go"
+          }
+        },
+        "required": ["packagePath"]
+      }
+    },
+    {
+      "name": "generate_samples",
+      "description": "Generate production-ready SDK samples using AI. WHEN TO USE: To create documentation examples. WORKFLOW: detect_source → analyze_coverage → generate_samples targeting gaps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packagePath": {
+            "type": "string",
+            "description": "Absolute path to SDK root directory"
           },
           "outputPath": {
             "type": "string",
-            "description": "Optional output directory for generated samples. If not specified, the tool auto-detects the appropriate folder (e.g., 'samples', 'examples') or creates one."
+            "description": "Output directory (default: auto-detected samples/ or examples/)"
           },
           "prompt": {
             "type": "string",
-            "description": "Optional custom prompt to guide sample generation. Examples: 'Generate samples for authentication scenarios', 'Create examples showing error handling', 'Focus on async/await patterns'."
+            "description": "Guide generation: 'streaming examples', 'error handling', 'authentication'"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of samples (default: 5)"
+          },
+          "budget": {
+            "type": "integer",
+            "description": "Max context chars (default: 512K). Reduce for faster generation."
+          },
+          "model": {
+            "type": "string",
+            "description": "AI model override"
+          },
+          "language": {
+            "type": "string",
+            "description": "Force language: dotnet, python, java, javascript, typescript, go"
           }
         },
         "required": ["packagePath"]

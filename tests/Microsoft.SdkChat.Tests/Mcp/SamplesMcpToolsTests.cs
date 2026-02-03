@@ -11,23 +11,23 @@ using Xunit;
 namespace Microsoft.SdkChat.Tests.Mcp;
 
 /// <summary>
-/// Comprehensive tests for the MCP Sample Generator tool.
+/// Comprehensive tests for the MCP Samples tools.
 /// </summary>
-public class SampleGeneratorMcpToolTests : IDisposable
+public class SamplesMcpToolsTests : IDisposable
 {
     private readonly string _testRoot;
     private readonly MockAiService _mockAiService;
     private readonly FileHelper _fileHelper;
-    private readonly SampleGeneratorMcpTool _tool;
+    private readonly SamplesMcpTools _tool;
 
-    public SampleGeneratorMcpToolTests()
+    public SamplesMcpToolsTests()
     {
         _testRoot = Path.Combine(Path.GetTempPath(), $"McpToolTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testRoot);
 
         _mockAiService = new MockAiService();
         _fileHelper = new FileHelper();
-        _tool = new SampleGeneratorMcpTool(_mockAiService, _fileHelper);
+        _tool = new SamplesMcpTools(_mockAiService, _fileHelper);
     }
 
     public void Dispose()
@@ -415,48 +415,95 @@ public class SampleGeneratorMcpToolTests : IDisposable
     {
         var srcDir = Path.Combine(_testRoot, "src");
         Directory.CreateDirectory(srcDir);
-        File.WriteAllText(Path.Combine(srcDir, "MyProject.csproj"), "<Project />");
-        File.WriteAllText(Path.Combine(srcDir, "Client.cs"), "public class Client { }");
+        File.WriteAllText(Path.Combine(srcDir, "MyProject.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>");
+        File.WriteAllText(Path.Combine(srcDir, "Client.cs"), @"
+namespace TestSdk;
+/// <summary>Test client.</summary>
+public class Client
+{
+    /// <summary>Gets a resource.</summary>
+    public string GetResource(int id) => ""test"";
+}
+");
     }
 
     private void CreatePythonProject()
     {
         var srcDir = Path.Combine(_testRoot, "src");
         Directory.CreateDirectory(srcDir);
-        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"), "[project]");
-        File.WriteAllText(Path.Combine(srcDir, "client.py"), "class Client: pass");
+        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"), "[project]\nname = \"test-sdk\"\nversion = \"1.0.0\"");
+        File.WriteAllText(Path.Combine(srcDir, "__init__.py"), "");
+        File.WriteAllText(Path.Combine(srcDir, "client.py"), @"
+class Client:
+    '''Test client for API operations.'''
+    
+    def get_resource(self, id: int) -> str:
+        '''Gets a resource by ID.'''
+        return 'test'
+");
     }
 
     private void CreateJavaProject()
     {
-        var srcDir = Path.Combine(_testRoot, "src", "main", "java");
+        var srcDir = Path.Combine(_testRoot, "src", "main", "java", "com", "test");
         Directory.CreateDirectory(srcDir);
-        File.WriteAllText(Path.Combine(_testRoot, "pom.xml"), "<project />");
-        File.WriteAllText(Path.Combine(srcDir, "Client.java"), "public class Client { }");
+        File.WriteAllText(Path.Combine(_testRoot, "pom.xml"), "<project><groupId>com.test</groupId><artifactId>test-sdk</artifactId></project>");
+        File.WriteAllText(Path.Combine(srcDir, "Client.java"), @"
+package com.test;
+/** Test client. */
+public class Client {
+    /** Gets a resource. */
+    public String getResource(int id) { return ""test""; }
+}
+");
     }
 
     private void CreateTypeScriptProject()
     {
         var srcDir = Path.Combine(_testRoot, "src");
         Directory.CreateDirectory(srcDir);
-        File.WriteAllText(Path.Combine(_testRoot, "package.json"), "{\"name\": \"test\"}");
-        File.WriteAllText(Path.Combine(_testRoot, "tsconfig.json"), "{}");
-        File.WriteAllText(Path.Combine(srcDir, "client.ts"), "export class Client { }");
+        File.WriteAllText(Path.Combine(_testRoot, "package.json"), "{\"name\": \"test-sdk\", \"version\": \"1.0.0\"}");
+        File.WriteAllText(Path.Combine(_testRoot, "tsconfig.json"), "{\"compilerOptions\": {\"target\": \"ES2020\"}}");
+        File.WriteAllText(Path.Combine(srcDir, "client.ts"), @"
+/** Test client. */
+export class Client {
+    /** Gets a resource. */
+    getResource(id: number): string { return 'test'; }
+}
+");
     }
 
     private void CreateJavaScriptProject()
     {
         var srcDir = Path.Combine(_testRoot, "src");
         Directory.CreateDirectory(srcDir);
-        File.WriteAllText(Path.Combine(_testRoot, "package.json"), "{\"name\": \"test\"}");
-        File.WriteAllText(Path.Combine(srcDir, "client.js"), "class Client { }");
+        File.WriteAllText(Path.Combine(_testRoot, "package.json"), "{\"name\": \"test-sdk\", \"version\": \"1.0.0\"}");
+        File.WriteAllText(Path.Combine(srcDir, "client.js"), @"
+/** Test client. */
+class Client {
+    /** Gets a resource. */
+    getResource(id) { return 'test'; }
+}
+module.exports = { Client };
+");
     }
 
     private void CreateGoProject()
     {
         Directory.CreateDirectory(_testRoot);
-        File.WriteAllText(Path.Combine(_testRoot, "go.mod"), "module test");
-        File.WriteAllText(Path.Combine(_testRoot, "client.go"), "package main");
+        File.WriteAllText(Path.Combine(_testRoot, "go.mod"), "module github.com/test/sdk\n\ngo 1.21");
+        File.WriteAllText(Path.Combine(_testRoot, "client.go"), @"
+// Package sdk provides test functionality.
+package sdk
+
+// Client is a test client.
+type Client struct {}
+
+// GetResource gets a resource by ID.
+func (c *Client) GetResource(id int) string {
+    return ""test""
+}
+");
     }
 
     #endregion
@@ -659,7 +706,7 @@ public class SampleGeneratorMcpToolTests : IDisposable
 
         // Set up a mock that delays before returning samples
         var delaySamples = new DelaySamplesMockAiService(delay: TimeSpan.FromSeconds(5));
-        var tool = new SampleGeneratorMcpTool(delaySamples, _fileHelper);
+        var tool = new SamplesMcpTools(delaySamples, _fileHelper);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 

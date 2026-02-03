@@ -4,10 +4,16 @@ namespace Microsoft.SdkChat.Commands;
 
 public class PackageCommand : Command
 {
-    public PackageCommand() : base("package", "Package-related commands")
+    public PackageCommand() : base("package", "SDK package operations")
     {
-        var sampleCommand = new Command("sample", "Sample-related commands");
-        sampleCommand.Add(new GenerateCommand());
-        Add(sampleCommand);
+        // Entity-based command structure:
+        // package source detect <path>
+        // package samples detect <path>
+        // package samples generate <path>
+        // package api extract <path>
+        // package api coverage <path>
+        Add(new SourceEntityCommand());
+        Add(new SamplesEntityCommand());
+        Add(new ApiEntityCommand());
     }
 }

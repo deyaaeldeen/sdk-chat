@@ -53,7 +53,9 @@ public static class McpServer
                 options.ServerInfo = new() { Name = "sdk-chat", Version = "1.0.0" };
             })
             .WithHttpTransport()
-            .WithTools<SampleGeneratorMcpTool>();
+            .WithTools<SourceMcpTools>()
+            .WithTools<SamplesMcpTools>()
+            .WithTools<ApiMcpTools>();
 
             var app = builder.Build();
 
@@ -76,7 +78,9 @@ public static class McpServer
                 options.ServerInfo = new() { Name = "sdk-chat", Version = "1.0.0" };
             })
             .WithStdioServerTransport()
-            .WithTools<SampleGeneratorMcpTool>();
+            .WithTools<SourceMcpTools>()
+            .WithTools<SamplesMcpTools>()
+            .WithTools<ApiMcpTools>();
 
             var host = builder.Build();
             await host.RunAsync(cancellationToken);

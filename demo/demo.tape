@@ -17,7 +17,7 @@ Sleep 500ms
 Type "# Using Docker (official installation method)"
 Enter
 Sleep 500ms
-Type "./scripts/sdk-chat.sh package sample generate ~/openai-dotnet --count 1"
+Type "./scripts/sdk-chat.sh package samples generate ~/openai-dotnet --count 1"
 Sleep 300ms
 Enter
 Sleep 30s
@@ -26,7 +26,7 @@ Sleep 30s
 Type "# With OpenAI instead of GitHub Copilot"
 Enter
 Sleep 500ms
-Type "./scripts/sdk-chat.sh package sample generate ~/openai-dotnet --use-openai --load-dotenv --count 1"
+Type "./scripts/sdk-chat.sh package samples generate ~/openai-dotnet --use-openai --load-dotenv --count 1"
 Sleep 300ms
 Enter
 Sleep 30s

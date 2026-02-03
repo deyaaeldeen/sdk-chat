@@ -53,10 +53,10 @@ docker run --rm -u $(id -u):$(id -g) \
   -e GH_TOKEN="ghp_..." \
   -v "$HOME:$HOME" \
   -e "HOME=$HOME" \
-  sdk-chat:latest package sample generate /path/to/sdk
+  sdk-chat:latest package samples generate /path/to/sdk
 
 # Or with Docker Compose
-GH_TOKEN="ghp_..." SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package sample generate /sdk
+GH_TOKEN="ghp_..." SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package samples generate /sdk
 ```
 
 ### Wrapper Scripts (Host Only)
@@ -69,7 +69,7 @@ The wrapper scripts in `scripts/` are designed for use **on the host machine**, 
 
 ```bash
 # From host machine (not inside dev container)
-./scripts/sdk-chat.sh package sample generate /path/to/sdk
+./scripts/sdk-chat.sh package samples generate /path/to/sdk
 ```
 
 ### Docker-in-Docker (Dev Container)
@@ -87,7 +87,7 @@ docker inspect $(hostname) | grep -A 2 'workspaces/sdk-chat'
 docker run --rm \
   -e GH_TOKEN="ghp_..." \
   -v "/home/<user>/sdk-chat/temp/openai-dotnet:/sdk" \
-  sdk-chat:latest package sample generate /sdk --dry-run
+  sdk-chat:latest package samples generate /sdk --dry-run
 ```
 
 > **Why?** The Docker socket is shared, so `docker run` commands execute on the host. Paths passed to `-v` must exist on the host, not inside the dev container.
@@ -144,11 +144,29 @@ public string? OptionalProperty { get; init; }
 | Task | File |
 |------|------|
 | CLI commands | `src/Microsoft.SdkChat/Program.cs` |
+| Package info service | `src/Microsoft.SdkChat/Services/PackageInfoService.cs` |
+| Sample generator service | `src/Microsoft.SdkChat/Services/SampleGeneratorService.cs` |
 | AI streaming | `src/Microsoft.SdkChat/Services/AiService.cs` |
-| Sample generation | `src/Microsoft.SdkChat/Tools/Package/Samples/SampleGeneratorTool.cs` |
+| Sample generation (CLI) | `src/Microsoft.SdkChat/Tools/Package/Samples/SampleGeneratorTool.cs` |
 | Language detection | `src/Microsoft.SdkChat/Services/SdkInfo.cs` |
 | MCP server | `src/Microsoft.SdkChat/Mcp/McpServer.cs` |
+| MCP source tools | `src/Microsoft.SdkChat/Mcp/SourceMcpTools.cs` |
+| MCP samples tools | `src/Microsoft.SdkChat/Mcp/SamplesMcpTools.cs` |
+| MCP API tools | `src/Microsoft.SdkChat/Mcp/ApiMcpTools.cs` |
 | ACP agent | `src/Microsoft.SdkChat/Acp/SampleGeneratorAgent.cs` |
+| Entity commands | `src/Microsoft.SdkChat/Commands/*EntityCommand.cs` |
+
+## CLI Structure
+
+Commands follow entity-based structure: `package <entity> <action>`
+
+```
+package source detect <path>     # Detect source folder + language
+package samples detect <path>    # Detect samples folder
+package samples generate <path>  # Generate samples (AI-powered)
+package api extract <path>       # Extract public API surface
+package api coverage <path>      # Analyze coverage gaps
+```
 
 ## Adding Features
 
