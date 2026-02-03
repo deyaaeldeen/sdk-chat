@@ -17,7 +17,7 @@ jobs:
         run: docker build -t sdk-chat-dev .
 
       - name: Build
-        run: docker run --rm -u $(id -u):$(id -g) -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet build --configuration Release
+        run: docker run --rm -u $(id -u):$(id -g) -e HOME=/workspace -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet build --configuration Release
 
       - name: Test
-        run: docker run --rm -u $(id -u):$(id -g) -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet test --configuration Release --verbosity normal
+        run: docker run --rm -u $(id -u):$(id -g) -e HOME=/workspace -v ${{ github.workspace }}:/workspace -w /workspace sdk-chat-dev dotnet test --configuration Release --verbosity normal
