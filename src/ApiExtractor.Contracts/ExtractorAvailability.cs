@@ -1,0 +1,225 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+using System.Collections.Concurrent;
+using System.Diagnostics;
+
+namespace ApiExtractor.Contracts;
+
+/// <summary>
+/// Execution mode for an extractor.
+/// </summary>
+public enum ExtractorMode
+{
+    /// <summary>Extractor not available in any mode.</summary>
+    Unavailable,
+
+    /// <summary>Using precompiled native binary (AOT container).</summary>
+    NativeBinary,
+
+    /// <summary>Using runtime interpreter/compiler (JIT environment).</summary>
+    RuntimeInterpreter
+}
+
+/// <summary>
+/// Result of extractor availability check.
+/// </summary>
+public sealed record ExtractorAvailabilityResult(
+    bool IsAvailable,
+    ExtractorMode Mode,
+    string? ExecutablePath,
+    string? UnavailableReason,
+    string? Warning
+)
+{
+    /// <summary>Creates a result for unavailable extractor.</summary>
+    public static ExtractorAvailabilityResult Unavailable(string reason) =>
+        new(false, ExtractorMode.Unavailable, null, reason, null);
+
+    /// <summary>Creates a result for native binary mode.</summary>
+    public static ExtractorAvailabilityResult NativeBinary(string path, string? warning = null) =>
+        new(true, ExtractorMode.NativeBinary, path, null, warning);
+
+    /// <summary>Creates a result for runtime interpreter mode.</summary>
+    public static ExtractorAvailabilityResult RuntimeInterpreter(string path, string? warning = null) =>
+        new(true, ExtractorMode.RuntimeInterpreter, path, null, warning);
+}
+
+/// <summary>
+/// Provides robust availability detection for API extractors across AOT and JIT environments.
+/// Caches results and validates executables actually work, not just that they exist.
+/// </summary>
+public static class ExtractorAvailability
+{
+    private static readonly ConcurrentDictionary<string, ExtractorAvailabilityResult> Cache = new();
+
+    /// <summary>
+    /// Timeout for executable validation in milliseconds.
+    /// </summary>
+    private const int ValidationTimeoutMs = 5000;
+
+    /// <summary>
+    /// Checks if an extractor is available, preferring precompiled native binary over runtime.
+    /// Results are cached for the lifetime of the process.
+    /// </summary>
+    /// <param name="language">Extractor language identifier (e.g., "go", "python").</param>
+    /// <param name="nativeBinaryName">Name of the precompiled binary (e.g., "go_extractor").</param>
+    /// <param name="runtimeToolName">Name of the runtime tool (e.g., "go", "python3").</param>
+    /// <param name="runtimeCandidates">Candidate paths for the runtime tool.</param>
+    /// <param name="nativeValidationArgs">Args to validate native binary (default: "--help").</param>
+    /// <param name="runtimeValidationArgs">Args to validate runtime tool (default: "--version").</param>
+    /// <param name="forceRecheck">If true, bypasses cache and rechecks availability.</param>
+    /// <returns>Availability result with mode, path, and any warnings.</returns>
+    public static ExtractorAvailabilityResult Check(
+        string language,
+        string nativeBinaryName,
+        string runtimeToolName,
+        string[] runtimeCandidates,
+        string nativeValidationArgs = "--help",
+        string runtimeValidationArgs = "--version",
+        bool forceRecheck = false)
+    {
+        var cacheKey = $"{language}:{nativeBinaryName}:{runtimeToolName}";
+
+        if (!forceRecheck && Cache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        var result = CheckInternal(
+            language,
+            nativeBinaryName,
+            runtimeToolName,
+            runtimeCandidates,
+            nativeValidationArgs,
+            runtimeValidationArgs);
+
+        Cache[cacheKey] = result;
+        return result;
+    }
+
+    /// <summary>
+    /// Clears the availability cache. Useful for testing.
+    /// </summary>
+    public static void ClearCache() => Cache.Clear();
+
+    private static ExtractorAvailabilityResult CheckInternal(
+        string language,
+        string nativeBinaryName,
+        string runtimeToolName,
+        string[] runtimeCandidates,
+        string nativeValidationArgs,
+        string runtimeValidationArgs)
+    {
+        // 1. Check for precompiled native binary first (AOT mode)
+        var nativePath = GetNativeBinaryPath(nativeBinaryName);
+        if (nativePath != null)
+        {
+            var validation = ValidateExecutable(nativePath, nativeValidationArgs);
+            if (validation.Success)
+            {
+                return ExtractorAvailabilityResult.NativeBinary(nativePath);
+            }
+
+            // Native binary exists but failed validation - log warning but continue to runtime
+            // This handles cases like wrong architecture, missing libraries, etc.
+        }
+
+        // 2. Fall back to runtime interpreter/compiler (JIT mode)
+        var runtimeResult = ToolPathResolver.ResolveWithDetails(
+            runtimeToolName,
+            runtimeCandidates,
+            runtimeValidationArgs);
+
+        if (runtimeResult.IsAvailable && runtimeResult.Path != null)
+        {
+            return ExtractorAvailabilityResult.RuntimeInterpreter(
+                runtimeResult.Path,
+                runtimeResult.WarningOrError);
+        }
+
+        // 3. Neither available - provide helpful error message
+        var nativeHint = nativePath != null
+            ? $" Native binary found at {nativePath} but failed to execute."
+            : "";
+
+        return ExtractorAvailabilityResult.Unavailable(
+            $"{language} extractor not available.{nativeHint} " +
+            $"Runtime tool '{runtimeToolName}' not found. " +
+            GetInstallHint(language));
+    }
+
+    /// <summary>
+    /// Gets the path to a precompiled native binary if it exists.
+    /// Checks AppContext.BaseDirectory (where the main executable lives).
+    /// </summary>
+    private static string? GetNativeBinaryPath(string binaryName)
+    {
+        var assemblyDir = AppContext.BaseDirectory;
+        var extension = OperatingSystem.IsWindows() ? ".exe" : "";
+        var binaryPath = Path.Combine(assemblyDir, binaryName + extension);
+
+        return File.Exists(binaryPath) ? binaryPath : null;
+    }
+
+    /// <summary>
+    /// Validates that an executable runs successfully with given args.
+    /// More robust than just checking file existence.
+    /// </summary>
+    private static (bool Success, string? Error) ValidateExecutable(string path, string args)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = path,
+                Arguments = args,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi);
+            if (process == null)
+            {
+                return (false, "Failed to start process");
+            }
+
+            var completed = process.WaitForExit(ValidationTimeoutMs);
+            if (!completed)
+            {
+                try { process.Kill(); } catch { }
+                return (false, "Validation timed out");
+            }
+
+            // Exit code 0 or 1 are acceptable for --help (some tools return 1 for help)
+            // Exit code 0 is required for --version
+            var acceptableExitCodes = args.Contains("--help") ? new[] { 0, 1 } : new[] { 0 };
+            if (acceptableExitCodes.Contains(process.ExitCode))
+            {
+                return (true, null);
+            }
+
+            var stderr = process.StandardError.ReadToEnd();
+            return (false, $"Exit code {process.ExitCode}: {stderr}");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Gets installation hint for a language's runtime tool.
+    /// </summary>
+    private static string GetInstallHint(string language) => language.ToLowerInvariant() switch
+    {
+        "go" => "Install Go from https://go.dev",
+        "python" => "Install Python 3.9+ from https://python.org",
+        "java" => "Install JBang from https://jbang.dev",
+        "typescript" or "javascript" => "Install Node.js 20+ from https://nodejs.org",
+        "dotnet" or "csharp" => "Install .NET SDK from https://dot.net",
+        _ => $"Install the {language} runtime"
+    };
+}

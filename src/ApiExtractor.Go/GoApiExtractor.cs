@@ -18,9 +18,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     private static readonly SemaphoreSlim CompileLock = new(1, 1);
     private static string? _cachedBinaryPath;
 
-    private string? _goPath;
-    private string? _unavailableReason;
-    private string? _warning;
+    private ExtractorAvailabilityResult? _availability;
 
     /// <inheritdoc />
     public string Language => "go";
@@ -28,31 +26,32 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// <summary>
     /// Warning message from tool resolution (if any).
     /// </summary>
-    public string? Warning => _warning;
+    public string? Warning => GetAvailability().Warning;
+
+    /// <summary>
+    /// Gets the current execution mode (NativeBinary or RuntimeInterpreter).
+    /// </summary>
+    public ExtractorMode Mode => GetAvailability().Mode;
 
     /// <inheritdoc />
-    public bool IsAvailable()
+    public bool IsAvailable() => GetAvailability().IsAvailable;
+
+    /// <inheritdoc />
+    public string? UnavailableReason => GetAvailability().UnavailableReason;
+
+    /// <summary>
+    /// Gets detailed availability information with caching.
+    /// </summary>
+    private ExtractorAvailabilityResult GetAvailability()
     {
-        // Check for precompiled binary first (used in release container)
-        if (GetPrecompiledBinaryPath() != null)
-        {
-            return true;
-        }
-
-        // Fall back to Go runtime for compilation
-        var result = ToolPathResolver.ResolveWithDetails("go", GoPaths, "version");
-        if (!result.IsAvailable)
-        {
-            _unavailableReason = result.WarningOrError ?? "Go not found. Install Go (https://go.dev) and ensure it's in PATH.";
-            return false;
-        }
-        _goPath = result.Path;
-        _warning = result.WarningOrError; // Store warning for structured logging by caller
-        return true;
+        return _availability ??= ExtractorAvailability.Check(
+            language: "go",
+            nativeBinaryName: "go_extractor",
+            runtimeToolName: "go",
+            runtimeCandidates: GoPaths,
+            nativeValidationArgs: "--help",
+            runtimeValidationArgs: "version");
     }
-
-    /// <inheritdoc />
-    public string? UnavailableReason => _unavailableReason;
 
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
@@ -88,15 +87,21 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
-        var binaryPath = GetPrecompiledBinaryPath();
+        var availability = GetAvailability();
+        string binaryPath;
 
-        if (binaryPath == null)
+        if (availability.Mode == ExtractorMode.NativeBinary)
         {
-            // Fall back to runtime compilation if pre-compiled binary not available
-            var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version")
-                ?? throw new FileNotFoundException("Go executable not found. Pre-compiled binary also not available.");
-
-            binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
+            binaryPath = availability.ExecutablePath!;
+        }
+        else if (availability.Mode == ExtractorMode.RuntimeInterpreter)
+        {
+            // Compile using the Go runtime
+            binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            throw new InvalidOperationException(availability.UnavailableReason ?? "Go extractor not available");
         }
 
         // Use ProcessSandbox for hardened execution with timeout and output limits
@@ -127,15 +132,20 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsGoAsync(string rootPath, CancellationToken ct = default)
     {
-        var binaryPath = GetPrecompiledBinaryPath();
+        var availability = GetAvailability();
+        string binaryPath;
 
-        if (binaryPath == null)
+        if (availability.Mode == ExtractorMode.NativeBinary)
         {
-            // Fall back to runtime compilation if pre-compiled binary not available
-            var goPath = _goPath ?? ToolPathResolver.Resolve("go", GoPaths, "version")
-                ?? throw new FileNotFoundException("Go executable not found. Pre-compiled binary also not available.");
-
-            binaryPath = await EnsureCompiledAsync(goPath, ct).ConfigureAwait(false);
+            binaryPath = availability.ExecutablePath!;
+        }
+        else if (availability.Mode == ExtractorMode.RuntimeInterpreter)
+        {
+            binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            throw new InvalidOperationException(availability.UnavailableReason ?? "Go extractor not available");
         }
 
         // Use ProcessSandbox for hardened execution with timeout and output limits
@@ -154,26 +164,6 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         }
 
         return result.StandardOutput;
-    }
-
-    /// <summary>
-    /// Gets the path to the pre-compiled Go extractor binary if it exists.
-    /// The binary is compiled during build and placed in the assembly directory.
-    /// </summary>
-    /// <returns>Path to pre-compiled binary, or null if not available.</returns>
-    private static string? GetPrecompiledBinaryPath()
-    {
-        var assemblyDir = AppContext.BaseDirectory;
-        var binaryName = OperatingSystem.IsWindows() ? "go_extractor.exe" : "go_extractor";
-        var binaryPath = Path.Combine(assemblyDir, binaryName);
-
-        if (File.Exists(binaryPath))
-        {
-            _cachedBinaryPath = binaryPath;
-            return binaryPath;
-        }
-
-        return null;
     }
 
     /// <summary>

@@ -22,22 +22,22 @@ public class ReleaseContainerCollection : ICollectionFixture<ReleaseContainerFix
 public class ReleaseContainerFixture : IAsyncLifetime
 {
     private static readonly string RepoRoot = FindRepoRoot();
-    
+
     /// <summary>
     /// Path to the wrapper script that handles all Docker setup.
     /// </summary>
     public string WrapperScript => Path.Combine(RepoRoot, "scripts", "sdk-chat.sh");
-    
+
     /// <summary>
     /// Path to test fixtures (shared with ApiExtractor.Tests).
     /// </summary>
     public string FixturesPath => Path.Combine(RepoRoot, "tests", "ApiExtractor.Tests", "TestFixtures");
-    
+
     /// <summary>
     /// Whether the test environment is available (Docker + script exists).
     /// </summary>
     public bool IsAvailable { get; private set; }
-    
+
     /// <summary>
     /// Reason why tests are being skipped, if any.
     /// </summary>
@@ -97,7 +97,7 @@ public class ReleaseContainerFixture : IAsyncLifetime
         // Use bash to run the wrapper script
         var scriptArgs = new List<string> { WrapperScript };
         scriptArgs.AddRange(args);
-        
+
         return await RunProcessAsync("bash", [.. scriptArgs], timeoutSeconds);
     }
 
@@ -115,16 +115,16 @@ public class ReleaseContainerFixture : IAsyncLifetime
         int timeoutSeconds = 120)
     {
         var fixturePath = Path.Combine(FixturesPath, language);
-        
+
         // Parse command into args, append fixture path, then additional args
         var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
         args.Add(fixturePath);
-        
+
         if (!string.IsNullOrEmpty(additionalArgs))
         {
             args.AddRange(additionalArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         }
-        
+
         return await RunAsync([.. args], timeoutSeconds);
     }
 
@@ -166,14 +166,14 @@ public class ReleaseContainerFixture : IAsyncLifetime
         try
         {
             process.Start();
-            
+
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-            
+
             var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
             var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
-            
+
             await process.WaitForExitAsync(cts.Token);
-            
+
             return (process.ExitCode, await outputTask, await errorTask);
         }
         catch (OperationCanceledException)

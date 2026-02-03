@@ -13,9 +13,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 {
     private static readonly string[] JBangCandidates = { "jbang" };
 
-    private string? _jbangPath;
-    private string? _unavailableReason;
-    private string? _warning;
+    private ExtractorAvailabilityResult? _availability;
 
     /// <inheritdoc />
     public string Language => "java";
@@ -23,31 +21,32 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// <summary>
     /// Warning message from tool resolution (if any).
     /// </summary>
-    public string? Warning => _warning;
+    public string? Warning => GetAvailability().Warning;
+
+    /// <summary>
+    /// Gets the current execution mode (NativeBinary or RuntimeInterpreter).
+    /// </summary>
+    public ExtractorMode Mode => GetAvailability().Mode;
 
     /// <inheritdoc />
-    public bool IsAvailable()
+    public bool IsAvailable() => GetAvailability().IsAvailable;
+
+    /// <inheritdoc />
+    public string? UnavailableReason => GetAvailability().UnavailableReason;
+
+    /// <summary>
+    /// Gets detailed availability information with caching.
+    /// </summary>
+    private ExtractorAvailabilityResult GetAvailability()
     {
-        // Check for precompiled binary first (used in release container)
-        if (GetPrecompiledBinaryPath() != null)
-        {
-            return true;
-        }
-
-        // Fall back to JBang runtime
-        var result = ToolPathResolver.ResolveWithDetails("jbang", JBangCandidates);
-        if (!result.IsAvailable)
-        {
-            _unavailableReason = "JBang not found. Install JBang (https://jbang.dev) and ensure it's in PATH.";
-            return false;
-        }
-        _jbangPath = result.Path;
-        _warning = result.WarningOrError; // Store warning for structured logging by caller
-        return true;
+        return _availability ??= ExtractorAvailability.Check(
+            language: "java",
+            nativeBinaryName: "java_extractor",
+            runtimeToolName: "jbang",
+            runtimeCandidates: JBangCandidates,
+            nativeValidationArgs: "--help",
+            runtimeValidationArgs: "--version");
     }
-
-    /// <inheritdoc />
-    public string? UnavailableReason => _unavailableReason;
 
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
@@ -83,13 +82,13 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
-        var binaryPath = GetPrecompiledBinaryPath();
+        var availability = GetAvailability();
 
-        if (binaryPath != null)
+        if (availability.Mode == ExtractorMode.NativeBinary)
         {
             // Use precompiled native binary
             var result = await ProcessSandbox.ExecuteAsync(
-                binaryPath,
+                availability.ExecutablePath!,
                 [rootPath, "--json"],
                 cancellationToken: ct
             ).ConfigureAwait(false);
@@ -110,10 +109,12 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
             return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
         }
 
-        // Fall back to JBang runtime
-        var jbangPath = _jbangPath ?? ToolPathResolver.Resolve("jbang", JBangCandidates)
-            ?? throw new InvalidOperationException("JBang not found and precompiled binary not available");
+        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
+        {
+            throw new InvalidOperationException(availability.UnavailableReason ?? "Java extractor not available");
+        }
 
+        // Fall back to JBang runtime
         var scriptPath = GetScriptPath();
         if (!File.Exists(scriptPath))
         {
@@ -122,7 +123,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 
         // Use ProcessSandbox for hardened execution with timeout and output limits
         var jbangResult = await ProcessSandbox.ExecuteAsync(
-            jbangPath,
+            availability.ExecutablePath!,
             [scriptPath, rootPath, "--json"],
             cancellationToken: ct
         ).ConfigureAwait(false);
@@ -148,13 +149,13 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsJavaAsync(string rootPath, CancellationToken ct = default)
     {
-        var binaryPath = GetPrecompiledBinaryPath();
+        var availability = GetAvailability();
 
-        if (binaryPath != null)
+        if (availability.Mode == ExtractorMode.NativeBinary)
         {
             // Use precompiled native binary
             var result = await ProcessSandbox.ExecuteAsync(
-                binaryPath,
+                availability.ExecutablePath!,
                 [rootPath, "--stub"],
                 cancellationToken: ct
             ).ConfigureAwait(false);
@@ -170,15 +171,17 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
             return result.StandardOutput;
         }
 
-        // Fall back to JBang runtime
-        var jbangPath = _jbangPath ?? ToolPathResolver.Resolve("jbang", JBangCandidates)
-            ?? throw new InvalidOperationException("JBang not found and precompiled binary not available");
+        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
+        {
+            throw new InvalidOperationException(availability.UnavailableReason ?? "Java extractor not available");
+        }
 
+        // Fall back to JBang runtime
         var scriptPath = GetScriptPath();
 
         // Use ProcessSandbox for hardened execution with timeout and output limits
         var jbangResult = await ProcessSandbox.ExecuteAsync(
-            jbangPath,
+            availability.ExecutablePath!,
             [scriptPath, rootPath, "--stub"],
             cancellationToken: ct
         ).ConfigureAwait(false);
@@ -206,18 +209,5 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         throw new FileNotFoundException(
             $"Corrupt installation: ExtractApi.java not found at {scriptPath}. " +
             "Reinstall the application to resolve this issue.");
-    }
-
-    /// <summary>
-    /// Gets the path to the pre-compiled Java extractor binary if it exists.
-    /// The binary is compiled during Docker build using GraalVM native-image.
-    /// </summary>
-    private static string? GetPrecompiledBinaryPath()
-    {
-        var assemblyDir = AppContext.BaseDirectory;
-        var binaryName = OperatingSystem.IsWindows() ? "java_extractor.exe" : "java_extractor";
-        var binaryPath = Path.Combine(assemblyDir, binaryName);
-
-        return File.Exists(binaryPath) ? binaryPath : null;
     }
 }

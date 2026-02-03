@@ -22,7 +22,7 @@
     <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
   </ItemGroup>
 
-  <!-- 
+  <!--
     Note: Test fixtures are referenced from ApiExtractor.Tests/TestFixtures at runtime.
     The wrapper script (scripts/sdk-chat.sh) mounts them automatically.
   -->

@@ -9,12 +9,12 @@ namespace Microsoft.SdkChat.IntegrationTests;
 /// Integration tests for release container CLI commands across all supported languages.
 /// Uses the wrapper script (scripts/sdk-chat.sh) which handles Docker setup, path mounting,
 /// and credential passthrough automatically.
-/// 
+///
 /// Prerequisites:
 /// - Docker available
 /// - Release image built: docker build -f Dockerfile.release -t sdk-chat:latest .
 ///   Or use: ./scripts/sdk-chat.sh --build --help
-/// 
+///
 /// Run:
 ///   dotnet test tests/Microsoft.SdkChat.IntegrationTests --filter "Category=Integration"
 /// </summary>
@@ -37,7 +37,7 @@ public class ReleaseContainerTests
     public static TheoryData<string> SupportedLanguages => new()
     {
         "DotNet",
-        "Python", 
+        "Python",
         "Go",
         "TypeScript"
     };
@@ -57,7 +57,7 @@ public class ReleaseContainerTests
     public static TheoryData<string> AllLanguages => new()
     {
         "DotNet",
-        "Python", 
+        "Python",
         "Go",
         "Java",
         "TypeScript"
@@ -106,7 +106,7 @@ public class ReleaseContainerTests
 
         Assert.True(exitCode == 0, $"[{language}] Exit code {exitCode}. Error: {error}");
         Assert.False(string.IsNullOrWhiteSpace(output), $"[{language}] Expected output");
-        
+
         // Should return JSON or path info
         Assert.True(
             output.Contains("\"") || output.Contains("/"),
@@ -131,7 +131,7 @@ public class ReleaseContainerTests
 
         Assert.True(exitCode == 0, $"[{language}] Exit code {exitCode}. Error: {error}. Output: {output}");
         Assert.False(string.IsNullOrWhiteSpace(output), $"[{language}] Expected output");
-        
+
         // API extraction should return JSON with package/namespace info
         Assert.True(
             output.Contains("\"package\"") || output.Contains("\"namespaces\"") || output.Contains("\"types\""),

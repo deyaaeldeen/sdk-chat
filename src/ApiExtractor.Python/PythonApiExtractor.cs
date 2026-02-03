@@ -18,9 +18,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
     private static readonly string[] PythonCandidates = { "python3", "python" };
 
-    private string? _pythonPath;
-    private string? _unavailableReason;
-    private string? _warning;
+    private ExtractorAvailabilityResult? _availability;
 
     /// <inheritdoc />
     public string Language => "python";
@@ -29,31 +27,32 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     /// Warning message from tool resolution (if any).
     /// Check this after calling IsAvailable() for non-fatal issues.
     /// </summary>
-    public string? Warning => _warning;
+    public string? Warning => GetAvailability().Warning;
+
+    /// <summary>
+    /// Gets the current execution mode (NativeBinary or RuntimeInterpreter).
+    /// </summary>
+    public ExtractorMode Mode => GetAvailability().Mode;
 
     /// <inheritdoc />
-    public bool IsAvailable()
+    public bool IsAvailable() => GetAvailability().IsAvailable;
+
+    /// <inheritdoc />
+    public string? UnavailableReason => GetAvailability().UnavailableReason;
+
+    /// <summary>
+    /// Gets detailed availability information with caching.
+    /// </summary>
+    private ExtractorAvailabilityResult GetAvailability()
     {
-        // Check for precompiled binary first (used in release container)
-        if (GetPrecompiledBinaryPath() != null)
-        {
-            return true;
-        }
-
-        // Fall back to Python runtime
-        var result = ToolPathResolver.ResolveWithDetails("python", PythonCandidates);
-        if (!result.IsAvailable)
-        {
-            _unavailableReason = "Python 3 not found. Install Python 3.9+ and ensure it's in PATH.";
-            return false;
-        }
-        _pythonPath = result.Path;
-        _warning = result.WarningOrError; // Store warning for structured logging by caller
-        return true;
+        return _availability ??= ExtractorAvailability.Check(
+            language: "python",
+            nativeBinaryName: "python_extractor",
+            runtimeToolName: "python",
+            runtimeCandidates: PythonCandidates,
+            nativeValidationArgs: "--help",
+            runtimeValidationArgs: "--version");
     }
-
-    /// <inheritdoc />
-    public string? UnavailableReason => _unavailableReason;
 
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
@@ -86,31 +85,32 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
         var startTime = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        var binaryPath = GetPrecompiledBinaryPath();
+        var availability = GetAvailability();
         ProcessResult result;
 
-        if (binaryPath != null)
+        if (availability.Mode == ExtractorMode.NativeBinary)
         {
             // Use precompiled native binary
             result = await ProcessSandbox.ExecuteAsync(
-                binaryPath,
+                availability.ExecutablePath!,
                 [rootPath, "--json"],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+        }
+        else if (availability.Mode == ExtractorMode.RuntimeInterpreter)
+        {
+            // Fall back to Python runtime
+            var scriptPath = GetScriptPath();
+
+            result = await ProcessSandbox.ExecuteAsync(
+                availability.ExecutablePath!,
+                [scriptPath, rootPath, "--json"],
                 cancellationToken: ct
             ).ConfigureAwait(false);
         }
         else
         {
-            // Fall back to Python runtime
-            var python = _pythonPath ?? ToolPathResolver.Resolve("python", PythonCandidates)
-                ?? throw new InvalidOperationException("Python 3 not found and precompiled binary not available.");
-
-            var scriptPath = GetScriptPath();
-
-            result = await ProcessSandbox.ExecuteAsync(
-                python,
-                [scriptPath, rootPath, "--json"],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
+            throw new InvalidOperationException(availability.UnavailableReason ?? "Python extractor not available");
         }
 
         var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTime);
@@ -142,19 +142,6 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         throw new FileNotFoundException(
             $"Corrupt installation: extract_api.py not found at {ScriptPath}. " +
             "Reinstall the application to resolve this issue.");
-    }
-
-    /// <summary>
-    /// Gets the path to the pre-compiled Python extractor binary if it exists.
-    /// The binary is compiled during Docker build using PyInstaller.
-    /// </summary>
-    private static string? GetPrecompiledBinaryPath()
-    {
-        var assemblyDir = AppContext.BaseDirectory;
-        var binaryName = OperatingSystem.IsWindows() ? "python_extractor.exe" : "python_extractor";
-        var binaryPath = Path.Combine(assemblyDir, binaryName);
-
-        return File.Exists(binaryPath) ? binaryPath : null;
     }
 
     private static ApiIndex ConvertToApiIndex(RawPythonApiIndex raw)
