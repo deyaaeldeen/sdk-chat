@@ -241,133 +241,78 @@ public sealed class PackageInfoService : IPackageInfoService
         };
     }
 
+    /// <summary>
+    /// Registry of language-specific extractor and analyzer factories.
+    /// Adding a new language requires only adding an entry here.
+    /// </summary>
+    private static readonly Dictionary<SdkLanguage, Func<(IApiExtractor Extractor, IUsageAnalyzer Analyzer)>> AnalyzerRegistry = new()
+    {
+        [SdkLanguage.DotNet] = () => (new CSharpApiExtractor(), new CSharpUsageAnalyzer()),
+        [SdkLanguage.Python] = () => (new PythonApiExtractor(), new PythonUsageAnalyzer()),
+        [SdkLanguage.Go] = () => (new GoApiExtractor(), new GoUsageAnalyzer()),
+        [SdkLanguage.TypeScript] = () => (new TypeScriptApiExtractor(), new TypeScriptUsageAnalyzer()),
+        [SdkLanguage.JavaScript] = () => (new TypeScriptApiExtractor(), new TypeScriptUsageAnalyzer()), // JS uses TS tooling
+        [SdkLanguage.Java] = () => (new JavaApiExtractor(), new JavaUsageAnalyzer()),
+    };
+
     private async Task<(List<CoveredOperationInfo> Covered, List<UncoveredOperationInfo> Uncovered, int Total)> AnalyzeUsageInternalAsync(
         SdkLanguage language,
         string sourcePath,
         string samplesPath,
         CancellationToken ct)
     {
-        List<CoveredOperationInfo> covered = [];
-        List<UncoveredOperationInfo> uncovered = [];
-        var total = 0;
+        // Check if language is supported
+        if (!AnalyzerRegistry.TryGetValue(language, out var factory))
+            return ([], [], 0);
 
-        // Language-specific analysis
-        switch (language)
-        {
-            case SdkLanguage.DotNet:
-                var csharpExtractor = new CSharpApiExtractor();
-                var csharpAnalyzer = new CSharpUsageAnalyzer();
-                var csharpApi = await csharpExtractor.ExtractAsync(sourcePath, ct).ConfigureAwait(false);
-                var csharpUsage = await csharpAnalyzer.AnalyzeAsync(samplesPath, csharpApi, ct).ConfigureAwait(false);
+        // Create extractor and analyzer from registry
+        var (extractor, analyzer) = factory();
 
-                total = csharpUsage.CoveredOperations.Count + csharpUsage.UncoveredOperations.Count;
-                covered = csharpUsage.CoveredOperations
-                    .Select(o => new CoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, File = o.File, Line = o.Line })
-                    .ToList();
-                uncovered = csharpUsage.UncoveredOperations
-                    .Select(o => new UncoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, Signature = o.Signature })
-                    .ToList();
-                break;
+        // Check availability
+        if (!extractor.IsAvailable())
+            return ([], [], 0);
 
-            case SdkLanguage.Python:
-                var pythonExtractor = new PythonApiExtractor();
-                if (!pythonExtractor.IsAvailable())
-                {
-                    return ([], [], 0);
-                }
-                var pythonResult = await ((IApiExtractor<ApiExtractor.Python.ApiIndex>)pythonExtractor).ExtractAsync(sourcePath, ct).ConfigureAwait(false);
-                if (!pythonResult.IsSuccess) return ([], [], 0);
-                var pythonApi = (ApiExtractor.Python.ApiIndex)pythonResult.GetValueOrThrow();
-                var pythonAnalyzer = new PythonUsageAnalyzer();
-                var pythonUsage = await pythonAnalyzer.AnalyzeAsync(samplesPath, pythonApi, ct).ConfigureAwait(false);
+        // Extract API surface
+        var extractResult = await extractor.ExtractAsyncCore(sourcePath, ct).ConfigureAwait(false);
+        if (!extractResult.IsSuccess)
+            return ([], [], 0);
 
-                total = pythonUsage.CoveredOperations.Count + pythonUsage.UncoveredOperations.Count;
-                covered = pythonUsage.CoveredOperations
-                    .Select(o => new CoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, File = o.File, Line = o.Line })
-                    .ToList();
-                uncovered = pythonUsage.UncoveredOperations
-                    .Select(o => new UncoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, Signature = o.Signature })
-                    .ToList();
-                break;
+        var apiIndex = extractResult.GetValueOrThrow();
 
-            case SdkLanguage.Go:
-                var goExtractor = new GoApiExtractor();
-                if (!goExtractor.IsAvailable())
-                {
-                    return ([], [], 0);
-                }
-                var goResult = await ((IApiExtractor<ApiExtractor.Go.ApiIndex>)goExtractor).ExtractAsync(sourcePath, ct).ConfigureAwait(false);
-                if (!goResult.IsSuccess) return ([], [], 0);
-                var goApi = (ApiExtractor.Go.ApiIndex)goResult.GetValueOrThrow();
-                var goAnalyzer = new GoUsageAnalyzer();
-                var goUsage = await goAnalyzer.AnalyzeAsync(samplesPath, goApi, ct).ConfigureAwait(false);
+        // Analyze usage with the non-generic interface
+        var usage = await analyzer.AnalyzeAsyncCore(samplesPath, apiIndex, ct).ConfigureAwait(false);
 
-                total = goUsage.CoveredOperations.Count + goUsage.UncoveredOperations.Count;
-                covered = goUsage.CoveredOperations
-                    .Select(o => new CoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, File = o.File, Line = o.Line })
-                    .ToList();
-                uncovered = goUsage.UncoveredOperations
-                    .Select(o => new UncoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, Signature = o.Signature })
-                    .ToList();
-                break;
+        // Map to output format
+        var total = usage.CoveredOperations.Count + usage.UncoveredOperations.Count;
 
-            case SdkLanguage.TypeScript:
-            case SdkLanguage.JavaScript:
-                var tsExtractor = new TypeScriptApiExtractor();
-                if (!tsExtractor.IsAvailable())
-                {
-                    return ([], [], 0);
-                }
-                var tsResult = await ((IApiExtractor<ApiExtractor.TypeScript.ApiIndex>)tsExtractor).ExtractAsync(sourcePath, ct).ConfigureAwait(false);
-                if (!tsResult.IsSuccess) return ([], [], 0);
-                var tsApi = (ApiExtractor.TypeScript.ApiIndex)tsResult.GetValueOrThrow();
-                var tsAnalyzer = new TypeScriptUsageAnalyzer();
-                var tsUsage = await tsAnalyzer.AnalyzeAsync(samplesPath, tsApi, ct).ConfigureAwait(false);
+        var covered = usage.CoveredOperations
+            .Select(o => new CoveredOperationInfo
+            {
+                ClientType = o.ClientType,
+                Operation = o.Operation,
+                File = o.File,
+                Line = o.Line
+            })
+            .ToList();
 
-                total = tsUsage.CoveredOperations.Count + tsUsage.UncoveredOperations.Count;
-                covered = tsUsage.CoveredOperations
-                    .Select(o => new CoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, File = o.File, Line = o.Line })
-                    .ToList();
-                uncovered = tsUsage.UncoveredOperations
-                    .Select(o => new UncoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, Signature = o.Signature })
-                    .ToList();
-                break;
-
-            case SdkLanguage.Java:
-                var javaExtractor = new JavaApiExtractor();
-                if (!javaExtractor.IsAvailable())
-                {
-                    return ([], [], 0);
-                }
-                var javaResult = await ((IApiExtractor<ApiExtractor.Java.ApiIndex>)javaExtractor).ExtractAsync(sourcePath, ct).ConfigureAwait(false);
-                if (!javaResult.IsSuccess) return ([], [], 0);
-                var javaApi = (ApiExtractor.Java.ApiIndex)javaResult.GetValueOrThrow();
-                var javaAnalyzer = new JavaUsageAnalyzer();
-                var javaUsage = await javaAnalyzer.AnalyzeAsync(samplesPath, javaApi, ct).ConfigureAwait(false);
-
-                total = javaUsage.CoveredOperations.Count + javaUsage.UncoveredOperations.Count;
-                covered = javaUsage.CoveredOperations
-                    .Select(o => new CoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, File = o.File, Line = o.Line })
-                    .ToList();
-                uncovered = javaUsage.UncoveredOperations
-                    .Select(o => new UncoveredOperationInfo { ClientType = o.ClientType, Operation = o.Operation, Signature = o.Signature })
-                    .ToList();
-                break;
-        }
+        var uncovered = usage.UncoveredOperations
+            .Select(o => new UncoveredOperationInfo
+            {
+                ClientType = o.ClientType,
+                Operation = o.Operation,
+                Signature = o.Signature
+            })
+            .ToList();
 
         return (covered, uncovered, total);
     }
 
-    private static IApiExtractor? CreateExtractor(SdkLanguage language) => language switch
+    private static IApiExtractor? CreateExtractor(SdkLanguage language)
     {
-        SdkLanguage.DotNet => new CSharpApiExtractor(),
-        SdkLanguage.Python => new PythonApiExtractor(),
-        SdkLanguage.Go => new GoApiExtractor(),
-        SdkLanguage.TypeScript => new TypeScriptApiExtractor(),
-        SdkLanguage.JavaScript => new TypeScriptApiExtractor(), // JS uses TS extractor
-        SdkLanguage.Java => new JavaApiExtractor(),
-        _ => null
-    };
+        if (AnalyzerRegistry.TryGetValue(language, out var factory))
+            return factory().Extractor;
+        return null;
+    }
 }
 
 /// <summary>Result of source folder detection.</summary>

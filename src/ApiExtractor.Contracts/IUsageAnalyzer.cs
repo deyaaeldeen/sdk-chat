@@ -4,17 +4,37 @@
 namespace ApiExtractor.Contracts;
 
 /// <summary>
+/// Non-generic base interface for language-agnostic usage analysis operations.
+/// </summary>
+public interface IUsageAnalyzer
+{
+    /// <summary>
+    /// Gets the language this analyzer supports (e.g., "csharp", "python", "java", "go", "typescript").
+    /// </summary>
+    string Language { get; }
+
+    /// <summary>
+    /// Analyzes code files to extract API usage patterns (non-generic version).
+    /// </summary>
+    /// <param name="codePath">Path to directory containing code to analyze.</param>
+    /// <param name="apiIndex">The API surface to match usages against (must be compatible type).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Extracted usage information.</returns>
+    Task<UsageIndex> AnalyzeAsyncCore(string codePath, IApiIndex apiIndex, CancellationToken ct = default);
+
+    /// <summary>
+    /// Formats the usage index as a compact summary for LLM context.
+    /// </summary>
+    string Format(UsageIndex index);
+}
+
+/// <summary>
 /// Analyzes code to extract which API operations are being used.
 /// Generic across samples, tests, or any consumer code.
 /// </summary>
 /// <typeparam name="TApiIndex">The API index type to match against.</typeparam>
-public interface IUsageAnalyzer<TApiIndex> where TApiIndex : class
+public interface IUsageAnalyzer<TApiIndex> : IUsageAnalyzer where TApiIndex : class, IApiIndex
 {
-    /// <summary>
-    /// Gets the language this analyzer supports.
-    /// </summary>
-    string Language { get; }
-
     /// <summary>
     /// Analyzes code files to extract API usage patterns.
     /// </summary>
@@ -25,9 +45,15 @@ public interface IUsageAnalyzer<TApiIndex> where TApiIndex : class
     Task<UsageIndex> AnalyzeAsync(string codePath, TApiIndex apiIndex, CancellationToken ct = default);
 
     /// <summary>
-    /// Formats the usage index as a compact summary for LLM context.
+    /// Default implementation for non-generic analysis.
     /// </summary>
-    string Format(UsageIndex index);
+    async Task<UsageIndex> IUsageAnalyzer.AnalyzeAsyncCore(string codePath, IApiIndex apiIndex, CancellationToken ct)
+    {
+        if (apiIndex is not TApiIndex typedIndex)
+            throw new ArgumentException($"Expected {typeof(TApiIndex).Name} but got {apiIndex.GetType().Name}", nameof(apiIndex));
+
+        return await AnalyzeAsync(codePath, typedIndex, ct).ConfigureAwait(false);
+    }
 }
 
 /// <summary>
