@@ -17,11 +17,8 @@ public record RequestPermissionRequest
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
 
-    [JsonPropertyName("toolCallId")]
-    public required string ToolCallId { get; init; }
-
-    [JsonPropertyName("title")]
-    public required string Title { get; init; }
+    [JsonPropertyName("toolCall")]
+    public required ToolCallUpdate ToolCall { get; init; }
 
     [JsonPropertyName("options")]
     public required PermissionOption[] Options { get; init; }
@@ -30,16 +27,20 @@ public record RequestPermissionRequest
 /// <summary>
 /// Permission option.
 /// </summary>
-public record PermissionOption(string Id, string Label, string Kind)
+public record PermissionOption
 {
-    [JsonPropertyName("id")]
-    public string Id { get; init; } = Id;
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
 
-    [JsonPropertyName("label")]
-    public string Label { get; init; } = Label;
+    [JsonPropertyName("optionId")]
+    public required string OptionId { get; init; }
+
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
 
     [JsonPropertyName("kind")]
-    public string Kind { get; init; } = Kind;
+    public required string Kind { get; init; }
 }
 
 /// <summary>
@@ -52,7 +53,7 @@ public record RequestPermissionResponse
     public Dictionary<string, object>? Meta { get; init; }
 
     [JsonPropertyName("outcome")]
-    public required PermissionOutcome Outcome { get; init; }
+    public required RequestPermissionOutcome Outcome { get; init; }
 }
 
 /// <summary>
@@ -60,55 +61,33 @@ public record RequestPermissionResponse
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "outcome")]
 [JsonDerivedType(typeof(SelectedPermissionOutcome), "selected")]
-[JsonDerivedType(typeof(DismissedPermissionOutcome), "dismissed")]
-public abstract record PermissionOutcome;
+[JsonDerivedType(typeof(CancelledPermissionOutcome), "cancelled")]
+public abstract record RequestPermissionOutcome;
 
-public record SelectedPermissionOutcome : PermissionOutcome
+public record SelectedPermissionOutcome : RequestPermissionOutcome
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("optionId")]
     public required string OptionId { get; init; }
 }
 
-public record DismissedPermissionOutcome : PermissionOutcome;
+public record CancelledPermissionOutcome : RequestPermissionOutcome
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+}
 
 /// <summary>
 /// Permission option kinds.
 /// </summary>
-public static class PermissionKind
+public static class PermissionOptionKind
 {
     public const string AllowOnce = "allow_once";
     public const string AllowAlways = "allow_always";
     public const string RejectOnce = "reject_once";
     public const string RejectAlways = "reject_always";
-}
-
-/// <summary>
-/// Request text input from user.
-/// </summary>
-public record RequestInputRequest
-{
-    [JsonPropertyName("sessionId")]
-    public required string SessionId { get; init; }
-
-    [JsonPropertyName("requestId")]
-    public required string RequestId { get; init; }
-
-    [JsonPropertyName("prompt")]
-    public required string Prompt { get; init; }
-
-    [JsonPropertyName("defaultValue")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DefaultValue { get; init; }
-}
-
-/// <summary>
-/// Response to input request.
-/// </summary>
-public record RequestInputResponse
-{
-    [JsonPropertyName("value")]
-    public string? Value { get; init; }
-
-    [JsonPropertyName("cancelled")]
-    public bool Cancelled { get; init; }
 }

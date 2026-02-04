@@ -7,11 +7,11 @@ namespace AgentClientProtocol.Sdk;
 
 /// <summary>
 /// Interface that ACP-compliant clients must implement.
-/// 
+///
 /// Clients are typically code editors (IDEs) that provide the interface
 /// between users and AI agents. They manage the environment, handle user interactions,
 /// and control access to resources.
-/// 
+///
 /// Methods are decorated with [RpcMethod] for compile-time dispatch table generation.
 /// </summary>
 [RpcDispatcher("Client")]
@@ -28,13 +28,6 @@ public interface IClient
     /// </summary>
     [RpcMethod(ClientMethods.SessionUpdate, IsNotification = true)]
     Task SessionUpdateAsync(SessionNotification notification, CancellationToken ct = default);
-
-    /// <summary>
-    /// Handle text input request from agent (optional).
-    /// </summary>
-    [RpcMethod(ClientMethods.SessionRequestInput)]
-    Task<RequestInputResponse?> RequestInputAsync(RequestInputRequest request, CancellationToken ct = default) =>
-        Task.FromResult<RequestInputResponse?>(null);
 
     /// <summary>
     /// Read a text file (optional).

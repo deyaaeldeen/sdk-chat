@@ -10,7 +10,7 @@ namespace AgentClientProtocol.Sdk;
 /// <summary>
 /// Source-generated JSON serializer context for ACP protocol types.
 /// Provides AOT-compatible, reflection-free JSON serialization with improved performance.
-/// 
+///
 /// Usage:
 ///   var json = JsonSerializer.Serialize(request, AcpJsonContext.Default.JsonRpcRequest);
 ///   var response = JsonSerializer.Deserialize(json, AcpJsonContext.Default.InitializeResponse);
@@ -36,6 +36,8 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(NewSessionResponse))]
 [JsonSerializable(typeof(LoadSessionRequest))]
 [JsonSerializable(typeof(LoadSessionResponse))]
+[JsonSerializable(typeof(SetSessionModeRequest))]
+[JsonSerializable(typeof(SetSessionModeResponse))]
 [JsonSerializable(typeof(PromptRequest))]
 [JsonSerializable(typeof(PromptResponse))]
 [JsonSerializable(typeof(CancelNotification))]
@@ -55,31 +57,40 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(TextContent))]
 [JsonSerializable(typeof(ImageContent))]
 [JsonSerializable(typeof(AudioContent))]
+[JsonSerializable(typeof(ResourceLink))]
 [JsonSerializable(typeof(EmbeddedResource))]
-[JsonSerializable(typeof(ResourceContents))]
+[JsonSerializable(typeof(EmbeddedResourceResource))]
 [JsonSerializable(typeof(TextResourceContents))]
 [JsonSerializable(typeof(BlobResourceContents))]
 [JsonSerializable(typeof(Annotations))]
+[JsonSerializable(typeof(Content))]
+[JsonSerializable(typeof(ContentChunk))]
 
 // Session update types
 [JsonSerializable(typeof(SessionUpdate))]
+[JsonSerializable(typeof(UserMessageChunk))]
 [JsonSerializable(typeof(AgentMessageChunk))]
+[JsonSerializable(typeof(AgentThoughtChunk))]
+[JsonSerializable(typeof(ToolCall))]
 [JsonSerializable(typeof(ToolCallUpdate))]
-[JsonSerializable(typeof(ToolCallStatusUpdate))]
-[JsonSerializable(typeof(PlanUpdate))]
+[JsonSerializable(typeof(Plan))]
 [JsonSerializable(typeof(PlanEntry))]
+[JsonSerializable(typeof(AvailableCommandsUpdate))]
+[JsonSerializable(typeof(AvailableCommand))]
+[JsonSerializable(typeof(AvailableCommandInput))]
+[JsonSerializable(typeof(UnstructuredCommandInput))]
 [JsonSerializable(typeof(CurrentModeUpdate))]
+[JsonSerializable(typeof(ToolCallContent))]
+[JsonSerializable(typeof(ToolCallLocation))]
 [JsonSerializable(typeof(Diff))]
 
 // Permission types
 [JsonSerializable(typeof(RequestPermissionRequest))]
 [JsonSerializable(typeof(RequestPermissionResponse))]
 [JsonSerializable(typeof(PermissionOption))]
-[JsonSerializable(typeof(PermissionOutcome))]
+[JsonSerializable(typeof(RequestPermissionOutcome))]
 [JsonSerializable(typeof(SelectedPermissionOutcome))]
-[JsonSerializable(typeof(DismissedPermissionOutcome))]
-[JsonSerializable(typeof(RequestInputRequest))]
-[JsonSerializable(typeof(RequestInputResponse))]
+[JsonSerializable(typeof(CancelledPermissionOutcome))]
 
 // File system types
 [JsonSerializable(typeof(ReadTextFileRequest))]
@@ -118,6 +129,9 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(ContentBlock[]))]
 [JsonSerializable(typeof(PlanEntry[]))]
 [JsonSerializable(typeof(PermissionOption[]))]
+[JsonSerializable(typeof(AvailableCommand[]))]
+[JsonSerializable(typeof(ToolCallContent[]))]
+[JsonSerializable(typeof(ToolCallLocation[]))]
 [JsonSerializable(typeof(McpServer[]))]
 [JsonSerializable(typeof(EnvVariable[]))]
 [JsonSerializable(typeof(HttpHeader[]))]

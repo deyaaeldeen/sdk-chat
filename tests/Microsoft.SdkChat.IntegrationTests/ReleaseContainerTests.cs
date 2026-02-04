@@ -39,16 +39,8 @@ public class ReleaseContainerTests
         "DotNet",
         "Python",
         "Go",
+        "Java",
         "TypeScript"
-    };
-
-    /// <summary>
-    /// Languages with known issues in native compilation.
-    /// Java: GraalVM native-image incompatibility with JavaParser reflection.
-    /// </summary>
-    public static TheoryData<string> UnsupportedNativeLanguages => new()
-    {
-        "Java"
     };
 
     /// <summary>

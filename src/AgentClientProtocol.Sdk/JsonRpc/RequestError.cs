@@ -54,8 +54,20 @@ public class RequestError : Exception
         new(-32000, $"Authentication required{(additional != null ? $": {additional}" : "")}", data);
 
     [StackTraceHidden]
+    public static RequestError SessionNotFound(string? sessionId = null) =>
+        new(-32001, $"Session not found{(sessionId != null ? $": {sessionId}" : "")}", sessionId != null ? new { sessionId } : null);
+
+    [StackTraceHidden]
     public static RequestError ResourceNotFound(string? uri = null) =>
         new(-32002, $"Resource not found{(uri != null ? $": {uri}" : "")}", uri != null ? new { uri } : null);
+
+    [StackTraceHidden]
+    public static RequestError PermissionDenied(object? data = null, string? additional = null) =>
+        new(-32003, $"Permission denied{(additional != null ? $": {additional}" : "")}", data);
+
+    [StackTraceHidden]
+    public static RequestError TerminalNotFound(string? terminalId = null) =>
+        new(-32004, $"Terminal not found{(terminalId != null ? $": {terminalId}" : "")}", terminalId != null ? new { terminalId } : null);
 
     [StackTraceHidden]
     public static RequestError Cancelled() =>

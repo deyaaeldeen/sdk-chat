@@ -24,7 +24,7 @@ public sealed record InitializeRequest
     public Dictionary<string, object>? Meta { get; init; }
 
     [JsonPropertyName("protocolVersion")]
-    public required int ProtocolVersion { get; init; }
+    public required ushort ProtocolVersion { get; init; }
 
     [JsonPropertyName("clientCapabilities")]
     public ClientCapabilities? ClientCapabilities { get; init; }
@@ -43,7 +43,7 @@ public sealed record InitializeResponse
     public Dictionary<string, object>? Meta { get; init; }
 
     [JsonPropertyName("protocolVersion")]
-    public required int ProtocolVersion { get; init; }
+    public required ushort ProtocolVersion { get; init; }
 
     [JsonPropertyName("agentCapabilities")]
     public AgentCapabilities? AgentCapabilities { get; init; }
@@ -60,6 +60,10 @@ public sealed record InitializeResponse
 /// </summary>
 public record AuthMethod
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("id")]
     public required string Id { get; init; }
 
@@ -106,7 +110,7 @@ public sealed record NewSessionRequest
     public required string Cwd { get; init; }
 
     [JsonPropertyName("mcpServers")]
-    public McpServer[]? McpServers { get; init; }
+    public required McpServer[] McpServers { get; init; }
 }
 
 /// <summary>
@@ -141,7 +145,7 @@ public record LoadSessionRequest
     public required string Cwd { get; init; }
 
     [JsonPropertyName("mcpServers")]
-    public McpServer[]? McpServers { get; init; }
+    public required McpServer[] McpServers { get; init; }
 }
 
 /// <summary>
@@ -152,6 +156,9 @@ public record LoadSessionResponse
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("modes")]
+    public SessionModeState? Modes { get; init; }
 }
 
 /// <summary>
@@ -188,8 +195,38 @@ public sealed record PromptResponse
 /// </summary>
 public record CancelNotification
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
+}
+
+/// <summary>
+/// Request to set the session mode.
+/// </summary>
+public sealed record SetSessionModeRequest
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("sessionId")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("modeId")]
+    public required string ModeId { get; init; }
+}
+
+/// <summary>
+/// Response to set session mode request.
+/// </summary>
+public sealed record SetSessionModeResponse
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
 }
 
 /// <summary>
@@ -201,6 +238,10 @@ public record CancelNotification
 [JsonDerivedType(typeof(McpServerSse), "sse")]
 public abstract record McpServer
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("name")]
     public required string Name { get; init; }
 }
@@ -211,10 +252,10 @@ public record McpServerStdio : McpServer
     public required string Command { get; init; }
 
     [JsonPropertyName("args")]
-    public string[]? Args { get; init; }
+    public required string[] Args { get; init; }
 
     [JsonPropertyName("env")]
-    public EnvVariable[]? Env { get; init; }
+    public required EnvVariable[] Env { get; init; }
 }
 
 public record McpServerHttp : McpServer
@@ -223,7 +264,7 @@ public record McpServerHttp : McpServer
     public required string Url { get; init; }
 
     [JsonPropertyName("headers")]
-    public HttpHeader[]? Headers { get; init; }
+    public required HttpHeader[] Headers { get; init; }
 }
 
 public record McpServerSse : McpServer
@@ -232,11 +273,15 @@ public record McpServerSse : McpServer
     public required string Url { get; init; }
 
     [JsonPropertyName("headers")]
-    public HttpHeader[]? Headers { get; init; }
+    public required HttpHeader[] Headers { get; init; }
 }
 
 public record EnvVariable
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("name")]
     public required string Name { get; init; }
 
@@ -246,6 +291,10 @@ public record EnvVariable
 
 public record HttpHeader
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("name")]
     public required string Name { get; init; }
 
@@ -258,6 +307,10 @@ public record HttpHeader
 /// </summary>
 public record SessionModeState
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("availableModes")]
     public required SessionMode[] AvailableModes { get; init; }
 
@@ -270,6 +323,10 @@ public record SessionModeState
 /// </summary>
 public record SessionMode
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("id")]
     public required string Id { get; init; }
 
@@ -287,6 +344,8 @@ public static class StopReason
 {
     public const string EndTurn = "end_turn";
     public const string MaxTokens = "max_tokens";
-    public const string StopSequence = "stop_sequence";
+    public const string MaxTurnRequests = "max_turn_requests";
+    public const string Refusal = "refusal";
     public const string Cancelled = "cancelled";
+    public const string StopSequence = "stop_sequence";
 }

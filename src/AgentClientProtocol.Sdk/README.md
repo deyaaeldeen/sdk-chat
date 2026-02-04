@@ -26,14 +26,18 @@ Agent                          Client
   │◄────── initialize ──────────│
   │─────── initialized ────────►│
   │                              │
-  │◄────── session/start ───────│
-  │─────── session/started ────►│
+  │◄────── session/new ─────────│
+  │─────── session/new (resp) ─►│
   │                              │
-  │─────── permission/request ─►│
-  │◄────── permission/grant ────│
+  │─────── session/prompt ─────►│
+  │◄────── session/update ──────│
+  │─────── session/request_permission ─►│
+  │◄────── session/request_permission (resp) ────│
   │                              │
-  │─────── content/update ─────►│
-  │─────── session/end ────────►│
+  │◄────── session/update ──────│
+  │─────── session/set_mode ───►│
+  │◄────── session/update ──────│
+  │◄────── session/prompt (resp) ─────►│
 ```
 
 ## Usage

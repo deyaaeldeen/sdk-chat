@@ -81,6 +81,9 @@ public class ClientSideConnection : IAgent, IAsyncDisposable
     public Task<PromptResponse> PromptAsync(PromptRequest request, CancellationToken ct = default) =>
         _connection.SendRequestAsync<PromptResponse>(AgentMethods.SessionPrompt, request, ct)!;
 
+    public Task<SetSessionModeResponse?> SetSessionModeAsync(SetSessionModeRequest request, CancellationToken ct = default) =>
+        _connection.SendRequestAsync<SetSessionModeResponse>(AgentMethods.SessionSetMode, request, ct);
+
     public Task CancelAsync(CancelNotification notification, CancellationToken ct = default) =>
         _connection.SendNotificationAsync(AgentMethods.SessionCancel, notification, ct);
 

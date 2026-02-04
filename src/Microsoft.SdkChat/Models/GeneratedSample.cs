@@ -46,6 +46,7 @@ public partial class SdkChatJsonContext : JsonSerializerContext
     PropertyNameCaseInsensitive = true,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(GeneratedSample))]
+[JsonSerializable(typeof(List<GeneratedSample>))]
 public partial class AiStreamingJsonContext : JsonSerializerContext
 {
     private static AiStreamingJsonContext? _caseInsensitive;

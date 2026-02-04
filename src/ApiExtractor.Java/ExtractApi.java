@@ -103,7 +103,8 @@ public class ExtractApi {
         Set<String> patterns = new HashSet<>();
 
         ParserConfiguration config = new ParserConfiguration();
-        config.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        // Use RAW language level to disable validators that use reflection (fails in GraalVM native-image)
+        config.setLanguageLevel(ParserConfiguration.LanguageLevel.RAW);
         JavaParser parser = new JavaParser(config);
 
         for (Path file : javaFiles) {
@@ -211,7 +212,8 @@ public class ExtractApi {
             .collect(Collectors.toList());
 
         ParserConfiguration config = new ParserConfiguration();
-        config.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        // Use RAW language level to disable validators that use reflection (fails in GraalVM native-image)
+        config.setLanguageLevel(ParserConfiguration.LanguageLevel.RAW);
         JavaParser parser = new JavaParser(config);
 
         for (Path file : javaFiles) {
