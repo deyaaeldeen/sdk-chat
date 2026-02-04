@@ -59,7 +59,7 @@ public class ProtocolIntegrationTests
     {
         // Arrange
         var agent = new TestAgent();
-        var request = new NewSessionRequest { Cwd = "/test" };
+        var request = new NewSessionRequest { Cwd = "/test", McpServers = [] };
 
         // Act
         var response = await agent.NewSessionAsync(request);
@@ -96,9 +96,14 @@ public class ProtocolIntegrationTests
         var request = new RequestPermissionRequest
         {
             SessionId = "test-session",
-            ToolCallId = "test-tool-call",
-            Title = "Test Permission",
-            Options = [new PermissionOption(PermissionKind.AllowOnce, "Allow Once", PermissionKind.AllowOnce)]
+            ToolCall = new ToolCallUpdate
+            {
+                ToolCallId = "test-tool-call",
+                Title = "Test Permission",
+                Status = ToolCallStatus.Pending,
+                Kind = ToolKind.Read
+            },
+            Options = [new PermissionOption { OptionId = PermissionOptionKind.AllowOnce, Name = "Allow Once", Kind = PermissionOptionKind.AllowOnce }]
         };
 
         // Act
@@ -145,7 +150,7 @@ public class ProtocolIntegrationTests
         {
             return Task.FromResult(new RequestPermissionResponse
             {
-                Outcome = new SelectedPermissionOutcome { OptionId = PermissionKind.AllowOnce }
+                Outcome = new SelectedPermissionOutcome { OptionId = PermissionOptionKind.AllowOnce }
             });
         }
 

@@ -13,8 +13,14 @@ namespace AgentClientProtocol.Sdk.Schema;
 [JsonDerivedType(typeof(TextContent), "text")]
 [JsonDerivedType(typeof(ImageContent), "image")]
 [JsonDerivedType(typeof(AudioContent), "audio")]
+[JsonDerivedType(typeof(ResourceLink), "resource_link")]
 [JsonDerivedType(typeof(EmbeddedResource), "resource")]
-public abstract record ContentBlock;
+public abstract record ContentBlock
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+}
 
 /// <summary>
 /// Text content.
@@ -39,6 +45,10 @@ public record ImageContent : ContentBlock
     [JsonPropertyName("mimeType")]
     public required string MimeType { get; init; }
 
+    [JsonPropertyName("uri")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Uri { get; init; }
+
     [JsonPropertyName("annotations")]
     public Annotations? Annotations { get; init; }
 }
@@ -59,39 +69,75 @@ public record AudioContent : ContentBlock
 }
 
 /// <summary>
-/// Embedded resource content.
+/// Resource link content.
 /// </summary>
-public record EmbeddedResource : ContentBlock
+public record ResourceLink : ContentBlock
 {
-    [JsonPropertyName("resource")]
-    public required ResourceContents Resource { get; init; }
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("uri")]
+    public required string Uri { get; init; }
+
+    [JsonPropertyName("title")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Title { get; init; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; init; }
+
+    [JsonPropertyName("mimeType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MimeType { get; init; }
+
+    [JsonPropertyName("size")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? Size { get; init; }
 
     [JsonPropertyName("annotations")]
     public Annotations? Annotations { get; init; }
 }
 
 /// <summary>
-/// Resource contents (text or blob).
+/// Embedded resource content.
+/// </summary>
+public record EmbeddedResource : ContentBlock
+{
+    [JsonPropertyName("resource")]
+    public required EmbeddedResourceResource Resource { get; init; }
+
+    [JsonPropertyName("annotations")]
+    public Annotations? Annotations { get; init; }
+}
+
+/// <summary>
+/// Embedded resource contents (text or blob).
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(TextResourceContents), "text")]
 [JsonDerivedType(typeof(BlobResourceContents), "blob")]
-public abstract record ResourceContents
+public abstract record EmbeddedResourceResource
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("uri")]
     public required string Uri { get; init; }
 
     [JsonPropertyName("mimeType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MimeType { get; init; }
 }
 
-public record TextResourceContents : ResourceContents
+public record TextResourceContents : EmbeddedResourceResource
 {
     [JsonPropertyName("text")]
     public required string Text { get; init; }
 }
 
-public record BlobResourceContents : ResourceContents
+public record BlobResourceContents : EmbeddedResourceResource
 {
     [JsonPropertyName("blob")]
     public required string Blob { get; init; }
@@ -102,6 +148,10 @@ public record BlobResourceContents : ResourceContents
 /// </summary>
 public record Annotations
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("audience")]
     public string[]? Audience { get; init; }
 
@@ -113,10 +163,40 @@ public record Annotations
 }
 
 /// <summary>
+/// Wrapper for content used in tool call output.
+/// </summary>
+public record Content : ToolCallContent
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("content")]
+    public required ContentBlock Block { get; init; }
+}
+
+/// <summary>
+/// A streamed item of content.
+/// </summary>
+public record ContentChunk
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("content")]
+    public required ContentBlock Content { get; init; }
+}
+
+/// <summary>
 /// Session update notification.
 /// </summary>
 public record SessionNotification
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
 
@@ -128,72 +208,188 @@ public record SessionNotification
 /// Session update payload types.
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "sessionUpdate")]
+[JsonDerivedType(typeof(UserMessageChunk), "user_message_chunk")]
 [JsonDerivedType(typeof(AgentMessageChunk), "agent_message_chunk")]
-[JsonDerivedType(typeof(ToolCallUpdate), "tool_call")]
-[JsonDerivedType(typeof(ToolCallStatusUpdate), "tool_call_update")]
-[JsonDerivedType(typeof(PlanUpdate), "plan")]
+[JsonDerivedType(typeof(AgentThoughtChunk), "agent_thought_chunk")]
+[JsonDerivedType(typeof(ToolCall), "tool_call")]
+[JsonDerivedType(typeof(ToolCallUpdate), "tool_call_update")]
+[JsonDerivedType(typeof(Plan), "plan")]
+[JsonDerivedType(typeof(AvailableCommandsUpdate), "available_commands_update")]
 [JsonDerivedType(typeof(CurrentModeUpdate), "current_mode_update")]
 public abstract record SessionUpdate;
 
-public record AgentMessageChunk : SessionUpdate
+public record UserMessageChunk : SessionUpdate
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("content")]
     public required ContentBlock Content { get; init; }
 }
 
-public record ToolCallUpdate : SessionUpdate
+public record AgentMessageChunk : SessionUpdate
 {
-    [JsonPropertyName("id")]
-    public required string Id { get; init; }
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
 
-    [JsonPropertyName("name")]
-    public required string Name { get; init; }
+    [JsonPropertyName("content")]
+    public required ContentBlock Content { get; init; }
+}
+
+public record AgentThoughtChunk : SessionUpdate
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("content")]
+    public required ContentBlock Content { get; init; }
+}
+
+public record ToolCall : SessionUpdate
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("toolCallId")]
+    public required string ToolCallId { get; init; }
+
+    [JsonPropertyName("title")]
+    public required string Title { get; init; }
+
+    [JsonPropertyName("status")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Status { get; init; }
 
     [JsonPropertyName("kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Kind { get; init; }
 
-    [JsonPropertyName("status")]
-    public required string Status { get; init; }
-
-    [JsonPropertyName("arguments")]
-    public JsonElement? Arguments { get; init; }
-
     [JsonPropertyName("content")]
-    public ContentBlock[]? Content { get; init; }
+    public ToolCallContent[]? Content { get; init; }
+
+    [JsonPropertyName("locations")]
+    public ToolCallLocation[]? Locations { get; init; }
+
+    [JsonPropertyName("rawInput")]
+    public JsonElement? RawInput { get; init; }
+
+    [JsonPropertyName("rawOutput")]
+    public JsonElement? RawOutput { get; init; }
 }
 
-public record ToolCallStatusUpdate : SessionUpdate
+public record ToolCallUpdate : SessionUpdate
 {
-    [JsonPropertyName("id")]
-    public required string Id { get; init; }
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("toolCallId")]
+    public required string ToolCallId { get; init; }
+
+    [JsonPropertyName("title")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Title { get; init; }
 
     [JsonPropertyName("status")]
-    public required string Status { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Kind { get; init; }
 
     [JsonPropertyName("content")]
-    public ContentBlock[]? Content { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ToolCallContent[]? Content { get; init; }
+
+    [JsonPropertyName("locations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ToolCallLocation[]? Locations { get; init; }
+
+    [JsonPropertyName("rawInput")]
+    public JsonElement? RawInput { get; init; }
+
+    [JsonPropertyName("rawOutput")]
+    public JsonElement? RawOutput { get; init; }
 }
 
-public record PlanUpdate : SessionUpdate
+public record Plan : SessionUpdate
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("entries")]
     public required PlanEntry[] Entries { get; init; }
 }
 
 public record PlanEntry
 {
-    [JsonPropertyName("title")]
-    public required string Title { get; init; }
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("content")]
+    public required string Content { get; init; }
+
+    [JsonPropertyName("priority")]
+    public required string Priority { get; init; }
 
     [JsonPropertyName("status")]
     public required string Status { get; init; }
+}
 
-    [JsonPropertyName("priority")]
-    public string? Priority { get; init; }
+public record AvailableCommandsUpdate : SessionUpdate
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("availableCommands")]
+    public required AvailableCommand[] AvailableCommands { get; init; }
+}
+
+public record AvailableCommand
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("description")]
+    public required string Description { get; init; }
+
+    [JsonPropertyName("input")]
+    public AvailableCommandInput? Input { get; init; }
+}
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(UnstructuredCommandInput), "unstructured")]
+public abstract record AvailableCommandInput
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+}
+
+public record UnstructuredCommandInput : AvailableCommandInput
+{
+    [JsonPropertyName("hint")]
+    public required string Hint { get; init; }
 }
 
 public record CurrentModeUpdate : SessionUpdate
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("currentModeId")]
     public required string CurrentModeId { get; init; }
 }
@@ -204,9 +400,53 @@ public record CurrentModeUpdate : SessionUpdate
 public static class ToolCallStatus
 {
     public const string Pending = "pending";
-    public const string Running = "running";
+    public const string InProgress = "in_progress";
     public const string Completed = "completed";
     public const string Failed = "failed";
+}
+
+/// <summary>
+/// Tool kinds.
+/// </summary>
+public static class ToolKind
+{
+    public const string Read = "read";
+    public const string Edit = "edit";
+    public const string Delete = "delete";
+    public const string Move = "move";
+    public const string Search = "search";
+    public const string Execute = "execute";
+    public const string Think = "think";
+    public const string Fetch = "fetch";
+    public const string SwitchMode = "switch_mode";
+    public const string Other = "other";
+}
+
+/// <summary>
+/// Tool call location.
+/// </summary>
+public record ToolCallLocation
+{
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("path")]
+    public required string Path { get; init; }
+
+    [JsonPropertyName("line")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public uint? Line { get; init; }
+}
+
+/// <summary>
+/// Plan entry priority values.
+/// </summary>
+public static class PlanEntryPriority
+{
+    public const string High = "high";
+    public const string Medium = "medium";
+    public const string Low = "low";
 }
 
 /// <summary>
@@ -217,14 +457,26 @@ public static class PlanEntryStatus
     public const string Pending = "pending";
     public const string InProgress = "in_progress";
     public const string Completed = "completed";
-    public const string Failed = "failed";
 }
+
+/// <summary>
+/// Tool call content types.
+/// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(Content), "content")]
+[JsonDerivedType(typeof(Diff), "diff")]
+[JsonDerivedType(typeof(Terminal), "terminal")]
+public abstract record ToolCallContent;
 
 /// <summary>
 /// Diff representing file modifications.
 /// </summary>
-public record Diff
+public record Diff : ToolCallContent
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("path")]
     public required string Path { get; init; }
 

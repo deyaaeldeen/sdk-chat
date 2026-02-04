@@ -19,6 +19,14 @@ public record ReadTextFileRequest
 
     [JsonPropertyName("path")]
     public required string Path { get; init; }
+
+    [JsonPropertyName("line")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public uint? Line { get; init; }
+
+    [JsonPropertyName("limit")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public uint? Limit { get; init; }
 }
 
 /// <summary>

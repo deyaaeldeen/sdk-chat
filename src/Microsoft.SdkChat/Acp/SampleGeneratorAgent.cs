@@ -2,36 +2,40 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
+using System.Text.Json;
 using AgentClientProtocol.Sdk;
+using AgentClientProtocol.Sdk.JsonRpc;
 using AgentClientProtocol.Sdk.Schema;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
-using Microsoft.SdkChat.Services.Languages.Samples;
 using Microsoft.SdkChat.Telemetry;
 
 namespace Microsoft.SdkChat.Acp;
 
 /// <summary>
-/// ACP agent implementation for interactive sample generation.
-/// Uses the AgentClientProtocol.Sdk for protocol handling.
+/// ACP agent for SDK sample generation.
+///
+/// This agent does NOT call AI directly. Instead, it:
+/// 1. Analyzes the SDK and builds an AI prompt
+/// 2. Returns the prompt to the client for AI generation
+/// 3. Receives the generated samples and writes them to disk
+///
+/// This design keeps AI exclusively on the client side, simplifying
+/// the protocol and allowing clients to use any AI provider.
 /// </summary>
 public sealed class SampleGeneratorAgent(
     IServiceProvider services,
     ILogger<SampleGeneratorAgent> logger) : IAgent
 {
-    // Thread-safe session storage with cancellation support
     private readonly ConcurrentDictionary<string, AgentSessionState> _sessions = new();
-
-    // Store connection per session for interactive generation (volatile for thread-safe reads)
-    private volatile AgentSideConnection? _currentConnection;
+    private AgentSideConnection? _currentConnection;
 
     public void SetConnection(AgentSideConnection connection)
     {
-        _currentConnection = connection;
+        Interlocked.Exchange(ref _currentConnection, connection);
     }
 
     public Task<InitializeResponse> InitializeAsync(InitializeRequest request, CancellationToken ct = default)
@@ -69,157 +73,416 @@ public sealed class SampleGeneratorAgent(
 
         logger.LogDebug("Created session {SessionId} with cwd {Cwd}", sessionId, request.Cwd);
 
-        return Task.FromResult(new NewSessionResponse
-        {
-            SessionId = sessionId
-        });
+        return Task.FromResult(new NewSessionResponse { SessionId = sessionId });
     }
 
     public async Task<PromptResponse> PromptAsync(PromptRequest request, CancellationToken ct = default)
     {
         using var activity = SdkChatTelemetry.StartAcpSession(request.SessionId, "prompt");
 
-        if (!_sessions.TryGetValue(request.SessionId, out var sessionState))
+        if (!_sessions.TryGetValue(request.SessionId, out var session))
         {
-            throw new InvalidOperationException($"Unknown session: {request.SessionId}");
+            throw RequestError.SessionNotFound(request.SessionId);
         }
 
-        // Link the external cancellation token with session's cancellation token
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, sessionState.CancellationToken);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, session.CancellationToken);
         var effectiveCt = linkedCts.Token;
 
-        // Use workspace path from session's cwd
-        var workspacePath = sessionState.WorkingDirectory ?? ".";
-
-        // Stream status to client
-        if (_currentConnection != null)
-        {
-            await _currentConnection.SendTextAsync(request.SessionId, $"Analyzing SDK at {workspacePath}...\n", effectiveCt).ConfigureAwait(false);
-        }
-
-        // Get services
-        var aiService = services.GetRequiredService<IAiService>();
-        var fileHelper = services.GetRequiredService<FileHelper>();
-
-        // Track token usage via async callbacks
-        var promptTokens = 0;
-        var responseTokens = 0;
-
-        ValueTask OnPromptReadyAsync(AiPromptReadyEventArgs e)
-        {
-            promptTokens = e.EstimatedTokens;
-            return ValueTask.CompletedTask;
-        }
-
-        ValueTask OnStreamCompleteAsync(AiStreamCompleteEventArgs e)
-        {
-            responseTokens = e.EstimatedResponseTokens;
-            return ValueTask.CompletedTask;
-        }
+        var connection = _currentConnection;
+        var packageInfoService = services.GetRequiredService<IPackageInfoService>();
 
         try
         {
-            // Auto-detect source, samples folders, and language (async to avoid blocking)
-            var sdkInfo = await SdkInfo.ScanAsync(workspacePath, effectiveCt).ConfigureAwait(false);
-            if (sdkInfo.Language == null)
+            return session.Phase switch
             {
-                if (_currentConnection != null)
-                {
-                    await _currentConnection.SendTextAsync(request.SessionId, "Could not detect SDK language.\n", effectiveCt).ConfigureAwait(false);
-                }
-                return new PromptResponse { StopReason = StopReason.EndTurn };
-            }
-
-            activity?.SetTag("language", sdkInfo.LanguageName);
-
-            if (_currentConnection != null)
-            {
-                await _currentConnection.SendTextAsync(request.SessionId, $"Detected {sdkInfo.LanguageName} SDK\n", effectiveCt).ConfigureAwait(false);
-            }
-
-            if (_currentConnection != null)
-            {
-                await _currentConnection.SendTextAsync(request.SessionId, $"Source: {sdkInfo.SourceFolder}\n", effectiveCt).ConfigureAwait(false);
-                await _currentConnection.SendTextAsync(request.SessionId, $"Output: {sdkInfo.SuggestedSamplesFolder}\n\n", effectiveCt).ConfigureAwait(false);
-                await _currentConnection.SendTextAsync(request.SessionId, "Generating samples...\n", effectiveCt).ConfigureAwait(false);
-            }
-
-            // Create appropriate language context
-            var context = CreateLanguageContext(sdkInfo.Language.Value, fileHelper);
-
-            // Use default budget for ACP (could be made configurable via request params)
-            var contextBudget = SampleConstants.DefaultContextCharacters;
-
-            var systemPrompt = $"Generate runnable SDK samples. {context.GetInstructions()}";
-            var userPromptStream = StreamUserPromptAsync(sdkInfo.SourceFolder, context, contextBudget, effectiveCt);
-
-            // Stream parsed samples as they complete
-            List<GeneratedSample> samples = [];
-            await foreach (var sample in aiService.StreamItemsAsync(
-                systemPrompt, userPromptStream, AiStreamingJsonContext.CaseInsensitive.GeneratedSample, null, null,
-                OnPromptReadyAsync, OnStreamCompleteAsync, effectiveCt))
-            {
-                if (!string.IsNullOrEmpty(sample.Name) && !string.IsNullOrEmpty(sample.Code))
-                {
-                    samples.Add(sample);
-                }
-            }
-
-            var outputFolder = Path.GetFullPath(sdkInfo.SuggestedSamplesFolder);
-            Directory.CreateDirectory(outputFolder);
-
-            foreach (var sample in samples)
-            {
-                // Use FilePath if provided, otherwise generate from Name
-                var relativePath = !string.IsNullOrEmpty(sample.FilePath)
-                    ? PathSanitizer.SanitizeFilePath(sample.FilePath, context.FileExtension)
-                    : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
-                var filePath = Path.GetFullPath(Path.Combine(outputFolder, relativePath));
-
-                // SECURITY: Ensure path stays within output directory (defense-in-depth)
-                if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                    && !filePath.Equals(outputFolder, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue; // Skip files that would escape output directory
-                }
-
-                // Create subdirectories if needed
-                var fileDir = Path.GetDirectoryName(filePath);
-                if (!string.IsNullOrEmpty(fileDir))
-                {
-                    Directory.CreateDirectory(fileDir);
-                }
-
-                await File.WriteAllTextAsync(filePath, sample.Code, effectiveCt).ConfigureAwait(false);
-
-                if (_currentConnection != null)
-                {
-                    await _currentConnection.SendTextAsync(request.SessionId, $"✓ {filePath}\n", effectiveCt).ConfigureAwait(false);
-                }
-            }
-
-            // Record telemetry with token counts
-            SdkChatTelemetry.RecordSampleMetrics(activity, samples.Count, promptTokens, responseTokens);
-            logger.LogInformation("Generated {Count} samples in {Path}", samples.Count, outputFolder);
-
-            if (_currentConnection != null)
-            {
-                await _currentConnection.SendTextAsync(request.SessionId, $"\nDone! Generated {samples.Count} sample(s)\n", effectiveCt).ConfigureAwait(false);
-            }
-
-            return new PromptResponse { StopReason = StopReason.EndTurn };
+                SessionPhase.Initial => await HandleInitialPhaseAsync(session, request, packageInfoService, connection, effectiveCt),
+                SessionPhase.AwaitingSdkPath => await HandleSdkPathPhaseAsync(session, request, packageInfoService, connection, effectiveCt),
+                SessionPhase.AwaitingOutputFolder => await HandleOutputFolderPhaseAsync(session, request, connection, effectiveCt),
+                SessionPhase.AwaitingSampleCount => await HandleSampleCountPhaseAsync(session, request, connection, effectiveCt),
+                SessionPhase.AwaitingPromptConfirmation => await HandlePromptConfirmationPhaseAsync(session, request, connection, effectiveCt),
+                SessionPhase.AwaitingSamples => await HandleSamplesPhaseAsync(session, request, connection, effectiveCt),
+                SessionPhase.Complete => new PromptResponse { StopReason = StopReason.EndTurn },
+                _ => throw new InvalidOperationException($"Unknown session phase: {session.Phase}")
+            };
         }
-        finally
+        catch (OperationCanceledException)
         {
-            // Cleanup session to prevent memory leak
+            await SendTextAsync(connection, request.SessionId, "\n⏹️ Cancelled.\n", ct);
             CleanupSession(request.SessionId);
+            return new PromptResponse { StopReason = StopReason.Cancelled };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error in session {SessionId}", request.SessionId);
+            await SendTextAsync(connection, request.SessionId, $"\n❌ Error: {ex.Message}\n", ct);
+            CleanupSession(request.SessionId);
+            return new PromptResponse { StopReason = StopReason.EndTurn };
         }
     }
 
-    /// <summary>
-    /// Removes a session from storage and disposes its resources.
-    /// Call this when a session completes or is cancelled.
-    /// </summary>
+    /// <summary>Phase 1: Ask for SDK path.</summary>
+    private async Task<PromptResponse> HandleInitialPhaseAsync(
+        AgentSessionState session,
+        PromptRequest request,
+        IPackageInfoService packageInfoService,
+        AgentSideConnection? connection,
+        CancellationToken ct)
+    {
+        var defaultPath = session.WorkingDirectory ?? ".";
+
+        await SendTextAsync(connection, request.SessionId, "🔧 SDK Sample Generator\n\n", ct);
+        await SendTextAsync(connection, request.SessionId, $"SDK path (Enter for workspace): {defaultPath}\n", ct);
+
+        session.Phase = SessionPhase.AwaitingSdkPath;
+        return new PromptResponse { StopReason = StopReason.EndTurn };
+    }
+
+    /// <summary>Phase 2: Analyze SDK at the specified path.</summary>
+    private async Task<PromptResponse> HandleSdkPathPhaseAsync(
+        AgentSessionState session,
+        PromptRequest request,
+        IPackageInfoService packageInfoService,
+        AgentSideConnection? connection,
+        CancellationToken ct)
+    {
+        var userInput = ExtractUserText(request.Prompt);
+        var defaultPath = session.WorkingDirectory ?? ".";
+        session.SdkPath = string.IsNullOrWhiteSpace(userInput)
+            ? defaultPath
+            : ResolvePath(session, userInput);
+
+        if (!Directory.Exists(session.SdkPath))
+        {
+            await SendTextAsync(connection, request.SessionId, $"❌ Directory does not exist: {session.SdkPath}\n", ct);
+            await SendTextAsync(connection, request.SessionId, $"SDK path (Enter for workspace): {defaultPath}\n", ct);
+            return new PromptResponse { StopReason = StopReason.EndTurn };
+        }
+
+        await SendTextAsync(connection, request.SessionId, $"📂 Analyzing SDK at {session.SdkPath}...\n", ct);
+
+        session.SourceResult = await packageInfoService.DetectSourceFolderAsync(session.SdkPath, language: null, ct);
+        session.SamplesResult = await packageInfoService.DetectSamplesFolderAsync(session.SdkPath, ct);
+
+        if (string.IsNullOrEmpty(session.SourceResult.Language))
+        {
+            await SendTextAsync(connection, request.SessionId, "❌ Could not detect SDK language.\n", ct);
+            await SendTextAsync(connection, request.SessionId, $"SDK path (Enter for workspace): {defaultPath}\n", ct);
+            session.Phase = SessionPhase.AwaitingSdkPath;
+            return new PromptResponse { StopReason = StopReason.EndTurn };
+        }
+
+        await SendTextAsync(connection, request.SessionId, $"✓ Detected {session.SourceResult.Language} SDK\n", ct);
+        await SendTextAsync(connection, request.SessionId, $"  Source: {session.SourceResult.SourceFolder}\n", ct);
+
+        var suggestedOutput = Path.GetFullPath(session.SamplesResult.SuggestedSamplesFolder);
+        await SendTextAsync(connection, request.SessionId, $"\nOutput directory (Enter for default): {suggestedOutput}\n", ct);
+
+        session.Phase = SessionPhase.AwaitingOutputFolder;
+        return new PromptResponse { StopReason = StopReason.EndTurn };
+    }
+
+    /// <summary>Phase 3: Get output directory from user.</summary>
+    private async Task<PromptResponse> HandleOutputFolderPhaseAsync(
+        AgentSessionState session,
+        PromptRequest request,
+        AgentSideConnection? connection,
+        CancellationToken ct)
+    {
+        var userInput = ExtractUserText(request.Prompt);
+        var suggestedOutput = Path.GetFullPath(session.SamplesResult!.SuggestedSamplesFolder);
+        session.OutputFolder = string.IsNullOrWhiteSpace(userInput)
+            ? suggestedOutput
+            : ResolvePath(session, userInput);
+
+        await SendTextAsync(connection, request.SessionId, $"  Output: {session.OutputFolder}\n\n", ct);
+        await SendTextAsync(connection, request.SessionId, "How many samples to generate? (Enter for default: 5)\n", ct);
+
+        session.Phase = SessionPhase.AwaitingSampleCount;
+        return new PromptResponse { StopReason = StopReason.EndTurn };
+    }
+
+    /// <summary>Phase 4: Get sample count from user.</summary>
+    private async Task<PromptResponse> HandleSampleCountPhaseAsync(
+        AgentSessionState session,
+        PromptRequest request,
+        AgentSideConnection? connection,
+        CancellationToken ct)
+    {
+        var userInput = ExtractUserText(request.Prompt);
+
+        // Parse sample count, default to 5
+        if (string.IsNullOrWhiteSpace(userInput))
+        {
+            session.SampleCount = 5;
+        }
+        else if (int.TryParse(userInput.Trim(), out var count) && count > 0 && count <= 20)
+        {
+            session.SampleCount = count;
+        }
+        else
+        {
+            await SendTextAsync(connection, request.SessionId, "❌ Please enter a number between 1 and 20.\n", ct);
+            return new PromptResponse { StopReason = StopReason.EndTurn };
+        }
+
+        await SendTextAsync(connection, request.SessionId, $"  Samples: {session.SampleCount}\n\n", ct);
+        await SendTextAsync(connection, request.SessionId, "📝 Building AI prompt...\n", ct);
+
+        // Build the prompt
+        session.BuiltPrompt = await BuildPromptAsync(session, ct);
+
+        await SendTextAsync(connection, request.SessionId, $"✓ Prompt ready ({session.BuiltPrompt.EstimatedTokens} tokens)\n\n", ct);
+        await SendTextAsync(connection, request.SessionId, "The AI prompt has been built. Reply with:\n", ct);
+        await SendTextAsync(connection, request.SessionId, "  - 'generate' to receive the prompt for AI generation\n", ct);
+        await SendTextAsync(connection, request.SessionId, "  - 'cancel' to abort\n", ct);
+
+        session.Phase = SessionPhase.AwaitingPromptConfirmation;
+        return new PromptResponse { StopReason = StopReason.EndTurn };
+    }
+
+    /// <summary>Phase 5: Return prompt to client for AI generation.</summary>
+    private async Task<PromptResponse> HandlePromptConfirmationPhaseAsync(
+        AgentSessionState session,
+        PromptRequest request,
+        AgentSideConnection? connection,
+        CancellationToken ct)
+    {
+        var userInput = ExtractUserText(request.Prompt).ToLowerInvariant();
+
+        if (userInput.Contains("cancel"))
+        {
+            await SendTextAsync(connection, request.SessionId, "🚫 Cancelled.\n", ct);
+            CleanupSession(session.SessionId);
+            return new PromptResponse { StopReason = StopReason.EndTurn };
+        }
+
+        if (!string.IsNullOrWhiteSpace(userInput)
+            && !userInput.Contains("generate")
+            && !userInput.Contains("yes")
+            && !userInput.Equals("y", StringComparison.OrdinalIgnoreCase))
+        {
+            await SendTextAsync(connection, request.SessionId, "Please reply with 'generate' (or press Enter) to proceed, or 'cancel' to abort.\n", ct);
+            return new PromptResponse { StopReason = StopReason.EndTurn };
+        }
+
+        // Return the prompt to the client
+        var prompt = session.BuiltPrompt!;
+
+        await SendTextAsync(connection, request.SessionId, "\n📤 Prompt ready for AI generation.\n", ct);
+        await SendTextAsync(connection, request.SessionId, "Send the generated samples as JSON array:\n", ct);
+        await SendTextAsync(connection, request.SessionId, "[{\"name\":\"...\",\"description\":\"...\",\"code\":\"...\",\"filePath\":\"...\"}]\n\n", ct);
+
+        // Return prompt data in response metadata for structured access
+        session.Phase = SessionPhase.AwaitingSamples;
+
+        return new PromptResponse
+        {
+            StopReason = StopReason.EndTurn,
+            Meta = new Dictionary<string, object>
+            {
+                ["promptData"] = new Dictionary<string, object>
+                {
+                    ["systemPrompt"] = prompt.SystemPrompt,
+                    ["userPrompt"] = prompt.UserPrompt,
+                    ["language"] = session.SourceResult!.Language!,
+                    ["outputFolder"] = session.OutputFolder!,
+                    ["sampleCount"] = session.SampleCount,
+                    ["estimatedTokens"] = prompt.EstimatedTokens
+                }
+            }
+        };
+    }
+
+    /// <summary>Phase 6: Receive samples from client and write to disk.</summary>
+    private async Task<PromptResponse> HandleSamplesPhaseAsync(
+        AgentSessionState session,
+        PromptRequest request,
+        AgentSideConnection? connection,
+        CancellationToken ct)
+    {
+        var userInput = ExtractUserText(request.Prompt);
+
+        if (string.IsNullOrWhiteSpace(userInput))
+        {
+            await SendTextAsync(connection, request.SessionId, "❌ No samples provided. Send JSON array of samples.\n", ct);
+            return new PromptResponse { StopReason = StopReason.EndTurn };
+        }
+
+        // Parse samples from JSON
+        List<GeneratedSample> samples;
+        try
+        {
+            samples = JsonSerializer.Deserialize(userInput, AiStreamingJsonContext.CaseInsensitive.ListGeneratedSample)
+                ?? throw new JsonException("Null result");
+        }
+        catch (JsonException ex)
+        {
+            await SendTextAsync(connection, request.SessionId, $"❌ Invalid JSON: {ex.Message}\n", ct);
+            await SendTextAsync(connection, request.SessionId, "Expected: [{\"name\":\"...\",\"code\":\"...\",\"filePath\":\"...\"}]\n", ct);
+            return new PromptResponse { StopReason = StopReason.EndTurn };
+        }
+
+        if (samples.Count == 0)
+        {
+            await SendTextAsync(connection, request.SessionId, "❌ No samples in array.\n", ct);
+            return new PromptResponse { StopReason = StopReason.EndTurn };
+        }
+
+        // Write samples to disk
+        var outputFolder = session.OutputFolder!;
+        var language = SdkLanguageHelpers.Parse(session.SourceResult!.Language!);
+        var fileExtension = GetFileExtension(language);
+        var writtenFiles = new List<string>();
+
+        Directory.CreateDirectory(outputFolder);
+
+        await SendTextAsync(connection, request.SessionId, $"\n📁 Writing {samples.Count} sample(s)...\n", ct);
+
+        foreach (var sample in samples)
+        {
+            if (string.IsNullOrEmpty(sample.Code))
+                continue;
+
+            var relativePath = !string.IsNullOrEmpty(sample.FilePath)
+                ? PathSanitizer.SanitizeFilePath(sample.FilePath, fileExtension)
+                : PathSanitizer.SanitizeFileName(sample.Name ?? "sample") + fileExtension;
+
+            var filePath = Path.GetFullPath(Path.Combine(outputFolder, relativePath));
+
+            // Security: ensure path stays within output directory
+            if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning("Skipping sample with path outside output directory: {Path}", filePath);
+                continue;
+            }
+
+            var fileDir = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrEmpty(fileDir))
+                Directory.CreateDirectory(fileDir);
+
+            await File.WriteAllTextAsync(filePath, sample.Code, ct);
+            writtenFiles.Add(filePath);
+
+            await SendTextAsync(connection, request.SessionId, $"  ✓ {relativePath}\n", ct);
+        }
+
+        await SendTextAsync(connection, request.SessionId, $"\n✅ Done! Wrote {writtenFiles.Count} sample(s) to {outputFolder}\n", ct);
+
+        SdkChatTelemetry.RecordSampleMetrics(SdkChatTelemetry.StartAcpSession(session.SessionId, "samples"), writtenFiles.Count, 0, 0);
+        logger.LogInformation("Wrote {Count} samples to {Path}", writtenFiles.Count, outputFolder);
+
+        session.Phase = SessionPhase.Complete;
+        CleanupSession(session.SessionId);
+
+        return new PromptResponse { StopReason = StopReason.EndTurn };
+    }
+
+    /// <summary>Build the AI prompt for sample generation.</summary>
+    private async Task<BuiltPrompt> BuildPromptAsync(AgentSessionState session, CancellationToken ct)
+    {
+        var sourceResult = session.SourceResult!;
+        var samplesResult = session.SamplesResult!;
+        var language = SdkLanguageHelpers.Parse(sourceResult.Language!);
+        var fileHelper = services.GetRequiredService<FileHelper>();
+        var context = CreateLanguageContext(language, fileHelper);
+
+        var sdkName = sourceResult.SdkName ?? Path.GetFileName(session.SdkPath ?? ".");
+        var count = session.SampleCount;
+        var systemPrompt = $"Generate {count} runnable SDK samples for the '{sdkName}' SDK. {context.GetInstructions()}";
+
+        // Build user prompt by collecting source context
+        var userPromptBuilder = new System.Text.StringBuilder();
+        var existingSampleCount = samplesResult.SamplesFolder != null && Directory.Exists(samplesResult.SamplesFolder)
+            ? SdkInfo.CountFilesSafely(samplesResult.SamplesFolder, $"*{context.FileExtension}")
+            : 0;
+
+        // Prefix
+        userPromptBuilder.AppendLine(existingSampleCount > 0
+            ? $"Generate {count} NEW samples for uncovered APIs. Avoid duplicating <existing-samples>."
+            : $"Generate {count} samples covering: init/auth, CRUD, async, error handling, advanced features.");
+        userPromptBuilder.AppendLine();
+
+        // Output folder
+        userPromptBuilder.AppendLine($"<output-folder>{Path.GetFileName(session.OutputFolder!)}</output-folder>");
+        userPromptBuilder.AppendLine("Generate filePath relative to the output folder above.");
+        userPromptBuilder.AppendLine();
+
+        // Stream source context (limited to reasonable size for prompt)
+        const int MaxContextChars = 100_000; // ~25K tokens
+        var contextChars = 0;
+
+        await foreach (var chunk in context.StreamContextAsync(
+            sourceResult.SourceFolder ?? session.SdkPath!,
+            samplesResult.SamplesFolder,
+            config: null,
+            totalBudget: MaxContextChars,
+            ct: ct))
+        {
+            if (contextChars + chunk.Length > MaxContextChars)
+                break;
+            userPromptBuilder.Append(chunk);
+            contextChars += chunk.Length;
+        }
+
+        var userPrompt = userPromptBuilder.ToString();
+        var estimatedTokens = (systemPrompt.Length + userPrompt.Length) / 4;
+
+        return new BuiltPrompt(systemPrompt, userPrompt, estimatedTokens);
+    }
+
+    private static Services.Languages.Samples.SampleLanguageContext CreateLanguageContext(SdkLanguage language, FileHelper fileHelper) => language switch
+    {
+        SdkLanguage.DotNet => new Services.Languages.Samples.DotNetSampleLanguageContext(fileHelper),
+        SdkLanguage.Python => new Services.Languages.Samples.PythonSampleLanguageContext(fileHelper),
+        SdkLanguage.JavaScript => new Services.Languages.Samples.JavaScriptSampleLanguageContext(fileHelper),
+        SdkLanguage.TypeScript => new Services.Languages.Samples.TypeScriptSampleLanguageContext(fileHelper),
+        SdkLanguage.Java => new Services.Languages.Samples.JavaSampleLanguageContext(fileHelper),
+        SdkLanguage.Go => new Services.Languages.Samples.GoSampleLanguageContext(fileHelper),
+        _ => throw new NotSupportedException($"Language {language} not supported")
+    };
+
+    private static string GetFileExtension(SdkLanguage language) => language switch
+    {
+        SdkLanguage.DotNet => ".cs",
+        SdkLanguage.Python => ".py",
+        SdkLanguage.JavaScript => ".js",
+        SdkLanguage.TypeScript => ".ts",
+        SdkLanguage.Java => ".java",
+        SdkLanguage.Go => ".go",
+        _ => ".txt"
+    };
+
+    private static Task SendTextAsync(AgentSideConnection? connection, string sessionId, string text, CancellationToken ct)
+    {
+        return connection?.SendTextAsync(sessionId, text, ct) ?? Task.CompletedTask;
+    }
+
+    private static string ExtractUserText(ContentBlock[] prompt)
+    {
+        var parts = new List<string>();
+        foreach (var block in prompt)
+        {
+            if (block is TextContent text && !string.IsNullOrWhiteSpace(text.Text))
+                parts.Add(text.Text.Trim());
+        }
+        return string.Join("\n", parts).Trim();
+    }
+
+    private static string ResolvePath(AgentSessionState session, string userInput)
+    {
+        var trimmed = userInput.Trim();
+        if (Path.IsPathRooted(trimmed))
+        {
+            return Path.GetFullPath(trimmed);
+        }
+
+        var baseDirectory = string.IsNullOrWhiteSpace(session.WorkingDirectory)
+            ? Directory.GetCurrentDirectory()
+            : session.WorkingDirectory;
+
+        return Path.GetFullPath(Path.Combine(baseDirectory, trimmed));
+    }
+
     private void CleanupSession(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var state))
@@ -229,62 +492,32 @@ public sealed class SampleGeneratorAgent(
         }
     }
 
-    private static SampleLanguageContext CreateLanguageContext(SdkLanguage language, FileHelper fileHelper) => language switch
-    {
-        SdkLanguage.DotNet => new DotNetSampleLanguageContext(fileHelper),
-        SdkLanguage.Python => new PythonSampleLanguageContext(fileHelper),
-        SdkLanguage.JavaScript => new JavaScriptSampleLanguageContext(fileHelper),
-        SdkLanguage.TypeScript => new TypeScriptSampleLanguageContext(fileHelper),
-        SdkLanguage.Java => new JavaSampleLanguageContext(fileHelper),
-        SdkLanguage.Go => new GoSampleLanguageContext(fileHelper),
-        _ => new DotNetSampleLanguageContext(fileHelper) // fallback
-    };
-
     public Task CancelAsync(CancelNotification notification, CancellationToken ct = default)
     {
         logger.LogDebug("Cancel requested for session {SessionId}", notification.SessionId);
 
-        // Cancel the session's ongoing operations
         if (_sessions.TryGetValue(notification.SessionId, out var sessionState))
         {
             sessionState.RequestCancellation();
             logger.LogInformation("Cancelled session {SessionId}", notification.SessionId);
         }
-        else
-        {
-            logger.LogWarning("Cancel requested for unknown session {SessionId}", notification.SessionId);
-        }
 
         return Task.CompletedTask;
     }
 
-    private static async IAsyncEnumerable<string> StreamUserPromptAsync(
-        string sourceFolder,
-        SampleLanguageContext context,
-        int contextBudget,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+    private enum SessionPhase
     {
-        // Create budget tracker - reserve space for prefix overhead
-        const int OverheadReserve = 100;
-        var budgetTracker = new PromptBudgetTracker(contextBudget, OverheadReserve);
-
-        var prefix = "Generate samples for this SDK:\n";
-        budgetTracker.TryConsume(prefix.Length);
-        yield return prefix;
-
-        // Stream context with remaining budget
-        var remainingBudget = budgetTracker.Remaining;
-        if (remainingBudget > 0)
-        {
-            await foreach (var chunk in context.StreamContextAsync(
-                [sourceFolder], null, totalBudget: remainingBudget, ct: cancellationToken).ConfigureAwait(false))
-            {
-                yield return chunk;
-            }
-        }
+        Initial,
+        AwaitingSdkPath,
+        AwaitingOutputFolder,
+        AwaitingSampleCount,
+        AwaitingPromptConfirmation,
+        AwaitingSamples,
+        Complete
     }
 
-    /// <summary>Internal state for a session with cancellation support.</summary>
+    private sealed record BuiltPrompt(string SystemPrompt, string UserPrompt, int EstimatedTokens);
+
     private sealed class AgentSessionState : IDisposable
     {
         private readonly CancellationTokenSource _cts = new();
@@ -292,12 +525,16 @@ public sealed class SampleGeneratorAgent(
         public required string SessionId { get; init; }
         public string? WorkingDirectory { get; init; }
 
-        /// <summary>Token that will be cancelled when CancelAsync is called.</summary>
+        public SessionPhase Phase { get; set; } = SessionPhase.Initial;
+        public string? SdkPath { get; set; }
+        public SourceFolderResult? SourceResult { get; set; }
+        public SamplesFolderResult? SamplesResult { get; set; }
+        public string? OutputFolder { get; set; }
+        public int SampleCount { get; set; } = 5;
+        public BuiltPrompt? BuiltPrompt { get; set; }
+
         public CancellationToken CancellationToken => _cts.Token;
-
-        /// <summary>Request cancellation of this session's operations.</summary>
         public void RequestCancellation() => _cts.Cancel();
-
         public void Dispose() => _cts.Dispose();
     }
 }

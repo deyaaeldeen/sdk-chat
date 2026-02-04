@@ -72,9 +72,14 @@ public class ClientSideConnectionTests
         var response = await mockClient.Object.RequestPermissionAsync(new RequestPermissionRequest
         {
             SessionId = "sess_123",
-            ToolCallId = "tc_1",
-            Title = "Run command",
-            Options = new[] { new PermissionOption("allow", "Allow", PermissionKind.AllowOnce) }
+            ToolCall = new ToolCallUpdate
+            {
+                ToolCallId = "tc_1",
+                Title = "Run command",
+                Status = ToolCallStatus.Pending,
+                Kind = ToolKind.Execute
+            },
+            Options = new[] { new PermissionOption { OptionId = "allow", Name = "Allow", Kind = PermissionOptionKind.AllowOnce } }
         });
 
         // Assert
@@ -178,7 +183,7 @@ public class ClientSideConnectionTests
         var mockClient = new Mock<IClient>();
         mockClient
             .Setup(c => c.TerminalOutputAsync(It.IsAny<TerminalOutputRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new TerminalOutputResponse { Output = "Build succeeded.\n" });
+            .ReturnsAsync(new TerminalOutputResponse { Output = "Build succeeded.\n", Truncated = false });
 
         // Act
         var response = await mockClient.Object.TerminalOutputAsync(new TerminalOutputRequest
@@ -203,7 +208,7 @@ public class ClientSideConnectionTests
         var outcome = new SelectedPermissionOutcome { OptionId = "allow_once" };
 
         // Act
-        var json = JsonSerializer.Serialize<PermissionOutcome>(outcome);
+        var json = JsonSerializer.Serialize<RequestPermissionOutcome>(outcome);
 
         // Assert
         Assert.Contains("\"outcome\":\"selected\"", json);
@@ -211,16 +216,16 @@ public class ClientSideConnectionTests
     }
 
     [Fact]
-    public void DismissedPermissionOutcome_SerializesCorrectly()
+    public void CancelledPermissionOutcome_SerializesCorrectly()
     {
         // Arrange
-        var outcome = new DismissedPermissionOutcome();
+        var outcome = new CancelledPermissionOutcome();
 
         // Act
-        var json = JsonSerializer.Serialize<PermissionOutcome>(outcome);
+        var json = JsonSerializer.Serialize<RequestPermissionOutcome>(outcome);
 
         // Assert
-        Assert.Contains("\"outcome\":\"dismissed\"", json);
+        Assert.Contains("\"outcome\":\"cancelled\"", json);
     }
 
     #endregion

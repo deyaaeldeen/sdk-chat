@@ -42,8 +42,8 @@ public class AgentSideConnectionExtendedTests
         var (connection, output) = CreateTestConnection();
         var entries = new[]
         {
-            new PlanEntry { Title = "Step 1", Status = "completed" },
-            new PlanEntry { Title = "Step 2", Status = "in_progress" }
+            new PlanEntry { Content = "Step 1", Status = PlanEntryStatus.Completed, Priority = PlanEntryPriority.Medium },
+            new PlanEntry { Content = "Step 2", Status = PlanEntryStatus.InProgress, Priority = PlanEntryPriority.High }
         };
 
         // Act
@@ -68,10 +68,11 @@ public class AgentSideConnectionExtendedTests
         // Act
         await connection.SendToolCallAsync(
             sessionId: "session-789",
-            id: "tool-call-1",
-            name: "read_file",
-            status: "running",
-            arguments: new { path = "/test/file.txt" });
+            toolCallId: "tool-call-1",
+            title: "read_file",
+            status: ToolCallStatus.InProgress,
+            kind: ToolKind.Read,
+            rawInput: new { path = "/test/file.txt" });
         await Task.Delay(50);
 
         // Assert
@@ -79,7 +80,7 @@ public class AgentSideConnectionExtendedTests
         Assert.Contains("session/update", outputJson);
         Assert.Contains("tool-call-1", outputJson);
         Assert.Contains("read_file", outputJson);
-        Assert.Contains("running", outputJson);
+        Assert.Contains("in_progress", outputJson);
     }
 
     #endregion
@@ -125,7 +126,7 @@ public class AgentSideConnectionExtendedTests
     public async Task ProcessNewSession_RoutesToAgentNewSessionAsync()
     {
         // Arrange
-        var newSessionRequest = new NewSessionRequest { Cwd = "/workspace" };
+        var newSessionRequest = new NewSessionRequest { Cwd = "/workspace", McpServers = [] };
         var jsonRpcRequest = new JsonRpcRequest
         {
             Id = 10,

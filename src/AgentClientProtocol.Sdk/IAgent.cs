@@ -7,10 +7,10 @@ namespace AgentClientProtocol.Sdk;
 
 /// <summary>
 /// Interface that all ACP-compliant agents must implement.
-/// 
+///
 /// Agents are programs that use generative AI to autonomously modify code.
 /// They handle requests from clients (IDEs) and execute tasks using language models and tools.
-/// 
+///
 /// Methods are decorated with [RpcMethod] for compile-time dispatch table generation.
 /// </summary>
 [RpcDispatcher("Agent")]
@@ -53,6 +53,13 @@ public interface IAgent : IAsyncDisposable
     [RpcMethod(AgentMethods.SessionLoad)]
     Task<LoadSessionResponse?> LoadSessionAsync(LoadSessionRequest request, CancellationToken ct = default) =>
         Task.FromResult<LoadSessionResponse?>(null);
+
+    /// <summary>
+    /// Sets the current session mode (optional).
+    /// </summary>
+    [RpcMethod(AgentMethods.SessionSetMode)]
+    Task<SetSessionModeResponse?> SetSessionModeAsync(SetSessionModeRequest request, CancellationToken ct = default) =>
+        Task.FromResult<SetSessionModeResponse?>(null);
 
     /// <summary>
     /// Default disposal implementation - no-op for interfaces.

@@ -14,7 +14,6 @@ public static class ClientMethods
 
     // Session methods
     public const string SessionRequestPermission = "session/request_permission";
-    public const string SessionRequestInput = "session/request_input";
     public const string SessionUpdate = "session/update";
 
     // Terminal methods

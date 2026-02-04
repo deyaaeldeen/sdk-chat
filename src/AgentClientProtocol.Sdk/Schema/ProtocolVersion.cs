@@ -11,7 +11,7 @@ public static class Protocol
     /// <summary>
     /// Current protocol version supported by this SDK.
     /// </summary>
-    public const int Version = 1;
+    public const ushort Version = 1;
 
     /// <summary>
     /// Protocol version string for display.

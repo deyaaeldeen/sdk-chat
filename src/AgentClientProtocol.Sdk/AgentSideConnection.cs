@@ -11,11 +11,11 @@ namespace AgentClientProtocol.Sdk;
 
 /// <summary>
 /// Agent-side connection to a client.
-/// 
+///
 /// Provides the agent's view of an ACP connection, allowing agents to
 /// communicate with clients (IDEs). Implements methods for requesting permissions,
 /// accessing the file system, and sending session updates.
-/// 
+///
 /// Uses compile-time generated dispatch tables for O(1) method lookup.
 /// </summary>
 public class AgentSideConnection : IAsyncDisposable
@@ -87,18 +87,28 @@ public class AgentSideConnection : IAsyncDisposable
         SessionUpdateAsync(new SessionNotification
         {
             SessionId = sessionId,
-            Update = new PlanUpdate { Entries = entries }
+            Update = new Plan { Entries = entries }
         }, ct);
 
     /// <summary>
     /// Send tool call update to client.
     /// </summary>
-    public Task SendToolCallAsync(string sessionId, string id, string name, string status,
-        object? arguments = null, ContentBlock[]? content = null, CancellationToken ct = default)
+    public Task SendToolCallAsync(
+        string sessionId,
+        string toolCallId,
+        string title,
+        string status,
+        string? kind = null,
+        ToolCallContent[]? content = null,
+        ToolCallLocation[]? locations = null,
+        object? rawInput = null,
+        object? rawOutput = null,
+        CancellationToken ct = default)
     {
-        // Arguments is dynamic object - type unknown at compile time
+        // Raw input/output are dynamic objects - type unknown at compile time
 #pragma warning disable IL2026, IL3050 // Dynamic object serialization unavoidable
-        var serializedArgs = arguments != null ? JsonSerializer.SerializeToElement(arguments, AcpJsonContext.FlexibleOptions) : (JsonElement?)null;
+        var serializedInput = rawInput != null ? JsonSerializer.SerializeToElement(rawInput, AcpJsonContext.FlexibleOptions) : (JsonElement?)null;
+        var serializedOutput = rawOutput != null ? JsonSerializer.SerializeToElement(rawOutput, AcpJsonContext.FlexibleOptions) : (JsonElement?)null;
 #pragma warning restore IL2026, IL3050
 
         return SessionUpdateAsync(new SessionNotification
@@ -106,11 +116,14 @@ public class AgentSideConnection : IAsyncDisposable
             SessionId = sessionId,
             Update = new ToolCallUpdate
             {
-                Id = id,
-                Name = name,
+                ToolCallId = toolCallId,
+                Title = title,
                 Status = status,
-                Arguments = serializedArgs,
-                Content = content
+                Kind = kind,
+                Content = content,
+                Locations = locations,
+                RawInput = serializedInput,
+                RawOutput = serializedOutput
             }
         }, ct);
     }
@@ -121,23 +134,6 @@ public class AgentSideConnection : IAsyncDisposable
     public Task<RequestPermissionResponse> RequestPermissionAsync(
         RequestPermissionRequest request, CancellationToken ct = default) =>
         _connection.SendRequestAsync<RequestPermissionResponse>(ClientMethods.SessionRequestPermission, request, ct)!;
-
-    /// <summary>
-    /// Request text input from user.
-    /// </summary>
-    public Task<RequestInputResponse> RequestInputAsync(
-        string sessionId,
-        string requestId,
-        string prompt,
-        string? defaultValue = null,
-        CancellationToken ct = default) =>
-        _connection.SendRequestAsync<RequestInputResponse>(ClientMethods.SessionRequestInput, new RequestInputRequest
-        {
-            SessionId = sessionId,
-            RequestId = requestId,
-            Prompt = prompt,
-            DefaultValue = defaultValue
-        }, ct)!;
 
     /// <summary>
     /// Read a text file from client.

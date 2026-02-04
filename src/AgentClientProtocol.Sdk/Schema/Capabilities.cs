@@ -48,6 +48,10 @@ public record ClientCapabilities
 /// </summary>
 public record FileSystemCapability
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("readTextFile")]
     public bool ReadTextFile { get; init; }
 
@@ -60,6 +64,10 @@ public record FileSystemCapability
 /// </summary>
 public record McpCapabilities
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("http")]
     public bool? Http { get; init; }
 
@@ -75,42 +83,21 @@ public record PromptCapabilities
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
+
+    [JsonPropertyName("audio")]
+    public bool? Audio { get; init; }
+
+    [JsonPropertyName("embeddedContext")]
+    public bool? EmbeddedContext { get; init; }
+
+    [JsonPropertyName("image")]
+    public bool? Image { get; init; }
 }
 
 /// <summary>
 /// Session capabilities.
 /// </summary>
 public record SessionCapabilities
-{
-    [JsonPropertyName("_meta")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Dictionary<string, object>? Meta { get; init; }
-
-    [JsonPropertyName("fork")]
-    public SessionForkCapabilities? Fork { get; init; }
-
-    [JsonPropertyName("list")]
-    public SessionListCapabilities? List { get; init; }
-
-    [JsonPropertyName("resume")]
-    public SessionResumeCapabilities? Resume { get; init; }
-}
-
-public record SessionForkCapabilities
-{
-    [JsonPropertyName("_meta")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Dictionary<string, object>? Meta { get; init; }
-}
-
-public record SessionListCapabilities
-{
-    [JsonPropertyName("_meta")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Dictionary<string, object>? Meta { get; init; }
-}
-
-public record SessionResumeCapabilities
 {
     [JsonPropertyName("_meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -122,6 +109,10 @@ public record SessionResumeCapabilities
 /// </summary>
 public record Implementation
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("name")]
     public required string Name { get; init; }
 

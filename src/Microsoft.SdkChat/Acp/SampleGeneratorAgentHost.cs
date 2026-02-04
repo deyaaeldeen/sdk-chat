@@ -56,10 +56,8 @@ public static class SampleGeneratorAgentHost
         var options = SdkChatOptions.FromEnvironment();
         if (useOpenAi) options.UseOpenAi = true;
         services.AddSingleton(options);
-        services.AddSingleton<AiDebugLogger>();
-        services.AddSingleton<AiService>();
-        services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
         services.AddSingleton<FileHelper>();
+        services.AddSingleton<IPackageInfoService, PackageInfoService>();
 
         return services.BuildServiceProvider();
     }

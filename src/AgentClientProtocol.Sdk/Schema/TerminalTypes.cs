@@ -28,6 +28,10 @@ public record CreateTerminalRequest
 
     [JsonPropertyName("env")]
     public EnvVariable[]? Env { get; init; }
+
+    [JsonPropertyName("outputByteLimit")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ulong? OutputByteLimit { get; init; }
 }
 
 /// <summary>
@@ -70,6 +74,9 @@ public record TerminalOutputResponse
 
     [JsonPropertyName("output")]
     public required string Output { get; init; }
+
+    [JsonPropertyName("truncated")]
+    public required bool Truncated { get; init; }
 
     [JsonPropertyName("exitStatus")]
     public TerminalExitStatus? ExitStatus { get; init; }
@@ -126,11 +133,8 @@ public record WaitForTerminalExitResponse
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Meta { get; init; }
 
-    [JsonPropertyName("exitCode")]
-    public int? ExitCode { get; init; }
-
-    [JsonPropertyName("signal")]
-    public string? Signal { get; init; }
+    [JsonPropertyName("exitStatus")]
+    public required TerminalExitStatus ExitStatus { get; init; }
 }
 
 /// <summary>
@@ -164,6 +168,10 @@ public record KillTerminalCommandResponse
 /// </summary>
 public record TerminalExitStatus
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("exitCode")]
     public int? ExitCode { get; init; }
 
@@ -174,8 +182,12 @@ public record TerminalExitStatus
 /// <summary>
 /// Terminal embed reference.
 /// </summary>
-public record Terminal
+public record Terminal : ToolCallContent
 {
+    [JsonPropertyName("_meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object>? Meta { get; init; }
+
     [JsonPropertyName("terminalId")]
     public required string TerminalId { get; init; }
 }
