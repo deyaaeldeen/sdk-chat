@@ -66,6 +66,9 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Key: "namespace.TypeName", Value: merged type
         // Using ConcurrentDictionary for thread-safe parallel processing
         var typeMap = new ConcurrentDictionary<string, MergedType>();
+        
+        // Resolve entry point namespaces from project configuration
+        var entryPointNamespaces = ResolveEntryPointNamespaces(rootPath);
 
         // Parallelize Roslyn parsing - cap at 8 cores to prevent memory pressure
         // Beyond 8 cores, memory bandwidth dominates and additional parallelism hurts
@@ -81,7 +84,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 var code = await File.ReadAllTextAsync(file, token).ConfigureAwait(false);
                 var tree = CSharpSyntaxTree.ParseText(code, cancellationToken: token);
                 var root = await tree.GetRootAsync(token).ConfigureAwait(false);
-                ExtractFromRoot(root, typeMap);
+                ExtractFromRoot(root, typeMap, entryPointNamespaces);
             }).ConfigureAwait(false);
 
         var packageName = DetectPackageName(rootPath);
@@ -98,6 +101,117 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
         return new ApiIndex { Package = packageName, Namespaces = namespaces };
     }
+    
+    #region Entry Point Detection
+    
+    /// <summary>
+    /// Resolves entry point namespaces from project configuration.
+    /// Entry points in .NET are determined by:
+    /// 1. RootNamespace from .csproj
+    /// 2. PackageId from .csproj
+    /// 3. Inferred from project directory name
+    /// </summary>
+    private static HashSet<string> ResolveEntryPointNamespaces(string rootPath)
+    {
+        var entryPoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        // Find .csproj file
+        var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
+                  ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
+        
+        if (csproj != null)
+        {
+            var content = File.ReadAllText(csproj);
+            
+            // Parse RootNamespace
+            var rootNs = ExtractCsprojProperty(content, "RootNamespace");
+            if (!string.IsNullOrEmpty(rootNs))
+            {
+                entryPoints.Add(rootNs);
+            }
+            
+            // Parse PackageId
+            var packageId = ExtractCsprojProperty(content, "PackageId");
+            if (!string.IsNullOrEmpty(packageId))
+            {
+                entryPoints.Add(packageId);
+            }
+            
+            // Parse AssemblyName
+            var assemblyName = ExtractCsprojProperty(content, "AssemblyName");
+            if (!string.IsNullOrEmpty(assemblyName))
+            {
+                entryPoints.Add(assemblyName);
+            }
+            
+            // Fallback to project file name
+            var projectName = Path.GetFileNameWithoutExtension(csproj);
+            if (!string.IsNullOrEmpty(projectName))
+            {
+                entryPoints.Add(projectName);
+            }
+        }
+        else
+        {
+            // No csproj, use directory name as namespace hint
+            var dirName = Path.GetFileName(rootPath);
+            if (!string.IsNullOrEmpty(dirName))
+            {
+                entryPoints.Add(dirName);
+            }
+        }
+        
+        return entryPoints;
+    }
+    
+    /// <summary>
+    /// Extracts a property value from .csproj XML content.
+    /// </summary>
+    private static string? ExtractCsprojProperty(string content, string propertyName)
+    {
+        // Simple regex-based extraction (avoiding full XML parsing for speed)
+        var pattern = $"<{propertyName}>([^<]+)</{propertyName}>";
+        var match = System.Text.RegularExpressions.Regex.Match(content, pattern);
+        return match.Success ? match.Groups[1].Value.Trim() : null;
+    }
+    
+    /// <summary>
+    /// Checks if a namespace is an entry point namespace.
+    /// </summary>
+    private static bool IsEntryPointNamespace(string ns, HashSet<string> entryPointNamespaces)
+    {
+        if (entryPointNamespaces.Count == 0)
+        {
+            return false;
+        }
+        
+        foreach (var entryNs in entryPointNamespaces)
+        {
+            // Exact match or the namespace equals the entry point
+            if (string.Equals(ns, entryNs, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            
+            // Namespace is a direct child of entry point (e.g., "MyPkg.Models" when entry is "MyPkg")
+            // But exclude implementation/internal namespaces
+            if (ns.StartsWith(entryNs + ".", StringComparison.OrdinalIgnoreCase))
+            {
+                var suffix = ns[(entryNs.Length + 1)..].ToLowerInvariant();
+                if (!suffix.Contains(".internal") && !suffix.Contains(".implementation"))
+                {
+                    // Direct children of entry namespace are entry points
+                    // But deeper nested ones are typically supporting types
+                    var depth = suffix.Count(c => c == '.');
+                    return depth == 0;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    #endregion
 
     /// <summary>
     /// Thread-safe container for merging partial type definitions during parallel extraction.
@@ -114,6 +228,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         public volatile string? Doc;
         public ConcurrentDictionary<string, MemberInfo> Members { get; } = new(); // Key = signature for dedup
         public volatile List<string>? Values;
+        public volatile bool IsEntryPoint;
 
         public void AddInterface(string iface) => Interfaces.TryAdd(iface, 0);
 
@@ -149,33 +264,40 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Interfaces = !Interfaces.IsEmpty ? Interfaces.Keys.OrderBy(i => i).ToList() : null,
             Doc = Doc,
             Members = !Members.IsEmpty ? Members.Values.ToList() : null,
-            Values = Values
+            Values = Values,
+            EntryPoint = IsEntryPoint ? true : null
         };
     }
 
-    private void ExtractFromRoot(SyntaxNode root, ConcurrentDictionary<string, MergedType> typeMap)
+    private void ExtractFromRoot(SyntaxNode root, ConcurrentDictionary<string, MergedType> typeMap, HashSet<string> entryPointNamespaces)
     {
         var fileScopedNs = root.DescendantNodes().OfType<FileScopedNamespaceDeclarationSyntax>().FirstOrDefault();
         if (fileScopedNs != null)
         {
-            ExtractTypes(fileScopedNs, fileScopedNs.Name.ToString(), typeMap);
+            var nsName = fileScopedNs.Name.ToString();
+            var isEntryPointNs = IsEntryPointNamespace(nsName, entryPointNamespaces);
+            ExtractTypes(fileScopedNs, nsName, typeMap, isEntryPointNs);
             return;
         }
 
         foreach (var ns in root.DescendantNodes().OfType<NamespaceDeclarationSyntax>())
-            ExtractTypes(ns, ns.Name.ToString(), typeMap);
+        {
+            var nsName = ns.Name.ToString();
+            var isEntryPointNs = IsEntryPointNamespace(nsName, entryPointNamespaces);
+            ExtractTypes(ns, nsName, typeMap, isEntryPointNs);
+        }
 
         foreach (var type in root.ChildNodes().OfType<TypeDeclarationSyntax>().Where(IsPublic))
-            MergeType("", type, typeMap);
+            MergeType("", type, typeMap, false);
     }
 
-    private void ExtractTypes(SyntaxNode container, string nsName, ConcurrentDictionary<string, MergedType> typeMap)
+    private void ExtractTypes(SyntaxNode container, string nsName, ConcurrentDictionary<string, MergedType> typeMap, bool isEntryPointNamespace)
     {
         foreach (var type in container.ChildNodes().OfType<BaseTypeDeclarationSyntax>().Where(IsPublic))
-            MergeType(nsName, type, typeMap);
+            MergeType(nsName, type, typeMap, isEntryPointNamespace);
     }
 
-    private void MergeType(string ns, BaseTypeDeclarationSyntax type, ConcurrentDictionary<string, MergedType> typeMap)
+    private void MergeType(string ns, BaseTypeDeclarationSyntax type, ConcurrentDictionary<string, MergedType> typeMap, bool isEntryPointNamespace)
     {
         var name = GetTypeName(type);
         var key = $"{ns}.{name}";
@@ -184,6 +306,12 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
         // Update kind (first non-empty wins) - thread-safe
         merged.SetKindIfEmpty(GetTypeKind(type));
+        
+        // Mark as entry point if in entry point namespace
+        if (isEntryPointNamespace)
+        {
+            merged.IsEntryPoint = true;
+        }
 
         // Merge base types - thread-safe
         if (type is TypeDeclarationSyntax tds && tds.BaseList != null)

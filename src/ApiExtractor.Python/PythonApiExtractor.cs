@@ -148,11 +148,12 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     {
         var modules = raw.Modules?.Select(m => new ModuleInfo(
             m.Name ?? "",
-            m.Classes?.Select(c => new ClassInfo(
-                c.Name ?? "",
-                c.Base,
-                c.Doc,
-                c.Methods?.Select(mt => new MethodInfo(
+            m.Classes?.Select(c => new ClassInfo
+            {
+                Name = c.Name ?? "",
+                Base = c.Base,
+                Doc = c.Doc,
+                Methods = c.Methods?.Select(mt => new MethodInfo(
                     mt.Name ?? "",
                     mt.Sig ?? "",
                     mt.Doc,
@@ -160,14 +161,15 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                     mt.Classmethod,
                     mt.Staticmethod
                 )).ToList(),
-                c.Properties?.Select(p => new PropertyInfo(p.Name ?? "", p.Type, p.Doc)).ToList()
-            )).ToList(),
-            m.Functions?.Select(f => new FunctionInfo(
-                f.Name ?? "",
-                f.Sig ?? "",
-                f.Doc,
-                f.Async
-            )).ToList()
+                Properties = c.Properties?.Select(p => new PropertyInfo(p.Name ?? "", p.Type, p.Doc)).ToList()
+            }).ToList(),
+            m.Functions?.Select(f => new FunctionInfo
+            {
+                Name = f.Name ?? "",
+                Signature = f.Sig ?? "",
+                Doc = f.Doc,
+                IsAsync = f.Async
+            }).ToList()
         )).ToList() ?? [];
 
         return new ApiIndex(raw.Package ?? "", modules);

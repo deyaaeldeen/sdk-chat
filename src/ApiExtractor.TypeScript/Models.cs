@@ -59,6 +59,9 @@ public sealed record ClassInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("entryPoint")]
+    public bool? EntryPoint { get; init; }
+
     [JsonPropertyName("extends")]
     public string? Extends { get; init; }
 
@@ -80,10 +83,11 @@ public sealed record ClassInfo
     [JsonPropertyName("properties")]
     public IReadOnlyList<PropertyInfo>? Properties { get; init; }
 
-    /// <summary>Returns true if this is a client class (SDK entry point).</summary>
+    /// <summary>Returns true if this is a client class (SDK entry point with operations).
+    /// A client type must be an entry point AND have methods.</summary>
     [JsonIgnore]
     public bool IsClientType =>
-        (Name.EndsWith("Client") || Name.EndsWith("Service") || Name.EndsWith("Manager")) &&
+        EntryPoint == true &&
         (Methods?.Any() ?? false);
 
     /// <summary>Returns true if this is a model/DTO class.</summary>
@@ -152,6 +156,9 @@ public record InterfaceInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("entryPoint")]
+    public bool? EntryPoint { get; init; }
+
     [JsonPropertyName("extends")]
     public string? Extends { get; init; }
 
@@ -199,6 +206,9 @@ public record FunctionInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
+
+    [JsonPropertyName("entryPoint")]
+    public bool? EntryPoint { get; init; }
 
     [JsonPropertyName("sig")]
     public string Sig { get; init; } = "";

@@ -25,6 +25,7 @@ public class SmartTruncationTests
         {
             Name = "ChatClient",
             Kind = "class",
+            EntryPoint = true,
             Members = [new MemberInfo { Name = "SendAsync", Kind = "method", Signature = "() -> Task" }]
         };
 
@@ -67,6 +68,7 @@ public class SmartTruncationTests
         {
             Name = "ChatClient",
             Kind = "class",
+            EntryPoint = true,
             Members = [new MemberInfo { Name = "SendAsync", Kind = "method", Signature = "() -> Task" }]
         };
 
@@ -158,6 +160,7 @@ public class SmartTruncationTests
         {
             Name = "SampleClient",
             Kind = "class",
+            EntryPoint = true,
             Members = [new MemberInfo { Name = "DoSomething", Kind = "method", Signature = "() -> void" }]
         });
 
@@ -193,6 +196,7 @@ public class SmartTruncationTests
                     {
                         Name = "ChatClient",
                         Kind = "class",
+                        EntryPoint = true,
                         Members = [new MemberInfo { Name = "Send", Kind = "method", Signature = "() -> void" }]
                     },
                     new DotNet.TypeInfo
@@ -226,6 +230,7 @@ public class SmartTruncationTests
                     {
                         Name = "ChatClient",
                         Kind = "class",
+                        EntryPoint = true,
                         Members = [new MemberInfo { Name = "Send", Kind = "method", Signature = "(ChatMessage msg) -> void" }]
                     },
                     new DotNet.TypeInfo
@@ -246,21 +251,24 @@ public class SmartTruncationTests
     [Fact]
     public void Python_ClassInfo_IsClientType_DetectsClientClasses()
     {
-        var clientClass = new Python.ClassInfo(
-            Name: "ChatClient",
-            Base: null,
-            Doc: null,
-            Methods: [new Python.MethodInfo("send", "self, message", null, null, null, null)],
-            Properties: null
-        );
+        var clientClass = new Python.ClassInfo
+        {
+            Name = "ChatClient",
+            EntryPoint = true,
+            Base = null,
+            Doc = null,
+            Methods = [new Python.MethodInfo("send", "self, message", null, null, null, null)],
+            Properties = null
+        };
 
-        var modelClass = new Python.ClassInfo(
-            Name: "ChatMessage",
-            Base: null,
-            Doc: null,
-            Methods: null,
-            Properties: [new Python.PropertyInfo("content", "str", null)]
-        );
+        var modelClass = new Python.ClassInfo
+        {
+            Name = "ChatMessage",
+            Base = null,
+            Doc = null,
+            Methods = null,
+            Properties = [new Python.PropertyInfo("content", "str", null)]
+        };
 
         Assert.True(clientClass.IsClientType);
         Assert.False(modelClass.IsClientType);
@@ -269,21 +277,24 @@ public class SmartTruncationTests
     [Fact]
     public void Python_ClassInfo_TruncationPriority_ClientsFirst()
     {
-        var clientClass = new Python.ClassInfo(
-            Name: "ChatClient",
-            Base: null,
-            Doc: null,
-            Methods: [new Python.MethodInfo("send", "self", null, null, null, null)],
-            Properties: null
-        );
+        var clientClass = new Python.ClassInfo
+        {
+            Name = "ChatClient",
+            EntryPoint = true,
+            Base = null,
+            Doc = null,
+            Methods = [new Python.MethodInfo("send", "self", null, null, null, null)],
+            Properties = null
+        };
 
-        var modelClass = new Python.ClassInfo(
-            Name: "ChatMessage",
-            Base: null,
-            Doc: null,
-            Methods: null,
-            Properties: [new Python.PropertyInfo("content", "str", null)]
-        );
+        var modelClass = new Python.ClassInfo
+        {
+            Name = "ChatMessage",
+            Base = null,
+            Doc = null,
+            Methods = null,
+            Properties = [new Python.PropertyInfo("content", "str", null)]
+        };
 
         Assert.True(clientClass.TruncationPriority < modelClass.TruncationPriority);
     }
@@ -291,13 +302,14 @@ public class SmartTruncationTests
     [Fact]
     public void Python_ClassInfo_GetReferencedTypes_ExtractsFromAnnotations()
     {
-        var clientClass = new Python.ClassInfo(
-            Name: "ChatClient",
-            Base: "BaseClient",
-            Doc: null,
-            Methods: [new Python.MethodInfo("send", "self, message: ChatMessage -> ChatResponse", null, null, null, null)],
-            Properties: null
-        );
+        var clientClass = new Python.ClassInfo
+        {
+            Name = "ChatClient",
+            Base = "BaseClient",
+            Doc = null,
+            Methods = [new Python.MethodInfo("send", "self, message: ChatMessage -> ChatResponse", null, null, null, null)],
+            Properties = null
+        };
 
         var allTypes = new HashSet<string> { "ChatClient", "BaseClient", "ChatMessage", "ChatResponse", "Unrelated" };
         var refs = clientClass.GetReferencedTypes(allTypes);
@@ -323,28 +335,31 @@ public class SmartTruncationTests
     {
         var classes = new List<Python.ClassInfo>();
 
-        classes.Add(new Python.ClassInfo(
-            Name: "SampleClient",
-            Base: null,
-            Doc: null,
-            Methods: [new Python.MethodInfo("do_something", "self, param1: str, param2: int", null, null, null, null)],
-            Properties: null
-        ));
+        classes.Add(new Python.ClassInfo
+        {
+            Name = "SampleClient",
+            EntryPoint = true,
+            Base = null,
+            Doc = null,
+            Methods = [new Python.MethodInfo("do_something", "self, param1: str, param2: int", null, null, null, null)],
+            Properties = null
+        });
 
         for (int i = 0; i < classCount - 1; i++)
         {
             // Create more substantial model classes to trigger truncation
-            classes.Add(new Python.ClassInfo(
-                Name: $"Model{i}WithLongNameToTakeUpSpace",
-                Base: null,
-                Doc: $"This is a documentation comment for Model{i}.",
-                Methods: null,
-                Properties: [
+            classes.Add(new Python.ClassInfo
+            {
+                Name = $"Model{i}WithLongNameToTakeUpSpace",
+                Base = null,
+                Doc = $"This is a documentation comment for Model{i}.",
+                Methods = null,
+                Properties = [
                     new Python.PropertyInfo($"property_one_{i}", "str", null),
                     new Python.PropertyInfo($"property_two_{i}", "int", null),
                     new Python.PropertyInfo($"property_three_{i}", "bool", null)
                 ]
-            ));
+            });
         }
 
         return new Python.ApiIndex(
@@ -363,17 +378,19 @@ public class SmartTruncationTests
         var clientClass = new Java.ClassInfo
         {
             Name = "ChatClient",
+            EntryPoint = true,
             Methods = [new Java.MethodInfo { Name = "send", Sig = "()", Ret = "void" }]
         };
 
         var builderClass = new Java.ClassInfo
         {
             Name = "ChatClientBuilder",
+            EntryPoint = true,
             Methods = [new Java.MethodInfo { Name = "build", Sig = "()", Ret = "ChatClient" }]
         };
 
         Assert.True(clientClass.IsClientType);
-        Assert.True(builderClass.IsClientType); // Java includes Builder pattern
+        Assert.True(builderClass.IsClientType);
     }
 
     [Fact]
@@ -412,6 +429,7 @@ public class SmartTruncationTests
         classes.Add(new Java.ClassInfo
         {
             Name = "SampleClient",
+            EntryPoint = true,
             Methods = [new Java.MethodInfo { Name = "doSomething", Sig = "(String param1, int param2)", Ret = "void" }]
         });
 
@@ -447,6 +465,7 @@ public class SmartTruncationTests
         var clientStruct = new Go.StructApi
         {
             Name = "ChatClient",
+            EntryPoint = true,
             Methods = [new Go.FuncApi { Name = "Send", Sig = "(ctx context.Context)", Ret = "error" }]
         };
 
@@ -466,6 +485,7 @@ public class SmartTruncationTests
         var clientStruct = new Go.StructApi
         {
             Name = "ChatClient",
+            EntryPoint = true,
             Methods = [new Go.FuncApi { Name = "Send", Sig = "()", Ret = "error" }]
         };
 
@@ -496,6 +516,7 @@ public class SmartTruncationTests
         structs.Add(new Go.StructApi
         {
             Name = "SampleClient",
+            EntryPoint = true,
             Methods = [new Go.FuncApi { Name = "DoSomething", Sig = "()", Ret = "error" }]
         });
 
@@ -525,6 +546,7 @@ public class SmartTruncationTests
         var clientClass = new TypeScript.ClassInfo
         {
             Name = "ChatClient",
+            EntryPoint = true,
             Methods = [new TypeScript.MethodInfo { Name = "send", Sig = "message: string", Ret = "Promise<void>" }]
         };
 
@@ -574,6 +596,7 @@ public class SmartTruncationTests
         classes.Add(new TypeScript.ClassInfo
         {
             Name = "SampleClient",
+            EntryPoint = true,
             Methods = [new TypeScript.MethodInfo { Name = "doSomething", Sig = "", Ret = "void" }]
         });
 
@@ -600,38 +623,44 @@ public class SmartTruncationTests
     [Fact]
     public void AllLanguages_ClientPatternDetection_ConsistentAcrossLanguages()
     {
-        // All languages should detect *Client, *Service, *Manager as client types
+        // All languages should detect EntryPoint = true as client types
 
         var dotnetClient = new DotNet.TypeInfo
         {
             Name = "ChatService",
             Kind = "class",
+            EntryPoint = true,
             Members = [new MemberInfo { Name = "Send", Kind = "method", Signature = "() -> void" }]
         };
 
-        var pythonClient = new Python.ClassInfo(
-            Name: "ChatManager",
-            Base: null,
-            Doc: null,
-            Methods: [new Python.MethodInfo("send", "self", null, null, null, null)],
-            Properties: null
-        );
+        var pythonClient = new Python.ClassInfo
+        {
+            Name = "ChatManager",
+            EntryPoint = true,
+            Base = null,
+            Doc = null,
+            Methods = [new Python.MethodInfo("send", "self", null, null, null, null)],
+            Properties = null
+        };
 
         var javaClient = new Java.ClassInfo
         {
             Name = "ChatClient",
+            EntryPoint = true,
             Methods = [new Java.MethodInfo { Name = "send", Sig = "()", Ret = "void" }]
         };
 
         var goClient = new Go.StructApi
         {
             Name = "ChatClient",
+            EntryPoint = true,
             Methods = [new Go.FuncApi { Name = "Send", Sig = "()", Ret = "error" }]
         };
 
         var tsClient = new TypeScript.ClassInfo
         {
             Name = "ChatClient",
+            EntryPoint = true,
             Methods = [new TypeScript.MethodInfo { Name = "send", Sig = "", Ret = "void" }]
         };
 

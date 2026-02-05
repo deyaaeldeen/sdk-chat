@@ -144,6 +144,7 @@ public class ApiModelImmutabilityTests
                         {
                             Name = "TestClient",
                             Kind = "class",
+                            EntryPoint = true,
                             Members = [new MemberInfo { Name = "DoSomething", Kind = "method", Signature = "Task DoSomething()" }]
                         },
                         new TypeInfo { Name = "TestModel", Kind = "class" }

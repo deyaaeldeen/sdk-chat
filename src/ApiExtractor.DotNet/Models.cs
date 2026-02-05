@@ -99,6 +99,9 @@ public record TypeInfo
     [JsonPropertyName("kind")]
     public string Kind { get; init; } = ""; // class, interface, struct, enum, record, delegate
 
+    [JsonPropertyName("entryPoint")]
+    public bool? EntryPoint { get; init; }
+
     [JsonPropertyName("base")]
     public string? Base { get; init; }
 
@@ -116,11 +119,12 @@ public record TypeInfo
 
     /// <summary>
     /// Returns true if this is a client class (entry point for SDK operations).
+    /// A client type must be an entry point AND have methods (operations).
     /// </summary>
     [JsonIgnore]
     public bool IsClientType =>
+        EntryPoint == true &&
         Kind == "class" &&
-        (Name.EndsWith("Client") || Name.EndsWith("Service") || Name.EndsWith("Manager")) &&
         (Members?.Any(m => m.Kind == "method") ?? false);
 
     /// <summary>

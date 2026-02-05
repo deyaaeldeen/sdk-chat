@@ -49,6 +49,7 @@ export interface ConstructorInfo {
 
 export interface ClassInfo {
     name: string;
+    entryPoint?: boolean;
     extends?: string;
     implements?: string[];
     typeParams?: string;
@@ -60,6 +61,7 @@ export interface ClassInfo {
 
 export interface InterfaceInfo {
     name: string;
+    entryPoint?: boolean;
     extends?: string;
     typeParams?: string;
     doc?: string;
@@ -81,6 +83,7 @@ export interface TypeAliasInfo {
 
 export interface FunctionInfo {
     name: string;
+    entryPoint?: boolean;
     sig: string;
     ret?: string;
     doc?: string;
@@ -418,6 +421,192 @@ function extractModule(sourceFile: SourceFile, moduleName: string): ModuleInfo |
 }
 
 // ============================================================================
+// Entry Point Detection
+// ============================================================================
+
+interface PackageJson {
+    name?: string;
+    main?: string;
+    module?: string;
+    types?: string;
+    typings?: string;
+    browser?: string | Record<string, string | false>;
+    exports?: string | Record<string, unknown>;
+}
+
+/**
+ * Resolves entry point files from package.json configuration.
+ * Supports: exports, types, typings, module, main, browser.
+ */
+function resolveEntryPointFiles(rootPath: string): string[] {
+    const pkgPath = path.join(rootPath, "package.json");
+    if (!fs.existsSync(pkgPath)) {
+        return [];
+    }
+
+    const pkg: PackageJson = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    const entryFiles: string[] = [];
+
+    // 1. Modern exports map (highest priority)
+    if (pkg.exports) {
+        const exportPaths = extractExportPaths(pkg.exports);
+        for (const exportPath of exportPaths) {
+            const resolved = resolveToSourceFile(rootPath, exportPath);
+            if (resolved) entryFiles.push(resolved);
+        }
+    }
+
+    // 2. TypeScript types/typings
+    if (pkg.types) {
+        const resolved = resolveToSourceFile(rootPath, pkg.types);
+        if (resolved) entryFiles.push(resolved);
+    }
+    if (pkg.typings && pkg.typings !== pkg.types) {
+        const resolved = resolveToSourceFile(rootPath, pkg.typings);
+        if (resolved) entryFiles.push(resolved);
+    }
+
+    // 3. ES module entry
+    if (pkg.module) {
+        const resolved = resolveToSourceFile(rootPath, pkg.module);
+        if (resolved) entryFiles.push(resolved);
+    }
+
+    // 4. CommonJS entry
+    if (pkg.main) {
+        const resolved = resolveToSourceFile(rootPath, pkg.main);
+        if (resolved) entryFiles.push(resolved);
+    }
+
+    // 5. Fallback to common entry points
+    if (entryFiles.length === 0) {
+        const fallbackPaths = [
+            "src/index.ts",
+            "src/index.tsx",
+            "src/index.mts",
+            "index.ts",
+            "index.tsx",
+            "lib/index.ts",
+        ];
+        for (const fallback of fallbackPaths) {
+            const fullPath = path.join(rootPath, fallback);
+            if (fs.existsSync(fullPath)) {
+                entryFiles.push(fullPath);
+                break;
+            }
+        }
+    }
+
+    return [...new Set(entryFiles)]; // Deduplicate
+}
+
+/**
+ * Extracts all path values from package.json exports field.
+ */
+function extractExportPaths(exports: string | Record<string, unknown>): string[] {
+    const paths: string[] = [];
+
+    if (typeof exports === "string") {
+        paths.push(exports);
+    } else if (typeof exports === "object" && exports !== null) {
+        for (const value of Object.values(exports)) {
+            if (typeof value === "string") {
+                paths.push(value);
+            } else if (typeof value === "object" && value !== null) {
+                // Nested conditions (types, import, require, default)
+                const nested = value as Record<string, unknown>;
+                // Prefer types > import > require > default
+                const priority = ["types", "import", "require", "default"];
+                for (const key of priority) {
+                    if (typeof nested[key] === "string") {
+                        paths.push(nested[key] as string);
+                        break; // Only take one per export condition block
+                    }
+                }
+            }
+        }
+    }
+
+    return paths.filter((p) => p.endsWith(".ts") || p.endsWith(".d.ts") || p.endsWith(".js") || p.endsWith(".mjs"));
+}
+
+/**
+ * Resolves a dist/output path to its corresponding source file.
+ * Handles common patterns like dist/ -> src/, types/ -> src/.
+ */
+function resolveToSourceFile(rootPath: string, outputPath: string): string | null {
+    // Normalize path
+    let filePath = outputPath.replace(/^\.\//, "");
+
+    // Common output-to-source mappings
+    const mappings: Array<{ from: RegExp; to: string }> = [
+        { from: /^dist-esm\//, to: "src/" },
+        { from: /^dist\//, to: "src/" },
+        { from: /^lib\//, to: "src/" },
+        { from: /^build\//, to: "src/" },
+        { from: /^out\//, to: "src/" },
+        { from: /^types\//, to: "src/" },
+    ];
+
+    for (const { from, to } of mappings) {
+        if (from.test(filePath)) {
+            filePath = filePath.replace(from, to);
+            break;
+        }
+    }
+
+    // Convert .d.ts or .js to .ts
+    filePath = filePath
+        .replace(/\.d\.ts$/, ".ts")
+        .replace(/\.js$/, ".ts")
+        .replace(/\.mjs$/, ".mts")
+        .replace(/\.cjs$/, ".cts");
+
+    const fullPath = path.join(rootPath, filePath);
+    if (fs.existsSync(fullPath)) {
+        return fullPath;
+    }
+
+    // Try without the source mapping (file might be at root)
+    const directPath = path.join(rootPath, outputPath.replace(/^\.\//, ""))
+        .replace(/\.d\.ts$/, ".ts")
+        .replace(/\.js$/, ".ts");
+    if (fs.existsSync(directPath)) {
+        return directPath;
+    }
+
+    return null;
+}
+
+/**
+ * Extracts exported symbol names from entry point files.
+ */
+function extractExportedSymbols(project: Project, entryFiles: string[]): Set<string> {
+    const exportedSymbols = new Set<string>();
+
+    for (const entryFile of entryFiles) {
+        const sourceFile = project.getSourceFile(entryFile);
+        if (!sourceFile) continue;
+
+        // Get directly exported declarations
+        for (const decl of sourceFile.getExportedDeclarations().keys()) {
+            exportedSymbols.add(decl);
+        }
+
+        // Also check export statements that re-export from other modules
+        for (const exportDecl of sourceFile.getExportDeclarations()) {
+            const namedExports = exportDecl.getNamedExports();
+            for (const namedExport of namedExports) {
+                const name = namedExport.getAliasNode()?.getText() ?? namedExport.getName();
+                exportedSymbols.add(name);
+            }
+        }
+    }
+
+    return exportedSymbols;
+}
+
+// ============================================================================
 // Package Extraction
 // ============================================================================
 
@@ -462,6 +651,10 @@ export function extractPackage(rootPath: string): ApiIndex {
         project.addSourceFilesAtPaths(pattern);
     }
 
+    // Detect entry point files and extract exported symbols
+    const entryFiles = resolveEntryPointFiles(rootPath);
+    const entryPointSymbols = extractExportedSymbols(project, entryFiles);
+
     const modules: ModuleInfo[] = [];
 
     for (const sourceFile of project.getSourceFiles()) {
@@ -490,6 +683,28 @@ export function extractPackage(rootPath: string): ApiIndex {
 
         const module = extractModule(sourceFile, moduleName);
         if (module) {
+            // Mark entry points based on package.json exports
+            if (module.classes) {
+                for (const cls of module.classes) {
+                    if (entryPointSymbols.has(cls.name)) {
+                        (cls as { entryPoint?: boolean }).entryPoint = true;
+                    }
+                }
+            }
+            if (module.interfaces) {
+                for (const iface of module.interfaces) {
+                    if (entryPointSymbols.has(iface.name)) {
+                        (iface as { entryPoint?: boolean }).entryPoint = true;
+                    }
+                }
+            }
+            if (module.functions) {
+                for (const func of module.functions) {
+                    if (entryPointSymbols.has(func.name)) {
+                        (func as { entryPoint?: boolean }).entryPoint = true;
+                    }
+                }
+            }
             modules.push(module);
         }
     }

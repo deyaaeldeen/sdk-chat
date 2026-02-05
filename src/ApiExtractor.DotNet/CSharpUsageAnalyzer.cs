@@ -198,8 +198,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                      || t.Kind.Equals("struct", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        // Client classes are always roots - they're SDK entry points even if referenced by options/builders
-        static bool IsClientClass(string name) => name.EndsWith("Client", StringComparison.Ordinal) || name.EndsWith("AsyncClient", StringComparison.Ordinal);
+        // Use EntryPoint field to identify root types (SDK entry points)
+        static bool IsRootType(TypeInfo type) => type.EntryPoint == true;
 
         var rootTypes = candidateRoots
             .Where(type =>
@@ -208,7 +208,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 var hasOperations = type.Members?.Any(m => m.Kind == "method") ?? false;
                 var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
                 var isReferenced = referencedBy.ContainsKey(name);
-                return IsClientClass(name) || (!isReferenced && (hasOperations || referencesOperations));
+                return IsRootType(type) || (!isReferenced && (hasOperations || referencesOperations));
             })
             .ToList();
 
