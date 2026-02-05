@@ -240,6 +240,54 @@ public static class GoFormatter
             }
         }
 
+        // Add dependency types section
+        if (index.Dependencies?.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine("// Dependency Types (from external modules)");
+            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine();
+
+            foreach (var dep in index.Dependencies)
+            {
+                if (sb.Length >= maxLength) break;
+
+                sb.AppendLine($"// From: {dep.Package}");
+                sb.AppendLine();
+
+                foreach (var iface in dep.Interfaces ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    if (!string.IsNullOrEmpty(iface.Doc))
+                        sb.AppendLine($"// {iface.Doc}");
+                    sb.AppendLine($"type {iface.Name} interface {{");
+                    foreach (var m in iface.Methods ?? [])
+                    {
+                        var ret = !string.IsNullOrEmpty(m.Ret) ? $" {m.Ret}" : "";
+                        sb.AppendLine($"    {m.Name}({m.Sig}){ret}");
+                    }
+                    sb.AppendLine("}");
+                    sb.AppendLine();
+                }
+
+                foreach (var s in dep.Structs ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    FormatStruct(sb, s);
+                }
+
+                foreach (var t in dep.Types ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    if (!string.IsNullOrEmpty(t.Doc))
+                        sb.AppendLine($"// {t.Doc}");
+                    sb.AppendLine($"type {t.Name} = {t.Type}");
+                    sb.AppendLine();
+                }
+            }
+        }
+
         return sb.ToString();
     }
 

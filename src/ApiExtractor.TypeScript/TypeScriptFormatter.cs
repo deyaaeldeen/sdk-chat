@@ -99,6 +99,7 @@ public static class TypeScriptFormatter
 
     /// <summary>
     /// Formats the API surface with smart truncation that prioritizes client classes.
+    /// Groups exported symbols by their export subpath (e.g., ".", "./client").
     /// </summary>
     public static string Format(ApiIndex index, int maxLength)
     {
@@ -129,76 +130,161 @@ public static class TypeScriptFormatter
             classDeps[cls.Name] = cls.GetReferencedTypes(allTypeNames);
         }
 
-        // Prioritize classes: clients first, then their dependencies, then others
-        var prioritizedClasses = GetPrioritizedClasses(allClasses, classDeps);
+        // Group entry points by export path
+        var exportPaths = new HashSet<string>();
+        foreach (var cls in allClasses.Where(c => c.ExportPath != null))
+            exportPaths.Add(cls.ExportPath!);
+        foreach (var iface in allInterfaces.Where(i => i.ExportPath != null))
+            exportPaths.Add(iface.ExportPath!);
+        foreach (var fn in allFunctions.Where(f => f.ExportPath != null))
+            exportPaths.Add(fn.ExportPath!);
 
-        // Format with budget awareness
+        // Sort export paths: "." first, then alphabetically
+        var sortedExportPaths = exportPaths
+            .OrderBy(p => p == "." ? "" : p)
+            .ToList();
+
         int totalItems = allClasses.Count + allInterfaces.Count + allEnums.Count + allTypes.Count + allFunctions.Count;
         int includedItems = 0;
         var includedTypeNames = new HashSet<string>();
 
-        // First pass: Include client classes and their dependencies
-        foreach (var cls in prioritizedClasses)
+        // Format by export path sections if we have multiple paths
+        if (sortedExportPaths.Count > 1)
         {
-            if (sb.Length >= maxLength) break;
-
-            // Include this class
-            var classStr = FormatClass(cls);
-            if (sb.Length + classStr.Length > maxLength && includedItems > 0)
-                break;
-
-            sb.Append(classStr);
-            includedTypeNames.Add(cls.Name);
-            includedItems++;
-
-            // Include its dependencies (interfaces, enums, types)
-            foreach (var depName in classDeps.GetValueOrDefault(cls.Name, []))
+            foreach (var exportPath in sortedExportPaths)
             {
-                if (includedTypeNames.Contains(depName)) continue;
                 if (sb.Length >= maxLength) break;
 
-                // Try to find and include the dependency
-                var iface = allInterfaces.FirstOrDefault(i => i.Name == depName);
-                if (iface != null)
+                var importPath = exportPath == "."
+                    ? index.Package
+                    : $"{index.Package}/{exportPath[2..]}"; // Remove "./" prefix
+
+                sb.AppendLine($"// ============================================================================");
+                sb.AppendLine($"// import {{ ... }} from \"{importPath}\"");
+                sb.AppendLine($"// ============================================================================");
+                sb.AppendLine();
+
+                // Get classes for this export path
+                var pathClasses = allClasses.Where(c => c.ExportPath == exportPath).ToList();
+                var prioritizedClasses = GetPrioritizedClasses(pathClasses, classDeps);
+
+                foreach (var cls in prioritizedClasses)
                 {
+                    if (sb.Length >= maxLength) break;
+                    if (includedTypeNames.Contains(cls.Name)) continue;
+
+                    var classStr = FormatClass(cls);
+                    if (sb.Length + classStr.Length > maxLength && includedItems > 0)
+                        break;
+
+                    sb.Append(classStr);
+                    includedTypeNames.Add(cls.Name);
+                    includedItems++;
+                }
+
+                // Get interfaces for this export path
+                foreach (var iface in allInterfaces.Where(i => i.ExportPath == exportPath))
+                {
+                    if (sb.Length >= maxLength) break;
+                    if (includedTypeNames.Contains(iface.Name)) continue;
+
                     var ifaceStr = FormatInterface(iface);
-                    if (sb.Length + ifaceStr.Length <= maxLength)
-                    {
-                        sb.Append(ifaceStr);
-                        includedTypeNames.Add(depName);
-                        includedItems++;
-                    }
-                    continue;
+                    if (sb.Length + ifaceStr.Length > maxLength && includedItems > 0)
+                        break;
+
+                    sb.Append(ifaceStr);
+                    includedTypeNames.Add(iface.Name);
+                    includedItems++;
                 }
 
-                var enumDef = allEnums.FirstOrDefault(e => e.Name == depName);
-                if (enumDef != null)
+                // Get functions for this export path
+                foreach (var fn in allFunctions.Where(f => f.ExportPath == exportPath))
                 {
-                    var enumStr = FormatEnum(enumDef);
-                    if (sb.Length + enumStr.Length <= maxLength)
-                    {
-                        sb.Append(enumStr);
-                        includedTypeNames.Add(depName);
-                        includedItems++;
-                    }
-                    continue;
-                }
+                    if (sb.Length >= maxLength) break;
 
-                var typeDef = allTypes.FirstOrDefault(t => t.Name == depName);
-                if (typeDef != null)
+                    var fnStr = FormatFunction(fn);
+                    if (sb.Length + fnStr.Length > maxLength && includedItems > 0)
+                        break;
+
+                    sb.Append(fnStr);
+                    includedItems++;
+                }
+            }
+
+            // Include non-exported dependencies if space permits
+            sb.AppendLine($"// ============================================================================");
+            sb.AppendLine($"// Supporting Types (not directly exported)");
+            sb.AppendLine($"// ============================================================================");
+            sb.AppendLine();
+        }
+        else
+        {
+            // Original behavior: no export path grouping
+            var prioritizedClasses = GetPrioritizedClasses(allClasses, classDeps);
+
+            // First pass: Include client classes and their dependencies
+            foreach (var cls in prioritizedClasses)
+            {
+                if (sb.Length >= maxLength) break;
+
+                // Include this class
+                var classStr = FormatClass(cls);
+                if (sb.Length + classStr.Length > maxLength && includedItems > 0)
+                    break;
+
+                sb.Append(classStr);
+                includedTypeNames.Add(cls.Name);
+                includedItems++;
+
+                // Include its dependencies (interfaces, enums, types)
+                foreach (var depName in classDeps.GetValueOrDefault(cls.Name, []))
                 {
-                    var typeStr = FormatTypeAlias(typeDef);
-                    if (sb.Length + typeStr.Length <= maxLength)
+                    if (includedTypeNames.Contains(depName)) continue;
+                    if (sb.Length >= maxLength) break;
+
+                    // Try to find and include the dependency
+                    var iface = allInterfaces.FirstOrDefault(i => i.Name == depName);
+                    if (iface != null)
                     {
-                        sb.Append(typeStr);
-                        includedTypeNames.Add(depName);
-                        includedItems++;
+                        var ifaceStr = FormatInterface(iface);
+                        if (sb.Length + ifaceStr.Length <= maxLength)
+                        {
+                            sb.Append(ifaceStr);
+                            includedTypeNames.Add(depName);
+                            includedItems++;
+                        }
+                        continue;
+                    }
+
+                    var enumDef = allEnums.FirstOrDefault(e => e.Name == depName);
+                    if (enumDef != null)
+                    {
+                        var enumStr = FormatEnum(enumDef);
+                        if (sb.Length + enumStr.Length <= maxLength)
+                        {
+                            sb.Append(enumStr);
+                            includedTypeNames.Add(depName);
+                            includedItems++;
+                        }
+                        continue;
+                    }
+
+                    var typeDef = allTypes.FirstOrDefault(t => t.Name == depName);
+                    if (typeDef != null)
+                    {
+                        var typeStr = FormatTypeAlias(typeDef);
+                        if (sb.Length + typeStr.Length <= maxLength)
+                        {
+                            sb.Append(typeStr);
+                            includedTypeNames.Add(depName);
+                            includedItems++;
+                        }
                     }
                 }
             }
         }
 
-        // Second pass: Include remaining interfaces if space permits
+        // Include remaining interfaces if space permits
         foreach (var iface in allInterfaces.Where(i => !includedTypeNames.Contains(i.Name)))
         {
             if (sb.Length >= maxLength) break;
@@ -211,7 +297,7 @@ public static class TypeScriptFormatter
             }
         }
 
-        // Third pass: Include remaining enums if space permits
+        // Include remaining enums if space permits
         foreach (var enumDef in allEnums.Where(e => !includedTypeNames.Contains(e.Name)))
         {
             if (sb.Length >= maxLength) break;
@@ -224,9 +310,9 @@ public static class TypeScriptFormatter
             }
         }
 
-        // Fourth pass: Include functions if space permits (limit to first 20)
+        // Include remaining functions if space permits (limit to first 20)
         int funcCount = 0;
-        foreach (var fn in allFunctions.Take(20))
+        foreach (var fn in allFunctions.Where(f => f.ExportPath == null).Take(20))
         {
             if (sb.Length >= maxLength) break;
             var fnStr = FormatFunction(fn);
@@ -235,6 +321,72 @@ public static class TypeScriptFormatter
                 sb.Append(fnStr);
                 includedItems++;
                 funcCount++;
+            }
+        }
+
+        // Include dependency types if present and space permits
+        if (index.Dependencies != null && index.Dependencies.Count > 0 && sb.Length < maxLength)
+        {
+            sb.AppendLine();
+            sb.AppendLine("// ============================================================================");
+            sb.AppendLine("// Types from Dependencies (referenced in API surface)");
+            sb.AppendLine("// ============================================================================");
+            sb.AppendLine();
+
+            foreach (var dep in index.Dependencies)
+            {
+                if (sb.Length >= maxLength) break;
+
+                sb.AppendLine($"// From: {dep.Package}");
+                sb.AppendLine();
+
+                // Interfaces
+                foreach (var iface in dep.Interfaces ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    var ifaceStr = FormatInterface(iface, exportKeyword: false);
+                    if (sb.Length + ifaceStr.Length <= maxLength)
+                    {
+                        sb.Append(ifaceStr);
+                        includedItems++;
+                    }
+                }
+
+                // Classes
+                foreach (var cls in dep.Classes ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    var clsStr = FormatClass(cls, exportKeyword: false);
+                    if (sb.Length + clsStr.Length <= maxLength)
+                    {
+                        sb.Append(clsStr);
+                        includedItems++;
+                    }
+                }
+
+                // Enums
+                foreach (var e in dep.Enums ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    var enumStr = FormatEnum(e, exportKeyword: false);
+                    if (sb.Length + enumStr.Length <= maxLength)
+                    {
+                        sb.Append(enumStr);
+                        includedItems++;
+                    }
+                }
+
+                // Type aliases
+                foreach (var t in dep.Types ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    var typeStr = FormatTypeAlias(t, exportKeyword: false);
+                    if (sb.Length + typeStr.Length <= maxLength)
+                    {
+                        sb.Append(typeStr);
+                        includedItems++;
+                    }
+                }
             }
         }
 
@@ -283,7 +435,7 @@ public static class TypeScriptFormatter
         return result;
     }
 
-    private static string FormatClass(ClassInfo cls)
+    private static string FormatClass(ClassInfo cls, bool exportKeyword = true)
     {
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(cls.Doc))
@@ -291,7 +443,8 @@ public static class TypeScriptFormatter
         var ext = !string.IsNullOrEmpty(cls.Extends) ? $" extends {cls.Extends}" : "";
         var impl = cls.Implements?.Count > 0 ? $" implements {string.Join(", ", cls.Implements)}" : "";
         var typeParams = !string.IsNullOrEmpty(cls.TypeParams) ? $"<{cls.TypeParams}>" : "";
-        sb.AppendLine($"export class {cls.Name}{typeParams}{ext}{impl} {{");
+        var export = exportKeyword ? "export " : "";
+        sb.AppendLine($"{export}class {cls.Name}{typeParams}{ext}{impl} {{");
 
         foreach (var prop in cls.Properties ?? [])
         {
@@ -323,14 +476,15 @@ public static class TypeScriptFormatter
         return sb.ToString();
     }
 
-    private static string FormatInterface(InterfaceInfo iface)
+    private static string FormatInterface(InterfaceInfo iface, bool exportKeyword = true)
     {
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(iface.Doc))
             sb.AppendLine($"/** {iface.Doc} */");
         var ext = !string.IsNullOrEmpty(iface.Extends) ? $" extends {iface.Extends}" : "";
         var typeParams = !string.IsNullOrEmpty(iface.TypeParams) ? $"<{iface.TypeParams}>" : "";
-        sb.AppendLine($"export interface {iface.Name}{typeParams}{ext} {{");
+        var export = exportKeyword ? "export " : "";
+        sb.AppendLine($"{export}interface {iface.Name}{typeParams}{ext} {{");
 
         foreach (var prop in iface.Properties ?? [])
         {
@@ -351,12 +505,13 @@ public static class TypeScriptFormatter
         return sb.ToString();
     }
 
-    private static string FormatEnum(EnumInfo e)
+    private static string FormatEnum(EnumInfo e, bool exportKeyword = true)
     {
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(e.Doc))
             sb.AppendLine($"/** {e.Doc} */");
-        sb.AppendLine($"export enum {e.Name} {{");
+        var export = exportKeyword ? "export " : "";
+        sb.AppendLine($"{export}enum {e.Name} {{");
         if (e.Values != null)
             sb.AppendLine($"    {string.Join(", ", e.Values)}");
         sb.AppendLine("}");
@@ -364,12 +519,13 @@ public static class TypeScriptFormatter
         return sb.ToString();
     }
 
-    private static string FormatTypeAlias(TypeAliasInfo t)
+    private static string FormatTypeAlias(TypeAliasInfo t, bool exportKeyword = true)
     {
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(t.Doc))
             sb.AppendLine($"/** {t.Doc} */");
-        sb.AppendLine($"export type {t.Name} = {t.Type};");
+        var export = exportKeyword ? "export " : "";
+        sb.AppendLine($"{export}type {t.Name} = {t.Type};");
         sb.AppendLine();
         return sb.ToString();
     }

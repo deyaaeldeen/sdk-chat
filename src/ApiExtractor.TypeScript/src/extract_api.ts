@@ -18,6 +18,9 @@ import {
     ParameterDeclaration,
     JSDocableNode,
     Node,
+    Type,
+    Symbol as TsSymbol,
+    ts,
 } from "ts-morph";
 import * as fs from "fs";
 import * as path from "path";
@@ -50,6 +53,8 @@ export interface ConstructorInfo {
 export interface ClassInfo {
     name: string;
     entryPoint?: boolean;
+    exportPath?: string;  // The subpath to import from (e.g., "." or "./client")
+    reExportedFrom?: string;  // External package this is re-exported from (e.g., "@azure/core-client")
     extends?: string;
     implements?: string[];
     typeParams?: string;
@@ -62,6 +67,8 @@ export interface ClassInfo {
 export interface InterfaceInfo {
     name: string;
     entryPoint?: boolean;
+    exportPath?: string;  // The subpath to import from (e.g., "." or "./client")
+    reExportedFrom?: string;  // External package this is re-exported from
     extends?: string;
     typeParams?: string;
     doc?: string;
@@ -71,6 +78,7 @@ export interface InterfaceInfo {
 
 export interface EnumInfo {
     name: string;
+    reExportedFrom?: string;  // External package this is re-exported from
     doc?: string;
     values: string[];
 }
@@ -78,12 +86,15 @@ export interface EnumInfo {
 export interface TypeAliasInfo {
     name: string;
     type: string;
+    reExportedFrom?: string;  // External package this is re-exported from
     doc?: string;
 }
 
 export interface FunctionInfo {
     name: string;
     entryPoint?: boolean;
+    exportPath?: string;  // The subpath to import from (e.g., "." or "./client")
+    reExportedFrom?: string;  // External package this is re-exported from
     sig: string;
     ret?: string;
     doc?: string;
@@ -92,6 +103,8 @@ export interface FunctionInfo {
 
 export interface ModuleInfo {
     name: string;
+    /** If this module is from a dependency, the package name */
+    fromPackage?: string;
     classes?: ClassInfo[];
     interfaces?: InterfaceInfo[];
     enums?: EnumInfo[];
@@ -102,7 +115,403 @@ export interface ModuleInfo {
 export interface ApiIndex {
     package: string;
     modules: ModuleInfo[];
+    /** Types from dependency packages that appear in the public API */
+    dependencies?: DependencyInfo[];
 }
+
+/**
+ * Information about types from a dependency package.
+ */
+export interface DependencyInfo {
+    /** The npm package name */
+    package: string;
+    /** Types from this package that are referenced in the API */
+    classes?: ClassInfo[];
+    interfaces?: InterfaceInfo[];
+    enums?: EnumInfo[];
+    types?: TypeAliasInfo[];
+}
+
+// ============================================================================
+// Builtin Type Detection
+// ============================================================================
+
+/**
+ * Paths that indicate a type is a builtin (from TypeScript lib or @types/node).
+ */
+const BUILTIN_PATH_PATTERNS = [
+    "/typescript/lib/",      // TypeScript lib files (lib.dom.d.ts, lib.es*.d.ts)
+    "/@types/node/",         // Node.js types
+    "/node_modules/typescript/", // Alternative path format
+];
+
+/**
+ * Well-known builtin type names that are part of TypeScript/JavaScript/DOM.
+ * This is a fallback when type resolution isn't possible.
+ * Generated from TypeScript lib files - covers ES5 through ESNext and DOM.
+ */
+const WELL_KNOWN_BUILTINS = new Set([
+    // ES fundamentals
+    "Array", "ArrayBuffer", "ArrayBufferConstructor", "ArrayBufferLike", "ArrayBufferTypes",
+    "ArrayConstructor", "ArrayLike", "AsyncGenerator", "AsyncGeneratorFunction", "AsyncGeneratorFunctionConstructor",
+    "AsyncIterable", "AsyncIterableIterator", "AsyncIterator", "Atomics",
+    "BigInt", "BigInt64Array", "BigInt64ArrayConstructor", "BigIntConstructor", "BigIntToLocaleStringOptions",
+    "BigUint64Array", "BigUint64ArrayConstructor", "Boolean", "BooleanConstructor",
+    "CallableFunction", "ConcatArray", "Console", "DataView", "DataViewConstructor", "Date", "DateConstructor",
+    "Error", "ErrorConstructor", "EvalError", "EvalErrorConstructor",
+    "Float32Array", "Float32ArrayConstructor", "Float64Array", "Float64ArrayConstructor",
+    "Function", "FunctionConstructor", "Generator", "GeneratorFunction", "GeneratorFunctionConstructor",
+    "IArguments", "ImportMeta", "Int8Array", "Int8ArrayConstructor", "Int16Array", "Int16ArrayConstructor",
+    "Int32Array", "Int32ArrayConstructor", "Intl", "IterableIterator", "Iterator", "IteratorResult", "IteratorYieldResult", "IteratorReturnResult",
+    "JSON", "Map", "MapConstructor", "Math", "MethodDecorator",
+    "NewableFunction", "Number", "NumberConstructor", "Object", "ObjectConstructor",
+    "Parameters", "ConstructorParameters", "ReturnType", "InstanceType", "OmitThisParameter", "ThisParameterType", "ThisType",
+    "Partial", "Required", "Readonly", "Pick", "Omit", "Record", "Exclude", "Extract", "NonNullable", "Awaited",
+    "Uppercase", "Lowercase", "Capitalize", "Uncapitalize", "NoInfer",
+    "Promise", "PromiseConstructor", "PromiseLike", "PromiseFulfilledResult", "PromiseRejectedResult", "PromiseSettledResult",
+    "PropertyDecorator", "PropertyDescriptor", "PropertyDescriptorMap", "PropertyKey",
+    "ProxyHandler", "Proxy", "ProxyConstructor",
+    "RangeError", "RangeErrorConstructor", "ReferenceError", "ReferenceErrorConstructor",
+    "Reflect", "RegExp", "RegExpConstructor", "RegExpMatchArray", "RegExpExecArray",
+    "Set", "SetConstructor", "SharedArrayBuffer", "SharedArrayBufferConstructor",
+    "String", "StringConstructor", "Symbol", "SymbolConstructor",
+    "SyntaxError", "SyntaxErrorConstructor", "TemplateStringsArray",
+    "TypedPropertyDescriptor", "TypeError", "TypeErrorConstructor",
+    "Uint8Array", "Uint8ArrayConstructor", "Uint8ClampedArray", "Uint8ClampedArrayConstructor",
+    "Uint16Array", "Uint16ArrayConstructor", "Uint32Array", "Uint32ArrayConstructor",
+    "URIError", "URIErrorConstructor", "WeakMap", "WeakMapConstructor", "WeakSet", "WeakSetConstructor", "WeakRef", "WeakRefConstructor",
+    "FinalizationRegistry", "FinalizationRegistryConstructor",
+    // DOM types (commonly used)
+    "Blob", "BlobPropertyBag", "File", "FileList", "FileReader", "FileReaderSync",
+    "FormData", "FormDataEntryValue", "Headers", "HeadersInit",
+    "Request", "RequestInit", "RequestInfo", "Response", "ResponseInit", "ResponseType",
+    "URL", "URLSearchParams", "URLSearchParamsInit",
+    "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamBYOBReader",
+    "WritableStream", "WritableStreamDefaultWriter", "TransformStream",
+    "AbortController", "AbortSignal",
+    "EventTarget", "Event", "CustomEvent", "CustomEventInit", "EventInit", "EventListener", "EventListenerOrEventListenerObject",
+    "MessageEvent", "MessageEventInit", "MessagePort", "MessageChannel",
+    "Worker", "WorkerGlobalScope", "DedicatedWorkerGlobalScope", "SharedWorker", "SharedWorkerGlobalScope",
+    "Crypto", "SubtleCrypto", "CryptoKey", "CryptoKeyPair",
+    "TextDecoder", "TextEncoder", "TextDecoderStream", "TextEncoderStream",
+    "WebSocket", "CloseEvent", "WebSocketEventMap",
+    "Storage", "StorageEvent", "IDBDatabase", "IDBTransaction", "IDBObjectStore", "IDBRequest",
+    "Document", "Element", "HTMLElement", "Node", "NodeList", "HTMLCollection",
+    "Window", "WindowOrWorkerGlobalScope", "Navigator", "Location", "History",
+    "Performance", "PerformanceEntry", "PerformanceMark", "PerformanceMeasure",
+    "Console", "Timer", "Timeout", "Interval",
+    // Node.js built-ins (from @types/node)
+    "Buffer", "BufferEncoding", "NodeJS", "EventEmitter",
+    "Stream", "Readable", "Writable", "Duplex", "Transform", "PassThrough",
+    "ChildProcess", "Cluster", "Worker",
+    "IncomingMessage", "ServerResponse", "ClientRequest", "Agent",
+    "Socket", "Server", "TLSSocket",
+    "Stats", "Dirent", "ReadStream", "WriteStream",
+    "Process", "Global",
+]);
+
+/**
+ * Primitive type names that are always builtins (not resolvable to declarations).
+ */
+const PRIMITIVE_TYPES = new Set([
+    "string", "number", "boolean", "symbol", "bigint", 
+    "undefined", "null", "void", "never", "any", "unknown", "object",
+]);
+
+/**
+ * Cache for builtin type checks to avoid repeated resolution.
+ */
+const builtinTypeCache = new Map<string, boolean>();
+
+/**
+ * Project instance for type resolution (set during extraction).
+ */
+let typeResolutionProject: Project | null = null;
+
+/**
+ * Sets the project to use for type resolution.
+ */
+function setTypeResolutionProject(project: Project): void {
+    typeResolutionProject = project;
+    builtinTypeCache.clear();
+}
+
+/**
+ * Checks if a type name is a builtin using TypeScript's type resolution.
+ * Builtins are types defined in TypeScript's lib files or @types/node.
+ */
+function isBuiltinType(typeName: string): boolean {
+    // Strip generic parameters
+    const baseName = typeName.split("<")[0].trim();
+    
+    // Check primitives first (not resolvable)
+    if (PRIMITIVE_TYPES.has(baseName)) {
+        return true;
+    }
+    
+    // Check well-known builtins (fast path)
+    if (WELL_KNOWN_BUILTINS.has(baseName)) {
+        return true;
+    }
+    
+    // Check cache
+    if (builtinTypeCache.has(baseName)) {
+        return builtinTypeCache.get(baseName)!;
+    }
+    
+    // If no project available, assume not builtin (let it be resolved)
+    if (!typeResolutionProject) {
+        builtinTypeCache.set(baseName, false);
+        return false;
+    }
+    
+    // Try to resolve the type using the project's source files
+    // This catches types defined in node_modules/@types/* or typescript/lib/*
+    try {
+        for (const sourceFile of typeResolutionProject.getSourceFiles()) {
+            const filePath = sourceFile.getFilePath();
+            
+            // Check interfaces, classes, type aliases, and enums
+            const iface = sourceFile.getInterface(baseName);
+            if (iface) {
+                const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
+                builtinTypeCache.set(baseName, isBuiltin);
+                return isBuiltin;
+            }
+            
+            const cls = sourceFile.getClass(baseName);
+            if (cls) {
+                const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
+                builtinTypeCache.set(baseName, isBuiltin);
+                return isBuiltin;
+            }
+            
+            const typeAlias = sourceFile.getTypeAlias(baseName);
+            if (typeAlias) {
+                const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
+                builtinTypeCache.set(baseName, isBuiltin);
+                return isBuiltin;
+            }
+            
+            const enumDecl = sourceFile.getEnum(baseName);
+            if (enumDecl) {
+                const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
+                builtinTypeCache.set(baseName, isBuiltin);
+                return isBuiltin;
+            }
+        }
+    } catch {
+        // If resolution fails, assume not builtin
+    }
+    
+    builtinTypeCache.set(baseName, false);
+    return false;
+}
+
+// ============================================================================
+// AST-Based Type Reference Collection
+// ============================================================================
+
+/**
+ * Information about an external type reference with full symbol resolution.
+ */
+interface ResolvedTypeRef {
+    /** Simple type name */
+    name: string;
+    /** Full type name with namespace */
+    fullName: string;
+    /** Source file path where the type is declared */
+    declarationPath?: string;
+    /** Package name (from package.json or path inference) */
+    packageName?: string;
+}
+
+/**
+ * Collects external type references from a Type object using proper AST traversal.
+ * This recursively resolves generic type arguments, union/intersection members, etc.
+ * 
+ * @param type The Type object to analyze
+ * @param project The ts-morph Project for resolution
+ * @param refs Set to collect resolved type references
+ * @param visited Set of already visited type IDs to prevent infinite recursion
+ */
+function collectTypeRefsFromType(
+    type: Type,
+    project: Project,
+    refs: Set<ResolvedTypeRef>,
+    visited = new Set<string>()
+): void {
+    if (!type) return;
+    
+    // Get a unique ID for this type to prevent infinite recursion
+    const typeId = type.getText();
+    if (visited.has(typeId)) return;
+    visited.add(typeId);
+    
+    // Get the underlying TypeScript type
+    const tsType = type.compilerType;
+    
+    // Skip primitive types
+    if (tsType.flags & (
+        ts.TypeFlags.String | ts.TypeFlags.Number | ts.TypeFlags.Boolean |
+        ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Null |
+        ts.TypeFlags.Never | ts.TypeFlags.Any | ts.TypeFlags.Unknown |
+        ts.TypeFlags.BigInt | ts.TypeFlags.ESSymbol
+    )) {
+        return;
+    }
+    
+    // Handle union types
+    if (type.isUnion()) {
+        for (const unionType of type.getUnionTypes()) {
+            collectTypeRefsFromType(unionType, project, refs, visited);
+        }
+        return;
+    }
+    
+    // Handle intersection types
+    if (type.isIntersection()) {
+        for (const intersectionType of type.getIntersectionTypes()) {
+            collectTypeRefsFromType(intersectionType, project, refs, visited);
+        }
+        return;
+    }
+    
+    // Handle array types
+    if (type.isArray()) {
+        const elementType = type.getArrayElementType();
+        if (elementType) {
+            collectTypeRefsFromType(elementType, project, refs, visited);
+        }
+        return;
+    }
+    
+    // Handle tuple types
+    if (type.isTuple()) {
+        for (const tupleElement of type.getTupleElements()) {
+            collectTypeRefsFromType(tupleElement, project, refs, visited);
+        }
+        return;
+    }
+    
+    // Get the symbol for the type
+    const symbol = type.getSymbol() || type.getAliasSymbol();
+    if (!symbol) return;
+    
+    // Get the type name
+    const typeName = symbol.getName();
+    
+    // Skip anonymous types, primitives, and builtins
+    if (!typeName || typeName === "__type" || typeName === "__object" || 
+        PRIMITIVE_TYPES.has(typeName) || isBuiltinType(typeName)) {
+        return;
+    }
+    
+    // Get the declaration to find source file
+    const declarations = symbol.getDeclarations();
+    if (!declarations || declarations.length === 0) return;
+    
+    const declaration = declarations[0];
+    const sourceFile = declaration.getSourceFile();
+    const filePath = sourceFile.getFilePath();
+    
+    // Check if this is from a builtin location
+    const isBuiltinPath = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
+    if (isBuiltinPath) return;
+    
+    // Determine the package name from the source file path
+    const packageName = resolvePackageNameFromPath(filePath);
+    
+    // Add the resolved reference
+    refs.add({
+        name: typeName,
+        fullName: symbol.getFullyQualifiedName?.() ?? typeName,
+        declarationPath: filePath,
+        packageName,
+    });
+    
+    // Recursively process generic type arguments
+    const typeArgs = type.getTypeArguments();
+    for (const typeArg of typeArgs) {
+        collectTypeRefsFromType(typeArg, project, refs, visited);
+    }
+    
+    // Process base types for classes/interfaces
+    const baseTypes = type.getBaseTypes();
+    for (const baseType of baseTypes) {
+        collectTypeRefsFromType(baseType, project, refs, visited);
+    }
+}
+
+/**
+ * Resolves the package name from a source file path.
+ * Handles node_modules paths and local source files.
+ */
+function resolvePackageNameFromPath(filePath: string): string | undefined {
+    // Check if it's in node_modules
+    const nodeModulesIndex = filePath.lastIndexOf("node_modules");
+    if (nodeModulesIndex === -1) return undefined;
+    
+    // Extract the package path after node_modules
+    const afterNodeModules = filePath.substring(nodeModulesIndex + "node_modules".length + 1);
+    
+    // Handle scoped packages (@org/package)
+    if (afterNodeModules.startsWith("@")) {
+        const parts = afterNodeModules.split(/[/\\]/);
+        if (parts.length >= 2) {
+            return `${parts[0]}/${parts[1]}`;
+        }
+    } else {
+        // Regular package
+        const parts = afterNodeModules.split(/[/\\]/);
+        if (parts.length >= 1) {
+            return parts[0];
+        }
+    }
+    
+    return undefined;
+}
+
+/**
+ * Collector for type references during extraction.
+ * Accumulates all external type references found in the API surface.
+ */
+class TypeReferenceCollector {
+    private refs = new Set<ResolvedTypeRef>();
+    private project: Project | null = null;
+    private definedTypes = new Set<string>();
+    
+    setProject(project: Project): void {
+        this.project = project;
+    }
+    
+    addDefinedType(name: string): void {
+        this.definedTypes.add(name.split("<")[0]);
+    }
+    
+    collectFromType(type: Type): void {
+        if (!this.project) return;
+        collectTypeRefsFromType(type, this.project, this.refs);
+    }
+    
+    getExternalRefs(): ResolvedTypeRef[] {
+        // Filter out locally defined types and types without package info
+        return Array.from(this.refs).filter(ref => 
+            !this.definedTypes.has(ref.name) && 
+            ref.packageName !== undefined
+        );
+    }
+    
+    clear(): void {
+        this.refs.clear();
+        this.definedTypes.clear();
+    }
+}
+
+/**
+ * Global type reference collector instance.
+ */
+const typeCollector = new TypeReferenceCollector();
 
 // ============================================================================
 // Extraction Functions
@@ -140,14 +549,25 @@ function simplifyType(type: string): string {
 function formatParameter(p: ParameterDeclaration): string {
     let sig = p.getName();
     if (p.isOptional()) sig += "?";
-    const type = p.getType().getText();
-    if (type && type !== "any") sig += `: ${simplifyType(type)}`;
+    const type = p.getType();
+    const typeText = type.getText();
+    if (typeText && typeText !== "any") {
+        sig += `: ${simplifyType(typeText)}`;
+        // Collect type reference for dependency tracking
+        typeCollector.collectFromType(type);
+    }
     return sig;
 }
 
 function extractMethod(method: MethodDeclaration): MethodInfo {
     const params = method.getParameters().map(formatParameter).join(", ");
-    const ret = method.getReturnType()?.getText();
+    const returnType = method.getReturnType();
+    const ret = returnType?.getText();
+    
+    // Collect return type reference
+    if (returnType) {
+        typeCollector.collectFromType(returnType);
+    }
 
     const result: MethodInfo = {
         name: method.getName(),
@@ -166,9 +586,14 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
 }
 
 function extractProperty(prop: PropertyDeclaration): PropertyInfo {
+    const type = prop.getType();
+    
+    // Collect type reference for dependency tracking
+    typeCollector.collectFromType(type);
+    
     const result: PropertyInfo = {
         name: prop.getName(),
-        type: simplifyType(prop.getType().getText()),
+        type: simplifyType(type.getText()),
     };
 
     if (prop.isReadonly()) result.readonly = true;
@@ -192,13 +617,26 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
 
     const result: ClassInfo = { name };
 
-    // Base class
+    // Base class - collect type reference
     const ext = cls.getExtends();
-    if (ext) result.extends = ext.getText();
+    if (ext) {
+        result.extends = ext.getText();
+        // Collect base class type
+        const baseType = ext.getType();
+        typeCollector.collectFromType(baseType);
+    }
 
-    // Interfaces
-    const impl = cls.getImplements().map((i) => i.getText());
-    if (impl.length) result.implements = impl;
+    // Interfaces - collect type references
+    const implExprs = cls.getImplements();
+    const impl = implExprs.map((i) => i.getText());
+    if (impl.length) {
+        result.implements = impl;
+        // Collect interface types
+        for (const implExpr of implExprs) {
+            const implType = implExpr.getType();
+            typeCollector.collectFromType(implType);
+        }
+    }
 
     // Type parameters
     const typeParams = cls.getTypeParameters().map((t) => t.getText());
@@ -235,7 +673,13 @@ function extractInterfaceMethod(method: Node): MethodInfo | undefined {
     if (!Node.isMethodSignature(method)) return undefined;
 
     const params = method.getParameters().map(formatParameter).join(", ");
-    const ret = method.getReturnType()?.getText();
+    const returnType = method.getReturnType();
+    const ret = returnType?.getText();
+    
+    // Collect return type reference
+    if (returnType) {
+        typeCollector.collectFromType(returnType);
+    }
 
     const result: MethodInfo = {
         name: method.getName(),
@@ -257,7 +701,13 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
     if (!typeNode || !Node.isFunctionTypeNode(typeNode)) return undefined;
 
     const params = typeNode.getParameters().map(formatParameter).join(", ");
-    const ret = typeNode.getReturnType()?.getText();
+    const returnType = typeNode.getReturnType();
+    const ret = returnType?.getText();
+    
+    // Collect return type reference
+    if (returnType) {
+        typeCollector.collectFromType(returnType);
+    }
 
     const result: MethodInfo = {
         name: prop.getName(),
@@ -342,9 +792,14 @@ function extractEnum(en: EnumDeclaration): EnumInfo {
 }
 
 function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
+    const type = alias.getType();
+    
+    // Collect type reference for dependency tracking
+    typeCollector.collectFromType(type);
+    
     return {
         name: alias.getName(),
-        type: simplifyType(alias.getType().getText()),
+        type: simplifyType(type.getText()),
         doc: getDocString(alias),
     };
 }
@@ -354,7 +809,13 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     if (!name) return undefined;
 
     const params = fn.getParameters().map(formatParameter).join(", ");
-    const ret = fn.getReturnType()?.getText();
+    const returnType = fn.getReturnType();
+    const ret = returnType?.getText();
+    
+    // Collect return type reference
+    if (returnType) {
+        typeCollector.collectFromType(returnType);
+    }
 
     const result: FunctionInfo = {
         name,
@@ -436,50 +897,62 @@ interface PackageJson {
 
 /**
  * Resolves entry point files from package.json configuration.
+ * Prioritizes the "." (root) export - this is what users get with `import { X } from "pkg"`.
+ * Only falls back to subpath exports if root export is not found.
  * Supports: exports, types, typings, module, main, browser.
  */
-function resolveEntryPointFiles(rootPath: string): string[] {
+function resolveEntryPointFiles(rootPath: string): ExportEntry[] {
     const pkgPath = path.join(rootPath, "package.json");
     if (!fs.existsSync(pkgPath)) {
         return [];
     }
 
     const pkg: PackageJson = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-    const entryFiles: string[] = [];
+    const entryEntries: ExportEntry[] = [];
 
-    // 1. Modern exports map (highest priority)
+    // 1. Modern exports map (highest priority) - prefer "." export
     if (pkg.exports) {
-        const exportPaths = extractExportPaths(pkg.exports);
-        for (const exportPath of exportPaths) {
-            const resolved = resolveToSourceFile(rootPath, exportPath);
-            if (resolved) entryFiles.push(resolved);
+        // First try root export only ("." entry)
+        const rootExportPaths = extractExportPaths(pkg.exports, true);
+        for (const entry of rootExportPaths) {
+            const resolved = resolveToSourceFile(rootPath, entry.filePath);
+            if (resolved) entryEntries.push({ exportPath: entry.exportPath, filePath: resolved });
+        }
+        
+        // Also include all other exports (for subpath tracking)
+        const allExportPaths = extractExportPaths(pkg.exports, false);
+        for (const entry of allExportPaths) {
+            // Skip if already added from root
+            if (entryEntries.some(e => e.exportPath === entry.exportPath)) continue;
+            const resolved = resolveToSourceFile(rootPath, entry.filePath);
+            if (resolved) entryEntries.push({ exportPath: entry.exportPath, filePath: resolved });
         }
     }
 
-    // 2. TypeScript types/typings
-    if (pkg.types) {
+    // 2. TypeScript types/typings (these are root exports)
+    if (entryEntries.length === 0 && pkg.types) {
         const resolved = resolveToSourceFile(rootPath, pkg.types);
-        if (resolved) entryFiles.push(resolved);
+        if (resolved) entryEntries.push({ exportPath: ".", filePath: resolved });
     }
-    if (pkg.typings && pkg.typings !== pkg.types) {
+    if (entryEntries.length === 0 && pkg.typings && pkg.typings !== pkg.types) {
         const resolved = resolveToSourceFile(rootPath, pkg.typings);
-        if (resolved) entryFiles.push(resolved);
+        if (resolved) entryEntries.push({ exportPath: ".", filePath: resolved });
     }
 
-    // 3. ES module entry
-    if (pkg.module) {
+    // 3. ES module entry (root export)
+    if (entryEntries.length === 0 && pkg.module) {
         const resolved = resolveToSourceFile(rootPath, pkg.module);
-        if (resolved) entryFiles.push(resolved);
+        if (resolved) entryEntries.push({ exportPath: ".", filePath: resolved });
     }
 
-    // 4. CommonJS entry
-    if (pkg.main) {
+    // 4. CommonJS entry (root export)
+    if (entryEntries.length === 0 && pkg.main) {
         const resolved = resolveToSourceFile(rootPath, pkg.main);
-        if (resolved) entryFiles.push(resolved);
+        if (resolved) entryEntries.push({ exportPath: ".", filePath: resolved });
     }
 
     // 5. Fallback to common entry points
-    if (entryFiles.length === 0) {
+    if (entryEntries.length === 0) {
         const fallbackPaths = [
             "src/index.ts",
             "src/index.tsx",
@@ -491,35 +964,63 @@ function resolveEntryPointFiles(rootPath: string): string[] {
         for (const fallback of fallbackPaths) {
             const fullPath = path.join(rootPath, fallback);
             if (fs.existsSync(fullPath)) {
-                entryFiles.push(fullPath);
+                entryEntries.push({ exportPath: ".", filePath: fullPath });
                 break;
             }
         }
     }
 
-    return [...new Set(entryFiles)]; // Deduplicate
+    return entryEntries;
 }
 
 /**
- * Extracts all path values from package.json exports field.
+ * Entry for an export path mapping.
  */
-function extractExportPaths(exports: string | Record<string, unknown>): string[] {
-    const paths: string[] = [];
+interface ExportEntry {
+    /** The export subpath (e.g., "." or "./client") */
+    exportPath: string;
+    /** The resolved source file path */
+    filePath: string;
+}
+
+/**
+ * Extracts path values from package.json exports field.
+ * Prioritizes the "." (root) export over subpath exports.
+ * @param exports - The exports field from package.json
+ * @param rootOnly - If true, only extract from the "." export
+ * @returns Array of {exportPath, filePath} pairs
+ */
+function extractExportPaths(exports: string | Record<string, unknown>, rootOnly: boolean = false): Array<{ exportPath: string; filePath: string }> {
+    const results: Array<{ exportPath: string; filePath: string }> = [];
 
     if (typeof exports === "string") {
-        paths.push(exports);
+        // Simple string export is the root export
+        results.push({ exportPath: ".", filePath: exports });
     } else if (typeof exports === "object" && exports !== null) {
-        for (const value of Object.values(exports)) {
+        // Object exports map - prioritize "." entry
+        const entries = Object.entries(exports);
+        
+        // Sort to put "." first, then process
+        entries.sort(([keyA], [keyB]) => {
+            if (keyA === ".") return -1;
+            if (keyB === ".") return 1;
+            return keyA.localeCompare(keyB);
+        });
+
+        for (const [key, value] of entries) {
+            // If rootOnly, skip non-root exports
+            if (rootOnly && key !== ".") continue;
+
             if (typeof value === "string") {
-                paths.push(value);
+                results.push({ exportPath: key, filePath: value });
             } else if (typeof value === "object" && value !== null) {
                 // Nested conditions (types, import, require, default)
                 const nested = value as Record<string, unknown>;
                 // Prefer types > import > require > default
                 const priority = ["types", "import", "require", "default"];
-                for (const key of priority) {
-                    if (typeof nested[key] === "string") {
-                        paths.push(nested[key] as string);
+                for (const condKey of priority) {
+                    if (typeof nested[condKey] === "string") {
+                        results.push({ exportPath: key, filePath: nested[condKey] as string });
                         break; // Only take one per export condition block
                     }
                 }
@@ -527,7 +1028,10 @@ function extractExportPaths(exports: string | Record<string, unknown>): string[]
         }
     }
 
-    return paths.filter((p) => p.endsWith(".ts") || p.endsWith(".d.ts") || p.endsWith(".js") || p.endsWith(".mjs"));
+    return results.filter((r) => 
+        r.filePath.endsWith(".ts") || r.filePath.endsWith(".d.ts") || 
+        r.filePath.endsWith(".js") || r.filePath.endsWith(".mjs")
+    );
 }
 
 /**
@@ -579,26 +1083,67 @@ function resolveToSourceFile(rootPath: string, outputPath: string): string | nul
 }
 
 /**
- * Extracts exported symbol names from entry point files.
+ * Information about an exported symbol.
  */
-function extractExportedSymbols(project: Project, entryFiles: string[]): Set<string> {
-    const exportedSymbols = new Set<string>();
+interface ExportedSymbolInfo {
+    /** The export subpath (e.g., "." or "./client") */
+    exportPath: string;
+    /** If re-exported from an external package, the package name */
+    reExportedFrom?: string;
+}
 
-    for (const entryFile of entryFiles) {
-        const sourceFile = project.getSourceFile(entryFile);
+/**
+ * Extracts exported symbol names from entry point files.
+ * Returns a map from symbol name to its export info (path and optional re-export source).
+ * If a symbol is exported from multiple subpaths, the root export "." takes priority.
+ */
+function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): Map<string, ExportedSymbolInfo> {
+    // Map from symbol name to export info (priority: "." > other subpaths)
+    const exportedSymbols = new Map<string, ExportedSymbolInfo>();
+
+    // Sort entries so "." comes first (gets priority when same symbol exported multiple times)
+    const sortedEntries = [...entryEntries].sort((a, b) => {
+        if (a.exportPath === ".") return -1;
+        if (b.exportPath === ".") return 1;
+        return a.exportPath.localeCompare(b.exportPath);
+    });
+
+    for (const entry of sortedEntries) {
+        const sourceFile = project.getSourceFile(entry.filePath);
         if (!sourceFile) continue;
 
-        // Get directly exported declarations
+        // Get directly exported declarations (these are local, not re-exports)
         for (const decl of sourceFile.getExportedDeclarations().keys()) {
-            exportedSymbols.add(decl);
+            // Only set if not already set (preserves "." priority)
+            if (!exportedSymbols.has(decl)) {
+                exportedSymbols.set(decl, { exportPath: entry.exportPath });
+            }
         }
 
-        // Also check export statements that re-export from other modules
+        // Check export statements for re-exports from external packages
         for (const exportDecl of sourceFile.getExportDeclarations()) {
+            const moduleSpecifier = exportDecl.getModuleSpecifierValue();
+            const isExternalPackage = moduleSpecifier && !moduleSpecifier.startsWith(".") && !moduleSpecifier.startsWith("/");
+            
             const namedExports = exportDecl.getNamedExports();
             for (const namedExport of namedExports) {
                 const name = namedExport.getAliasNode()?.getText() ?? namedExport.getName();
-                exportedSymbols.add(name);
+                if (!exportedSymbols.has(name)) {
+                    exportedSymbols.set(name, {
+                        exportPath: entry.exportPath,
+                        reExportedFrom: isExternalPackage ? moduleSpecifier : undefined
+                    });
+                }
+            }
+            
+            // Handle `export * from "external-package"` - we can't enumerate these easily
+            // without resolving the external package, so we'll mark them when we see them used
+            if (exportDecl.isNamespaceExport() && isExternalPackage) {
+                // Store a marker for namespace re-exports that we'll use during type marking
+                exportedSymbols.set(`__namespace_reexport__${moduleSpecifier}`, {
+                    exportPath: entry.exportPath,
+                    reExportedFrom: moduleSpecifier
+                });
             }
         }
     }
@@ -636,6 +1181,11 @@ export function extractPackage(rootPath: string): ApiIndex {
         },
     });
 
+    // Set project for type resolution (used by isBuiltinType and type collector)
+    setTypeResolutionProject(project);
+    typeCollector.setProject(project);
+    typeCollector.clear();
+
     // Find source files
     const srcDir = path.join(rootPath, "src");
     const sourceDir = fs.existsSync(srcDir) ? srcDir : rootPath;
@@ -652,8 +1202,8 @@ export function extractPackage(rootPath: string): ApiIndex {
     }
 
     // Detect entry point files and extract exported symbols
-    const entryFiles = resolveEntryPointFiles(rootPath);
-    const entryPointSymbols = extractExportedSymbols(project, entryFiles);
+    const entryEntries = resolveEntryPointFiles(rootPath);
+    const entryPointSymbols = extractExportedSymbols(project, entryEntries);
 
     const modules: ModuleInfo[] = [];
 
@@ -686,22 +1236,54 @@ export function extractPackage(rootPath: string): ApiIndex {
             // Mark entry points based on package.json exports
             if (module.classes) {
                 for (const cls of module.classes) {
-                    if (entryPointSymbols.has(cls.name)) {
-                        (cls as { entryPoint?: boolean }).entryPoint = true;
+                    const exportInfo = entryPointSymbols.get(cls.name);
+                    if (exportInfo !== undefined) {
+                        (cls as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).entryPoint = true;
+                        (cls as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).exportPath = exportInfo.exportPath;
+                        if (exportInfo.reExportedFrom) {
+                            (cls as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
+                        }
                     }
                 }
             }
             if (module.interfaces) {
                 for (const iface of module.interfaces) {
-                    if (entryPointSymbols.has(iface.name)) {
-                        (iface as { entryPoint?: boolean }).entryPoint = true;
+                    const exportInfo = entryPointSymbols.get(iface.name);
+                    if (exportInfo !== undefined) {
+                        (iface as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).entryPoint = true;
+                        (iface as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).exportPath = exportInfo.exportPath;
+                        if (exportInfo.reExportedFrom) {
+                            (iface as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
+                        }
                     }
                 }
             }
             if (module.functions) {
                 for (const func of module.functions) {
-                    if (entryPointSymbols.has(func.name)) {
-                        (func as { entryPoint?: boolean }).entryPoint = true;
+                    const exportInfo = entryPointSymbols.get(func.name);
+                    if (exportInfo !== undefined) {
+                        (func as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).entryPoint = true;
+                        (func as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).exportPath = exportInfo.exportPath;
+                        if (exportInfo.reExportedFrom) {
+                            (func as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
+                        }
+                    }
+                }
+            }
+            // Mark enums and type aliases too
+            if (module.enums) {
+                for (const enumInfo of module.enums) {
+                    const exportInfo = entryPointSymbols.get(enumInfo.name);
+                    if (exportInfo?.reExportedFrom) {
+                        (enumInfo as { reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
+                    }
+                }
+            }
+            if (module.types) {
+                for (const typeInfo of module.types) {
+                    const exportInfo = entryPointSymbols.get(typeInfo.name);
+                    if (exportInfo?.reExportedFrom) {
+                        (typeInfo as { reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
                     }
                 }
             }
@@ -709,10 +1291,262 @@ export function extractPackage(rootPath: string): ApiIndex {
         }
     }
 
-    return {
+    const baseResult: ApiIndex = {
         package: packageName,
         modules: modules.sort((a, b) => a.name.localeCompare(b.name)),
     };
+
+    // Resolve transitive dependencies
+    const dependencies = resolveTransitiveDependencies(baseResult, project, rootPath);
+    if (dependencies.length > 0) {
+        baseResult.dependencies = dependencies;
+    }
+
+    return baseResult;
+}
+
+// ============================================================================
+// Transitive Dependency Resolution
+// ============================================================================
+
+/**
+ * Gets all type names defined in the API.
+ */
+function getDefinedTypes(api: ApiIndex): Set<string> {
+    const defined = new Set<string>();
+    for (const mod of api.modules) {
+        for (const cls of mod.classes || []) defined.add(cls.name);
+        for (const iface of mod.interfaces || []) defined.add(iface.name);
+        for (const en of mod.enums || []) defined.add(en.name);
+        for (const t of mod.types || []) defined.add(t.name);
+    }
+    return defined;
+}
+
+/**
+ * Finds the package that exports a given type name.
+ */
+function findTypeInNodeModules(typeName: string, rootPath: string, project: Project): { packageName: string; sourceFile: any } | null {
+    const nodeModulesPath = path.join(rootPath, "node_modules");
+    if (!fs.existsSync(nodeModulesPath)) return null;
+
+    // Search through project source files for import statements that reference this type
+    for (const sourceFile of project.getSourceFiles()) {
+        const filePath = sourceFile.getFilePath();
+        if (filePath.includes("node_modules")) continue;
+
+        for (const importDecl of sourceFile.getImportDeclarations()) {
+            const moduleSpecifier = importDecl.getModuleSpecifierValue();
+            if (!moduleSpecifier || moduleSpecifier.startsWith(".")) continue;
+
+            // Check named imports
+            const namedImports = importDecl.getNamedImports();
+            for (const namedImport of namedImports) {
+                const importedName = namedImport.getName();
+                const aliasName = namedImport.getAliasNode()?.getText();
+                if (importedName === typeName || aliasName === typeName) {
+                    // Found! Now resolve the type from the package
+                    const resolvedSourceFile = resolveTypeFromPackage(moduleSpecifier, typeName, nodeModulesPath);
+                    if (resolvedSourceFile) {
+                        return { packageName: moduleSpecifier, sourceFile: resolvedSourceFile };
+                    }
+                }
+            }
+        }
+
+        // Also check re-exports in export declarations
+        for (const exportDecl of sourceFile.getExportDeclarations()) {
+            const moduleSpecifier = exportDecl.getModuleSpecifierValue();
+            if (!moduleSpecifier || moduleSpecifier.startsWith(".")) continue;
+
+            const namedExports = exportDecl.getNamedExports();
+            for (const namedExport of namedExports) {
+                const name = namedExport.getName();
+                if (name === typeName) {
+                    const resolvedSourceFile = resolveTypeFromPackage(moduleSpecifier, typeName, nodeModulesPath);
+                    if (resolvedSourceFile) {
+                        return { packageName: moduleSpecifier, sourceFile: resolvedSourceFile };
+                    }
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Resolves the source file for a type from a package.
+ */
+function resolveTypeFromPackage(packageName: string, typeName: string, nodeModulesPath: string): any | null {
+    // Handle scoped packages
+    const packagePath = path.join(nodeModulesPath, packageName);
+    if (!fs.existsSync(packagePath)) return null;
+
+    const pkgJsonPath = path.join(packagePath, "package.json");
+    if (!fs.existsSync(pkgJsonPath)) return null;
+
+    try {
+        const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
+        
+        // Find types entry point
+        let typesPath: string | undefined;
+        if (pkg.types) typesPath = pkg.types;
+        else if (pkg.typings) typesPath = pkg.typings;
+        else if (pkg.exports?.["."]?.types) typesPath = pkg.exports["."].types;
+        
+        if (!typesPath) return null;
+
+        const fullTypesPath = path.join(packagePath, typesPath);
+        if (!fs.existsSync(fullTypesPath)) return null;
+
+        return { path: fullTypesPath, packagePath };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Extracts a type from a dependency package's type definitions.
+ */
+function extractTypeFromDependency(
+    typeName: string,
+    typesPath: string,
+    packagePath: string
+): ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | null {
+    try {
+        // Create a minimal project for the dependency
+        const depProject = new Project({
+            skipAddingFilesFromTsConfig: true,
+            compilerOptions: {
+                allowJs: true,
+                declaration: true,
+                skipLibCheck: true,
+            },
+        });
+
+        depProject.addSourceFilesAtPaths(path.join(packagePath, "**/*.d.ts"));
+
+        // Search for the type in all source files
+        for (const sourceFile of depProject.getSourceFiles()) {
+            // Check classes
+            const cls = sourceFile.getClass(typeName);
+            if (cls && cls.isExported()) {
+                return extractClass(cls);
+            }
+
+            // Check interfaces
+            const iface = sourceFile.getInterface(typeName);
+            if (iface && iface.isExported()) {
+                return extractInterface(iface);
+            }
+
+            // Check enums
+            const en = sourceFile.getEnum(typeName);
+            if (en && en.isExported()) {
+                return extractEnum(en);
+            }
+
+            // Check type aliases
+            const typeAlias = sourceFile.getTypeAlias(typeName);
+            if (typeAlias && typeAlias.isExported()) {
+                return extractTypeAlias(typeAlias);
+            }
+        }
+    } catch {
+        // Ignore errors from invalid packages
+    }
+
+    return null;
+}
+
+/**
+ * Resolves transitive dependencies from the API surface.
+ * Uses AST-based type collection for accurate dependency tracking.
+ */
+function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath: string): DependencyInfo[] {
+    // Register all defined types with the collector (to exclude from dependencies)
+    const definedTypes = getDefinedTypes(api);
+    for (const typeName of definedTypes) {
+        typeCollector.addDefinedType(typeName);
+    }
+    
+    // Get the AST-collected external type references
+    const externalRefs = typeCollector.getExternalRefs();
+    
+    if (externalRefs.length === 0) {
+        return [];
+    }
+
+    // Group by package name
+    const typesByPackage = new Map<string, ResolvedTypeRef[]>();
+    for (const ref of externalRefs) {
+        if (!ref.packageName) continue;
+        
+        if (!typesByPackage.has(ref.packageName)) {
+            typesByPackage.set(ref.packageName, []);
+        }
+        typesByPackage.get(ref.packageName)!.push(ref);
+    }
+
+    // Build dependency info array
+    const dependencies: DependencyInfo[] = [];
+    const resolvedTypes = new Map<string, { packageName: string; type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo }>();
+
+    for (const [packageName, refs] of typesByPackage) {
+        // Deduplicate type names
+        const uniqueTypeNames = [...new Set(refs.map(r => r.name))];
+        
+        // Try to extract full type definitions from the package
+        const nodeModulesPath = path.join(rootPath, "node_modules");
+        for (const typeName of uniqueTypeNames) {
+            const found = findTypeInNodeModules(typeName, rootPath, project);
+            if (found?.sourceFile?.path && found?.sourceFile?.packagePath) {
+                const extracted = extractTypeFromDependency(typeName, found.sourceFile.path, found.sourceFile.packagePath);
+                if (extracted) {
+                    resolvedTypes.set(typeName, { packageName, type: extracted });
+                }
+            }
+        }
+        
+        const depInfo: DependencyInfo = { package: packageName };
+        
+        const classes: ClassInfo[] = [];
+        const interfaces: InterfaceInfo[] = [];
+        const enums: EnumInfo[] = [];
+        const types: TypeAliasInfo[] = [];
+
+        for (const typeName of uniqueTypeNames) {
+            const resolved = resolvedTypes.get(typeName);
+            if (!resolved) continue;
+
+            const type = resolved.type;
+            if ("constructors" in type || "methods" in type && "properties" in type && !("extends" in type && typeof (type as InterfaceInfo).extends === "string")) {
+                // Distinguish class from interface by presence of constructors
+                if ("constructors" in type) {
+                    classes.push(type as ClassInfo);
+                } else if ("methods" in type || "properties" in type) {
+                    interfaces.push(type as InterfaceInfo);
+                }
+            } else if ("values" in type) {
+                enums.push(type as EnumInfo);
+            } else if ("type" in type && typeof (type as TypeAliasInfo).type === "string") {
+                types.push(type as TypeAliasInfo);
+            }
+        }
+
+        if (classes.length > 0) depInfo.classes = classes;
+        if (interfaces.length > 0) depInfo.interfaces = interfaces;
+        if (enums.length > 0) depInfo.enums = enums;
+        if (types.length > 0) depInfo.types = types;
+
+        // Only add if we have at least one resolved type
+        if (depInfo.classes || depInfo.interfaces || depInfo.enums || depInfo.types) {
+            dependencies.push(depInfo);
+        }
+    }
+
+    return dependencies.sort((a, b) => a.package.localeCompare(b.package));
 }
 
 // ============================================================================
@@ -809,6 +1643,84 @@ export function formatStubs(api: ApiIndex): string {
 
             lines.push("}");
             lines.push("");
+        }
+    }
+
+    // Add dependency types if present
+    if (api.dependencies && api.dependencies.length > 0) {
+        lines.push("");
+        lines.push("// ============================================================================");
+        lines.push("// Types from Dependencies (referenced in API surface)");
+        lines.push("// ============================================================================");
+        lines.push("");
+
+        for (const dep of api.dependencies) {
+            lines.push(`// From: ${dep.package}`);
+            lines.push("");
+
+            // Interfaces
+            for (const iface of dep.interfaces || []) {
+                if (iface.doc) lines.push(`/** ${iface.doc} */`);
+                const ext = iface.extends ? ` extends ${iface.extends}` : "";
+                const typeParams = iface.typeParams ? `<${iface.typeParams}>` : "";
+                lines.push(`interface ${iface.name}${typeParams}${ext} {`);
+
+                for (const prop of iface.properties || []) {
+                    const opt = prop.optional ? "?" : "";
+                    const ro = prop.readonly ? "readonly " : "";
+                    lines.push(`    ${ro}${prop.name}${opt}: ${prop.type};`);
+                }
+
+                for (const m of iface.methods || []) {
+                    const ret = m.ret ? `: ${m.ret}` : "";
+                    lines.push(`    ${m.name}(${m.sig})${ret};`);
+                }
+
+                lines.push("}");
+                lines.push("");
+            }
+
+            // Classes
+            for (const cls of dep.classes || []) {
+                if (cls.doc) lines.push(`/** ${cls.doc} */`);
+                const ext = cls.extends ? ` extends ${cls.extends}` : "";
+                const typeParams = cls.typeParams ? `<${cls.typeParams}>` : "";
+                lines.push(`class ${cls.name}${typeParams}${ext} {`);
+
+                for (const prop of cls.properties || []) {
+                    const opt = prop.optional ? "?" : "";
+                    const ro = prop.readonly ? "readonly " : "";
+                    lines.push(`    ${ro}${prop.name}${opt}: ${prop.type};`);
+                }
+
+                for (const m of cls.methods || []) {
+                    const ret = m.ret ? `: ${m.ret}` : "";
+                    lines.push(`    ${m.name}(${m.sig})${ret};`);
+                }
+
+                if (!cls.properties?.length && !cls.methods?.length) {
+                    lines.push("    // empty");
+                }
+
+                lines.push("}");
+                lines.push("");
+            }
+
+            // Enums
+            for (const e of dep.enums || []) {
+                if (e.doc) lines.push(`/** ${e.doc} */`);
+                lines.push(`enum ${e.name} {`);
+                lines.push(`    ${e.values.join(", ")}`);
+                lines.push("}");
+                lines.push("");
+            }
+
+            // Type aliases
+            for (const t of dep.types || []) {
+                if (t.doc) lines.push(`/** ${t.doc} */`);
+                lines.push(`type ${t.name} = ${t.type};`);
+                lines.push("");
+            }
         }
     }
 

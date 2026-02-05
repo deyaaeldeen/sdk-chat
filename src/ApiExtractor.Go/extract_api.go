@@ -17,10 +17,14 @@ import (
 	"unicode"
 )
 
+// =============================================================================
 // API Models
+// =============================================================================
+
 type ApiIndex struct {
-	Package  string       `json:"package"`
-	Packages []PackageApi `json:"packages"`
+	Package      string           `json:"package"`
+	Packages     []PackageApi     `json:"packages"`
+	Dependencies []DependencyInfo `json:"dependencies,omitempty"`
 }
 
 type PackageApi struct {
@@ -34,26 +38,39 @@ type PackageApi struct {
 	Variables  []VarApi    `json:"variables,omitempty"`
 }
 
+type DependencyInfo struct {
+	Package    string      `json:"package"`
+	Structs    []StructApi `json:"structs,omitempty"`
+	Interfaces []IfaceApi  `json:"interfaces,omitempty"`
+	Types      []TypeApi   `json:"types,omitempty"`
+}
+
 type StructApi struct {
-	Name    string     `json:"name"`
-	Doc     string     `json:"doc,omitempty"`
-	Fields  []FieldApi `json:"fields,omitempty"`
-	Methods []FuncApi  `json:"methods,omitempty"`
+	Name           string     `json:"name"`
+	Doc            string     `json:"doc,omitempty"`
+	Fields         []FieldApi `json:"fields,omitempty"`
+	Methods        []FuncApi  `json:"methods,omitempty"`
+	EntryPoint     bool       `json:"entryPoint,omitempty"`
+	ReExportedFrom string     `json:"reExportedFrom,omitempty"`
 }
 
 type IfaceApi struct {
-	Name    string    `json:"name"`
-	Doc     string    `json:"doc,omitempty"`
-	Methods []FuncApi `json:"methods,omitempty"`
+	Name           string    `json:"name"`
+	Doc            string    `json:"doc,omitempty"`
+	Methods        []FuncApi `json:"methods,omitempty"`
+	EntryPoint     bool      `json:"entryPoint,omitempty"`
+	ReExportedFrom string    `json:"reExportedFrom,omitempty"`
 }
 
 type FuncApi struct {
-	Name     string `json:"name"`
-	Sig      string `json:"sig"`
-	Ret      string `json:"ret,omitempty"`
-	Doc      string `json:"doc,omitempty"`
-	IsMethod bool   `json:"method,omitempty"`
-	Receiver string `json:"recv,omitempty"`
+	Name           string `json:"name"`
+	EntryPoint     bool   `json:"entryPoint,omitempty"`
+	ReExportedFrom string `json:"reExportedFrom,omitempty"`
+	Sig            string `json:"sig"`
+	Ret            string `json:"ret,omitempty"`
+	Doc            string `json:"doc,omitempty"`
+	IsMethod       bool   `json:"method,omitempty"`
+	Receiver       string `json:"recv,omitempty"`
 }
 
 type FieldApi struct {
@@ -64,9 +81,10 @@ type FieldApi struct {
 }
 
 type TypeApi struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Doc  string `json:"doc,omitempty"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Doc            string `json:"doc,omitempty"`
+	ReExportedFrom string `json:"reExportedFrom,omitempty"`
 }
 
 type ConstApi struct {
@@ -80,6 +98,66 @@ type VarApi struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 	Doc  string `json:"doc,omitempty"`
+}
+
+// =============================================================================
+// Builtin Type Detection
+// =============================================================================
+
+// Go standard library packages (not external dependencies)
+var goStdlibPackages = map[string]bool{
+	"archive": true, "bufio": true, "builtin": true, "bytes": true,
+	"compress": true, "container": true, "context": true, "crypto": true,
+	"database": true, "debug": true, "embed": true, "encoding": true,
+	"errors": true, "expvar": true, "flag": true, "fmt": true,
+	"go": true, "hash": true, "html": true, "image": true,
+	"index": true, "internal": true, "io": true, "log": true,
+	"maps": true, "math": true, "mime": true, "net": true,
+	"os": true, "path": true, "plugin": true, "reflect": true,
+	"regexp": true, "runtime": true, "slices": true, "sort": true,
+	"strconv": true, "strings": true, "sync": true, "syscall": true,
+	"testing": true, "text": true, "time": true, "unicode": true,
+	"unsafe": true,
+}
+
+// Go builtin types
+var goBuiltinTypes = map[string]bool{
+	// Basic types
+	"bool": true, "string": true,
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"uintptr": true, "byte": true, "rune": true,
+	"float32": true, "float64": true,
+	"complex64": true, "complex128": true,
+	"error": true, "any": true, "comparable": true,
+}
+
+func isBuiltinType(typeName string) bool {
+	// Remove pointer, slice, map prefixes
+	typeName = strings.TrimPrefix(typeName, "*")
+	typeName = strings.TrimPrefix(typeName, "[]")
+	if strings.HasPrefix(typeName, "map[") {
+		return true // map types use builtins
+	}
+
+	// Check if it's a stdlib package reference
+	if strings.Contains(typeName, ".") {
+		parts := strings.SplitN(typeName, ".", 2)
+		if goStdlibPackages[parts[0]] {
+			return true
+		}
+	}
+
+	return goBuiltinTypes[typeName]
+}
+
+func isStdlibPackage(pkgPath string) bool {
+	if pkgPath == "" {
+		return false
+	}
+	// Get the first path component
+	parts := strings.SplitN(pkgPath, "/", 2)
+	return goStdlibPackages[parts[0]]
 }
 
 func main() {
@@ -533,6 +611,10 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 	packageName := detectPackageName(absPath)
 	packages := make(map[string]*PackageApi)
 
+	// Reset the type collector and import map for this extraction
+	typeCollector = NewTypeReferenceCollector()
+	importMap = make(map[string]string)
+
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -577,6 +659,13 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 		if err != nil {
 			continue
 		}
+		
+		// Collect import mappings from all files in the package
+		for _, astPkg := range pkgs {
+			for _, file := range astPkg.Files {
+				collectImports(file)
+			}
+		}
 
 		for pkgName, astPkg := range pkgs {
 			if strings.HasSuffix(pkgName, "_test") {
@@ -608,10 +697,224 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 		return sortedPkgs[i].Name < sortedPkgs[j].Name
 	})
 
-	return &ApiIndex{
+	api := &ApiIndex{
 		Package:  packageName,
 		Packages: sortedPkgs,
-	}, nil
+	}
+
+	// Resolve transitive dependencies
+	deps := resolveTransitiveDependencies(api, absPath)
+	if len(deps) > 0 {
+		api.Dependencies = deps
+	}
+
+	return api, nil
+}
+
+// =============================================================================
+// Transitive Dependency Resolution (AST-Based)
+// =============================================================================
+
+// TypeReferenceCollector collects type references from AST expressions
+type TypeReferenceCollector struct {
+	refs         map[string]bool
+	definedTypes map[string]bool
+}
+
+func NewTypeReferenceCollector() *TypeReferenceCollector {
+	return &TypeReferenceCollector{
+		refs:         make(map[string]bool),
+		definedTypes: make(map[string]bool),
+	}
+}
+
+func (c *TypeReferenceCollector) AddDefinedType(name string) {
+	c.definedTypes[name] = true
+}
+
+// CollectFromExpr walks an AST expression and collects all type references.
+// This is a rigorous AST-based approach that properly handles:
+// - Identifiers: MyType
+// - Selectors: pkg.Type
+// - Pointers: *Type
+// - Slices: []Type
+// - Maps: map[Key]Value
+// - Generics: Type[Arg]
+// - Function types: func(A) B
+func (c *TypeReferenceCollector) CollectFromExpr(expr ast.Expr) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *ast.Ident:
+		// Simple type name like "MyType"
+		if isExported(e.Name) && !isBuiltinType(e.Name) {
+			c.refs[e.Name] = true
+		}
+	case *ast.SelectorExpr:
+		// Qualified name like "pkg.Type"
+		if ident, ok := e.X.(*ast.Ident); ok {
+			fullName := ident.Name + "." + e.Sel.Name
+			if !isBuiltinType(fullName) && !isStdlibPackage(ident.Name) {
+				c.refs[fullName] = true
+			}
+		}
+	case *ast.StarExpr:
+		// Pointer type like *Type
+		c.CollectFromExpr(e.X)
+	case *ast.ArrayType:
+		// Slice/array type like []Type
+		c.CollectFromExpr(e.Elt)
+	case *ast.MapType:
+		// Map type like map[Key]Value
+		c.CollectFromExpr(e.Key)
+		c.CollectFromExpr(e.Value)
+	case *ast.ChanType:
+		// Channel type like chan Type
+		c.CollectFromExpr(e.Value)
+	case *ast.FuncType:
+		// Function type like func(A) B
+		if e.Params != nil {
+			for _, field := range e.Params.List {
+				c.CollectFromExpr(field.Type)
+			}
+		}
+		if e.Results != nil {
+			for _, field := range e.Results.List {
+				c.CollectFromExpr(field.Type)
+			}
+		}
+	case *ast.IndexExpr:
+		// Generic type like Type[Arg]
+		c.CollectFromExpr(e.X)
+		c.CollectFromExpr(e.Index)
+	case *ast.IndexListExpr:
+		// Multi-parameter generic like Type[A, B]
+		c.CollectFromExpr(e.X)
+		for _, idx := range e.Indices {
+			c.CollectFromExpr(idx)
+		}
+	case *ast.Ellipsis:
+		// Variadic like ...Type
+		c.CollectFromExpr(e.Elt)
+	case *ast.InterfaceType:
+		// interface{} - no types to collect
+	case *ast.StructType:
+		// Anonymous struct type
+		if e.Fields != nil {
+			for _, field := range e.Fields.List {
+				c.CollectFromExpr(field.Type)
+			}
+		}
+	}
+}
+
+// CollectFromFieldList collects type references from a list of fields (params, results).
+func (c *TypeReferenceCollector) CollectFromFieldList(fl *ast.FieldList) {
+	if fl == nil {
+		return
+	}
+	for _, field := range fl.List {
+		c.CollectFromExpr(field.Type)
+	}
+}
+
+// GetExternalRefs returns type references that are not locally defined.
+func (c *TypeReferenceCollector) GetExternalRefs() map[string]bool {
+	result := make(map[string]bool)
+	for typeName := range c.refs {
+		baseName := typeName
+		if strings.Contains(typeName, ".") {
+			parts := strings.SplitN(typeName, ".", 2)
+			baseName = parts[1]
+		}
+		if !c.definedTypes[baseName] && !isBuiltinType(typeName) {
+			result[typeName] = true
+		}
+	}
+	return result
+}
+
+// Global collector (reset per extraction)
+var typeCollector = NewTypeReferenceCollector()
+
+// importMap maps package aliases to full import paths (collected during extraction)
+var importMap = make(map[string]string)
+
+// collectImports extracts import alias -> path mappings from a Go file's AST.
+// This enables rigorous resolution of package aliases to their full import paths.
+func collectImports(file *ast.File) {
+	for _, imp := range file.Imports {
+		// Get the import path (strip quotes)
+		importPath := strings.Trim(imp.Path.Value, "\"")
+		
+		// Determine the alias used in code
+		var alias string
+		if imp.Name != nil {
+			// Explicit alias: import foo "github.com/example/pkg"
+			alias = imp.Name.Name
+			if alias == "_" || alias == "." {
+				continue // blank import or dot import, skip
+			}
+		} else {
+			// Default alias is the last path component
+			parts := strings.Split(importPath, "/")
+			alias = parts[len(parts)-1]
+		}
+		
+		// Map alias to full path (later imports override earlier ones, which is correct Go behavior)
+		importMap[alias] = importPath
+	}
+}
+
+func collectTypeReferences(api *ApiIndex) map[string]bool {
+	// Use the AST-collected references instead
+	return typeCollector.GetExternalRefs()
+}
+
+func resolveTransitiveDependencies(api *ApiIndex, rootPath string) []DependencyInfo {
+	refs := collectTypeReferences(api)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	// Group external types by their resolved import path
+	depTypes := make(map[string][]string) // full import path -> type names
+
+	for typeName := range refs {
+		if strings.Contains(typeName, ".") {
+			parts := strings.SplitN(typeName, ".", 2)
+			pkgAlias := parts[0]
+			typeBaseName := parts[1]
+			
+			// Resolve alias to full import path using collected imports
+			fullPath := pkgAlias
+			if resolved, ok := importMap[pkgAlias]; ok {
+				fullPath = resolved
+			}
+			
+			if !isStdlibPackage(fullPath) {
+				depTypes[fullPath] = append(depTypes[fullPath], typeBaseName)
+			}
+		}
+	}
+
+	// Convert to DependencyInfo list
+	var deps []DependencyInfo
+	for pkgPath, types := range depTypes {
+		dep := DependencyInfo{Package: pkgPath}
+		for _, t := range types {
+			dep.Types = append(dep.Types, TypeApi{Name: t})
+		}
+		deps = append(deps, dep)
+	}
+
+	// Sort by package name
+	sort.Slice(deps, func(i, j int) bool {
+		return deps[i].Package < deps[j].Package
+	})
+
+	return deps
 }
 
 func extractPkg(pkg *doc.Package, fset *token.FileSet) *PackageApi {
@@ -676,7 +979,9 @@ func extractPkg(pkg *doc.Package, fset *token.FileSet) *PackageApi {
 				api.Interfaces = append(api.Interfaces, i)
 
 			default:
-				// Type alias
+				// Type alias - collect type reference and register as defined
+				typeCollector.AddDefinedType(t.Name)
+				typeCollector.CollectFromExpr(ts.Type)
 				api.Types = append(api.Types, TypeApi{
 					Name: t.Name,
 					Type: formatExpr(ts.Type),
@@ -752,8 +1057,14 @@ func extractStruct(t *doc.Type, st *ast.StructType) StructApi {
 		Doc:  firstLine(t.Doc),
 	}
 
+	// Register as defined type
+	typeCollector.AddDefinedType(t.Name)
+
 	// Fields
 	for _, field := range st.Fields.List {
+		// Collect type references from AST
+		typeCollector.CollectFromExpr(field.Type)
+
 		if len(field.Names) == 0 {
 			// Embedded field
 			s.Fields = append(s.Fields, FieldApi{
@@ -804,6 +1115,9 @@ func extractInterface(t *doc.Type, it *ast.InterfaceType) IfaceApi {
 		Doc:  firstLine(t.Doc),
 	}
 
+	// Register as defined type
+	typeCollector.AddDefinedType(t.Name)
+
 	for _, m := range it.Methods.List {
 		if len(m.Names) == 0 {
 			continue // embedded interface
@@ -816,6 +1130,10 @@ func extractInterface(t *doc.Type, it *ast.InterfaceType) IfaceApi {
 			if !ok {
 				continue
 			}
+			// Collect type references from method params and results
+			typeCollector.CollectFromFieldList(ft.Params)
+			typeCollector.CollectFromFieldList(ft.Results)
+
 			i.Methods = append(i.Methods, FuncApi{
 				Name: name.Name,
 				Sig:  formatParams(ft.Params),
@@ -828,6 +1146,10 @@ func extractInterface(t *doc.Type, it *ast.InterfaceType) IfaceApi {
 }
 
 func extractFunc(decl *ast.FuncDecl, docStr string) FuncApi {
+	// Collect type references from params and results
+	typeCollector.CollectFromFieldList(decl.Type.Params)
+	typeCollector.CollectFromFieldList(decl.Type.Results)
+
 	f := FuncApi{
 		Name: decl.Name.Name,
 		Sig:  formatParams(decl.Type.Params),
@@ -838,6 +1160,8 @@ func extractFunc(decl *ast.FuncDecl, docStr string) FuncApi {
 	if decl.Recv != nil && len(decl.Recv.List) > 0 {
 		f.IsMethod = true
 		f.Receiver = formatExpr(decl.Recv.List[0].Type)
+		// Collect receiver type reference
+		typeCollector.CollectFromFieldList(decl.Recv)
 	}
 
 	return f

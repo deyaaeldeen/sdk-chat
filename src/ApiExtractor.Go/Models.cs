@@ -16,6 +16,11 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("packages")]
     public IReadOnlyList<PackageApi> Packages { get; init; } = [];
 
+    /// <summary>Types from external dependencies that are referenced in the public API.</summary>
+    [JsonPropertyName("dependencies")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
+
     /// <summary>Gets all structs in the API.</summary>
     public IEnumerable<StructApi> GetAllStructs() =>
         Packages.SelectMany(p => p.Structs ?? []);
@@ -29,6 +34,29 @@ public sealed record ApiIndex : IApiIndex
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => GoFormatter.Format(this);
+}
+
+/// <summary>Information about types from a dependency module.</summary>
+public sealed record DependencyInfo
+{
+    /// <summary>The module path (e.g., "github.com/Azure/azure-sdk-for-go/sdk/azcore").</summary>
+    [JsonPropertyName("package")]
+    public string Package { get; init; } = "";
+
+    /// <summary>Structs from this module that are referenced in the API.</summary>
+    [JsonPropertyName("structs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<StructApi>? Structs { get; init; }
+
+    /// <summary>Interfaces from this module that are referenced in the API.</summary>
+    [JsonPropertyName("interfaces")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<IfaceApi>? Interfaces { get; init; }
+
+    /// <summary>Type aliases from this module that are referenced in the API.</summary>
+    [JsonPropertyName("types")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<TypeApi>? Types { get; init; }
 }
 
 /// <summary>A Go package.</summary>
@@ -67,7 +95,9 @@ public sealed record StructApi
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
-
+    /// <summary>External module this type is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
@@ -143,7 +173,9 @@ public record IfaceApi
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
-
+    /// <summary>External module this type is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
@@ -159,6 +191,10 @@ public record FuncApi
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
+
+    /// <summary>External module this function is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("sig")]
     public string Sig { get; init; } = "";
@@ -200,6 +236,10 @@ public record TypeApi
 
     [JsonPropertyName("type")]
     public string Type { get; init; } = "";
+
+    /// <summary>External module this type alias references.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }

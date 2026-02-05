@@ -22,6 +22,11 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("namespaces")]
     public IReadOnlyList<NamespaceInfo> Namespaces { get; init; } = [];
 
+    /// <summary>Types from external dependencies that are referenced in the public API.</summary>
+    [JsonPropertyName("dependencies")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
+
     public string ToJson(bool pretty = false) => pretty
         ? JsonSerializer.Serialize(this, JsonContext.Indented.ApiIndex)
         : JsonSerializer.Serialize(this, JsonContext.Default.ApiIndex);
@@ -82,6 +87,19 @@ public sealed record ApiIndex : IApiIndex
     }
 }
 
+/// <summary>Information about types from a dependency package/assembly.</summary>
+public sealed record DependencyInfo
+{
+    /// <summary>The package name (e.g., "Azure.Core").</summary>
+    [JsonPropertyName("package")]
+    public string Package { get; init; } = "";
+
+    /// <summary>Types from this package that are referenced in the API.</summary>
+    [JsonPropertyName("types")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<TypeInfo>? Types { get; init; }
+}
+
 public record NamespaceInfo
 {
     [JsonPropertyName("name")]
@@ -101,6 +119,10 @@ public record TypeInfo
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
+
+    /// <summary>External package/assembly this type is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("base")]
     public string? Base { get; init; }

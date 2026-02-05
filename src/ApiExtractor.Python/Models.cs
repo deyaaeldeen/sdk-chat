@@ -8,7 +8,10 @@ using ApiExtractor.Contracts;
 namespace ApiExtractor.Python;
 
 // Reuse the same output models for consistency across languages
-public sealed record ApiIndex(string Package, IReadOnlyList<ModuleInfo> Modules) : IApiIndex
+public sealed record ApiIndex(
+    string Package, 
+    IReadOnlyList<ModuleInfo> Modules,
+    IReadOnlyList<DependencyInfo>? Dependencies = null) : IApiIndex
 {
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
@@ -25,6 +28,24 @@ public sealed record ApiIndex(string Package, IReadOnlyList<ModuleInfo> Modules)
     public string ToStubs() => PythonFormatter.Format(this);
 }
 
+/// <summary>Information about types from a dependency package.</summary>
+public sealed record DependencyInfo
+{
+    /// <summary>The package name (e.g., "azure-core").</summary>
+    [JsonPropertyName("package")]
+    public string Package { get; init; } = "";
+
+    /// <summary>Classes from this package that are referenced in the API.</summary>
+    [JsonPropertyName("classes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ClassInfo>? Classes { get; init; }
+
+    /// <summary>Functions from this package that are referenced in the API.</summary>
+    [JsonPropertyName("functions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<FunctionInfo>? Functions { get; init; }
+}
+
 public sealed record ModuleInfo(string Name, IReadOnlyList<ClassInfo>? Classes, IReadOnlyList<FunctionInfo>? Functions);
 
 public sealed record ClassInfo
@@ -34,7 +55,9 @@ public sealed record ClassInfo
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
-
+    /// <summary>External package this type is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
     [JsonPropertyName("base")]
     public string? Base { get; init; }
 
@@ -127,6 +150,10 @@ public sealed record FunctionInfo
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
+
+    /// <summary>External package this function is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("sig")]
     public string Signature { get; init; } = "";

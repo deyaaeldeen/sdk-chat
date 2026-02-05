@@ -4,14 +4,32 @@ using Xunit;
 
 namespace Microsoft.SdkChat.Tests;
 
-public class SdkInfoTests
+public class SdkInfoTests : IDisposable
 {
     private readonly string _testRoot;
 
     public SdkInfoTests()
     {
+        // Clear cache before each test to ensure isolation
+        SdkInfo.ClearCache();
+        
         _testRoot = Path.Combine(Path.GetTempPath(), $"SdkInfoTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testRoot);
+    }
+
+    public void Dispose()
+    {
+        // Clear cache after each test
+        SdkInfo.ClearCache();
+        
+        try
+        {
+            if (Directory.Exists(_testRoot))
+                Directory.Delete(_testRoot, recursive: true);
+        }
+        catch { }
+        
+        GC.SuppressFinalize(this);
     }
 
     ~SdkInfoTests()

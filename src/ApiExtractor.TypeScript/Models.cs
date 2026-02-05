@@ -16,6 +16,11 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("modules")]
     public IReadOnlyList<ModuleInfo> Modules { get; init; } = [];
 
+    /// <summary>Types from dependency packages that appear in the public API.</summary>
+    [JsonPropertyName("dependencies")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
+
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
         Modules.SelectMany(m => m.Classes ?? []);
@@ -29,6 +34,34 @@ public sealed record ApiIndex : IApiIndex
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => TypeScriptFormatter.Format(this);
+}
+
+/// <summary>Information about types from a dependency package.</summary>
+public sealed record DependencyInfo
+{
+    /// <summary>The npm package name.</summary>
+    [JsonPropertyName("package")]
+    public string Package { get; init; } = "";
+
+    /// <summary>Classes from this package that are referenced in the API.</summary>
+    [JsonPropertyName("classes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ClassInfo>? Classes { get; init; }
+
+    /// <summary>Interfaces from this package that are referenced in the API.</summary>
+    [JsonPropertyName("interfaces")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<InterfaceInfo>? Interfaces { get; init; }
+
+    /// <summary>Enums from this package that are referenced in the API.</summary>
+    [JsonPropertyName("enums")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<EnumInfo>? Enums { get; init; }
+
+    /// <summary>Type aliases from this package that are referenced in the API.</summary>
+    [JsonPropertyName("types")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<TypeAliasInfo>? Types { get; init; }
 }
 
 /// <summary>A TypeScript module/file.</summary>
@@ -61,6 +94,14 @@ public sealed record ClassInfo
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
+
+    /// <summary>The subpath to import from (e.g., "." or "./client").</summary>
+    [JsonPropertyName("exportPath")]
+    public string? ExportPath { get; init; }
+
+    /// <summary>External package this type is re-exported from (e.g., "@azure/core-client").</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("extends")]
     public string? Extends { get; init; }
@@ -159,6 +200,14 @@ public record InterfaceInfo
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
 
+    /// <summary>The subpath to import from (e.g., "." or "./client").</summary>
+    [JsonPropertyName("exportPath")]
+    public string? ExportPath { get; init; }
+
+    /// <summary>External package this type is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
+
     [JsonPropertyName("extends")]
     public string? Extends { get; init; }
 
@@ -180,7 +229,9 @@ public record EnumInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
-
+    /// <summary>External package this type is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
@@ -197,6 +248,10 @@ public record TypeAliasInfo
     [JsonPropertyName("type")]
     public string Type { get; init; } = "";
 
+    /// <summary>External package this type is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
+
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 }
@@ -209,6 +264,14 @@ public record FunctionInfo
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
+
+    /// <summary>The subpath to import from (e.g., "." or "./client").</summary>
+    [JsonPropertyName("exportPath")]
+    public string? ExportPath { get; init; }
+
+    /// <summary>External package this function is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("sig")]
     public string Sig { get; init; } = "";

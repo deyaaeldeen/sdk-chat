@@ -186,6 +186,30 @@ public static class CSharpFormatter
                 includedTypes.Add(t.Name);
         }
 
+        // Add dependency types section
+        if (index.Dependencies?.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine("// Dependency Types (from external packages)");
+            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine();
+
+            foreach (var dep in index.Dependencies)
+            {
+                if (sb.Length >= maxLength) break;
+
+                sb.AppendLine($"// From: {dep.Package}");
+                sb.AppendLine();
+
+                foreach (var type in dep.Types ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    FormatType(sb, type, "");
+                }
+            }
+        }
+
         return sb.ToString();
     }
 

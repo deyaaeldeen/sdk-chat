@@ -195,6 +195,28 @@ public static class PythonFormatter
             sb.AppendLine();
         }
 
+        // Add dependency types section
+        if (index.Dependencies?.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("# " + new string('=', 77));
+            sb.AppendLine("# Dependency Types (from external packages)");
+            sb.AppendLine("# " + new string('=', 77));
+            sb.AppendLine();
+
+            foreach (var dep in index.Dependencies)
+            {
+                sb.AppendLine($"# From: {dep.Package}");
+                sb.AppendLine();
+
+                foreach (var cls in dep.Classes ?? [])
+                    FormatClass(sb, cls);
+
+                foreach (var func in dep.Functions ?? [])
+                    FormatFunction(sb, func, "");
+            }
+        }
+
         return sb.ToString();
     }
 

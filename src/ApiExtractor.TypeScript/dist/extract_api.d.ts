@@ -23,6 +23,9 @@ export interface ConstructorInfo {
 }
 export interface ClassInfo {
     name: string;
+    entryPoint?: boolean;
+    exportPath?: string;
+    reExportedFrom?: string;
     extends?: string;
     implements?: string[];
     typeParams?: string;
@@ -33,6 +36,9 @@ export interface ClassInfo {
 }
 export interface InterfaceInfo {
     name: string;
+    entryPoint?: boolean;
+    exportPath?: string;
+    reExportedFrom?: string;
     extends?: string;
     typeParams?: string;
     doc?: string;
@@ -41,16 +47,21 @@ export interface InterfaceInfo {
 }
 export interface EnumInfo {
     name: string;
+    reExportedFrom?: string;
     doc?: string;
     values: string[];
 }
 export interface TypeAliasInfo {
     name: string;
     type: string;
+    reExportedFrom?: string;
     doc?: string;
 }
 export interface FunctionInfo {
     name: string;
+    entryPoint?: boolean;
+    exportPath?: string;
+    reExportedFrom?: string;
     sig: string;
     ret?: string;
     doc?: string;
@@ -58,6 +69,8 @@ export interface FunctionInfo {
 }
 export interface ModuleInfo {
     name: string;
+    /** If this module is from a dependency, the package name */
+    fromPackage?: string;
     classes?: ClassInfo[];
     interfaces?: InterfaceInfo[];
     enums?: EnumInfo[];
@@ -67,6 +80,20 @@ export interface ModuleInfo {
 export interface ApiIndex {
     package: string;
     modules: ModuleInfo[];
+    /** Types from dependency packages that appear in the public API */
+    dependencies?: DependencyInfo[];
+}
+/**
+ * Information about types from a dependency package.
+ */
+export interface DependencyInfo {
+    /** The npm package name */
+    package: string;
+    /** Types from this package that are referenced in the API */
+    classes?: ClassInfo[];
+    interfaces?: InterfaceInfo[];
+    enums?: EnumInfo[];
+    types?: TypeAliasInfo[];
 }
 export declare function extractPackage(rootPath: string): ApiIndex;
 export declare function formatStubs(api: ApiIndex): string;

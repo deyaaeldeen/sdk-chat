@@ -365,6 +365,10 @@ public class ExtractApi {
         }
 
     static Map<String, Object> extractPackage(Path root) throws Exception {
+        // Reset the type collector and import map for this extraction
+        typeCollector.clear();
+        importMap.clear();
+        
         String packageName = detectPackageName(root);
         List<Map<String, Object>> packages = new ArrayList<>();
         Map<String, Map<String, Object>> packageMap = new TreeMap<>();
@@ -403,10 +407,20 @@ public class ExtractApi {
         for (Path file : javaFiles) {
             try {
                 ParseResult<CompilationUnit> result = parser.parse(file);
-                if (!result.isSuccessful()) continue;
+                if (!result.isSuccessful()) {
+                    // Log parse failures to stderr for debugging
+                    System.err.println("Parse failed: " + file + " - " + 
+                        result.getProblems().stream()
+                            .map(p -> p.getMessage())
+                            .collect(Collectors.joining("; ")));
+                    continue;
+                }
 
                 CompilationUnit cu = result.getResult().orElse(null);
                 if (cu == null) continue;
+                
+                // Collect import statements for type-to-package resolution
+                collectImports(cu);
 
                 String pkg = cu.getPackageDeclaration()
                     .map(pd -> pd.getNameAsString())
@@ -423,7 +437,8 @@ public class ExtractApi {
                     extractType(type, pkgInfo);
                 }
             } catch (Exception e) {
-                // Skip unparseable files
+                // Log parse exceptions to stderr for debugging
+                System.err.println("Exception parsing " + file + ": " + e.getMessage());
             }
         }
 
@@ -432,7 +447,294 @@ public class ExtractApi {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("package", packageName);
         result.put("packages", packages);
+        
+        // Resolve transitive dependencies
+        List<Map<String, Object>> dependencies = resolveTransitiveDependencies(packages);
+        if (!dependencies.isEmpty()) {
+            result.put("dependencies", dependencies);
+        }
+        
         return result;
+    }
+    
+    // ===== Transitive Dependency Resolution =====
+    
+    // Java builtin types - types from java.lang and common java.* packages
+    private static final Set<String> JAVA_BUILTINS = Set.of(
+        // Primitives and wrappers
+        "boolean", "byte", "char", "short", "int", "long", "float", "double", "void",
+        "Boolean", "Byte", "Character", "Short", "Integer", "Long", "Float", "Double", "Void",
+        "Number", "Object", "String", "Class", "Enum",
+        
+        // Collections
+        "Collection", "List", "Set", "Map", "Queue", "Deque", "Iterator", "Iterable",
+        "ArrayList", "LinkedList", "HashSet", "TreeSet", "LinkedHashSet",
+        "HashMap", "TreeMap", "LinkedHashMap", "Hashtable",
+        "Vector", "Stack", "Properties", "EnumSet", "EnumMap",
+        "Collections", "Arrays",
+        
+        // Streams
+        "Stream", "IntStream", "LongStream", "DoubleStream",
+        "Optional", "OptionalInt", "OptionalLong", "OptionalDouble",
+        "Collector", "Collectors",
+        
+        // Functions
+        "Function", "BiFunction", "Consumer", "BiConsumer", "Supplier",
+        "Predicate", "BiPredicate", "UnaryOperator", "BinaryOperator",
+        "Runnable", "Callable", "Comparator",
+        
+        // Exceptions
+        "Exception", "RuntimeException", "Error", "Throwable",
+        "IllegalArgumentException", "IllegalStateException", "NullPointerException",
+        "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException",
+        "ClassCastException", "UnsupportedOperationException", "NoSuchElementException",
+        "IOException", "FileNotFoundException", "EOFException",
+        "InterruptedException", "TimeoutException", "ExecutionException",
+        
+        // IO/NIO
+        "InputStream", "OutputStream", "Reader", "Writer",
+        "File", "Path", "Paths", "Files", "URI", "URL",
+        "ByteBuffer", "CharBuffer", "Channel", "FileChannel",
+        "Closeable", "AutoCloseable", "Flushable",
+        
+        // Time
+        "Date", "Calendar", "TimeZone",
+        "Instant", "Duration", "Period", "LocalDate", "LocalTime", "LocalDateTime",
+        "ZonedDateTime", "OffsetDateTime", "OffsetTime", "ZoneId", "ZoneOffset",
+        "DateTimeFormatter", "ChronoUnit", "TemporalUnit",
+        
+        // Concurrency
+        "Thread", "ThreadLocal", "Executor", "ExecutorService",
+        "Future", "CompletableFuture", "CompletionStage",
+        "Lock", "ReentrantLock", "Semaphore", "CountDownLatch",
+        "AtomicBoolean", "AtomicInteger", "AtomicLong", "AtomicReference",
+        "ConcurrentHashMap", "ConcurrentLinkedQueue", "BlockingQueue",
+        
+        // Reflection
+        "Method", "Field", "Constructor", "Annotation", "Type", "ParameterizedType",
+        
+        // Misc
+        "StringBuilder", "StringBuffer", "Pattern", "Matcher",
+        "Random", "UUID", "Objects", "Math", "System",
+        "Serializable", "Cloneable", "Comparable", "Appendable", "CharSequence",
+        "BigInteger", "BigDecimal"
+    );
+    
+    // Java standard library packages
+    private static final Set<String> JAVA_STDLIB_PACKAGES = Set.of(
+        "java.lang", "java.util", "java.io", "java.nio", "java.net",
+        "java.time", "java.math", "java.text", "java.security", "java.sql",
+        "java.beans", "java.awt", "java.applet", "javax.swing", "javax.xml",
+        "javax.crypto", "javax.net", "javax.security", "javax.sql",
+        "sun.", "com.sun.", "jdk."
+    );
+    
+    private static boolean isBuiltinType(String typeName) {
+        if (typeName == null || typeName.isEmpty()) return true;
+        String baseName = typeName.contains("<") ? typeName.substring(0, typeName.indexOf('<')) : typeName;
+        baseName = baseName.contains(".") ? baseName.substring(baseName.lastIndexOf('.') + 1) : baseName;
+        return JAVA_BUILTINS.contains(baseName);
+    }
+    
+    private static boolean isStdlibPackage(String pkgName) {
+        if (pkgName == null || pkgName.isEmpty()) return true;
+        for (String stdlib : JAVA_STDLIB_PACKAGES) {
+            if (pkgName.equals(stdlib) || pkgName.startsWith(stdlib + ".") || pkgName.startsWith(stdlib)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    // =========================================================================
+    // AST-Based Type Reference Collection
+    // =========================================================================
+    
+    /**
+     * Collector for type references during extraction using proper AST traversal.
+     */
+    private static class TypeReferenceCollector {
+        private final Set<String> refs = new HashSet<>();
+        private final Set<String> definedTypes = new HashSet<>();
+        
+        void addDefinedType(String name) {
+            if (name != null) {
+                String baseName = name.contains("<") ? name.substring(0, name.indexOf('<')) : name;
+                definedTypes.add(baseName);
+            }
+        }
+        
+        /**
+         * Collect type references from a JavaParser Type node.
+         * Walks the AST properly handling:
+         * - ClassOrInterfaceType: MyClass, pkg.MyClass
+         * - ArrayType: int[], String[]
+         * - PrimitiveType: int, boolean
+         * - VoidType: void
+         * - WildcardType: ? extends X
+         * - TypeParameter: T, E
+         */
+        void collectFromType(Type type) {
+            if (type == null) return;
+            
+            if (type.isClassOrInterfaceType()) {
+                ClassOrInterfaceType cit = type.asClassOrInterfaceType();
+                // Get the simple name (ignoring scope/package)
+                String name = cit.getNameAsString();
+                if (!isBuiltinType(name)) {
+                    // Get fully qualified if there's a scope
+                    if (cit.getScope().isPresent()) {
+                        String fullName = cit.getScope().get().toString() + "." + name;
+                        refs.add(fullName);
+                    } else {
+                        refs.add(name);
+                    }
+                }
+                // Recursively collect from generic type arguments
+                cit.getTypeArguments().ifPresent(args -> {
+                    for (Type arg : args) {
+                        collectFromType(arg);
+                    }
+                });
+            } else if (type.isArrayType()) {
+                // Array type like String[]
+                collectFromType(type.asArrayType().getComponentType());
+            } else if (type.isWildcardType()) {
+                // Wildcard like ? extends X or ? super Y
+                WildcardType wt = type.asWildcardType();
+                wt.getExtendedType().ifPresent(this::collectFromType);
+                wt.getSuperType().ifPresent(this::collectFromType);
+            } else if (type.isUnionType()) {
+                // Union type in catch clauses
+                for (ReferenceType rt : type.asUnionType().getElements()) {
+                    collectFromType(rt);
+                }
+            } else if (type.isIntersectionType()) {
+                // Intersection type
+                for (ReferenceType rt : type.asIntersectionType().getElements()) {
+                    collectFromType(rt);
+                }
+            }
+            // PrimitiveType and VoidType are skipped (they're builtins)
+        }
+        
+        /**
+         * Collect type references from a list of parameters.
+         */
+        void collectFromParameters(List<Parameter> params) {
+            if (params == null) return;
+            for (Parameter param : params) {
+                collectFromType(param.getType());
+            }
+        }
+        
+        /**
+         * Get external type references (not locally defined, not builtins).
+         */
+        Set<String> getExternalRefs() {
+            Set<String> result = new HashSet<>();
+            for (String typeName : refs) {
+                String baseName = typeName.contains("<") ? typeName.substring(0, typeName.indexOf('<')) : typeName;
+                baseName = baseName.contains(".") ? baseName.substring(baseName.lastIndexOf('.') + 1) : baseName;
+                if (!definedTypes.contains(baseName) && !isBuiltinType(typeName)) {
+                    result.add(typeName);
+                }
+            }
+            return result;
+        }
+        
+        void clear() {
+            refs.clear();
+            definedTypes.clear();
+        }
+    }
+    
+    // Global collector (reset per extraction)
+    private static final TypeReferenceCollector typeCollector = new TypeReferenceCollector();
+    
+    // Maps simple type names to their fully qualified package from import statements
+    // This enables rigorous resolution instead of heuristic guessing
+    private static final Map<String, String> importMap = new HashMap<>();
+    
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> resolveTransitiveDependencies(List<Map<String, Object>> packages) {
+        // Get externally referenced types from the AST collector
+        Set<String> externalTypes = typeCollector.getExternalRefs();
+        
+        if (externalTypes.isEmpty()) {
+            return List.of();
+        }
+        
+        // Group by resolved package using import mappings
+        Map<String, List<String>> byPackage = new TreeMap<>();
+        for (String typeName : externalTypes) {
+            String pkg = resolvePackageFromImports(typeName);
+            if (pkg != null && !isStdlibPackage(pkg)) {
+                byPackage.computeIfAbsent(pkg, k -> new ArrayList<>()).add(typeName);
+            }
+        }
+        
+        // Convert to dependency list
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : byPackage.entrySet()) {
+            Map<String, Object> depInfo = new LinkedHashMap<>();
+            depInfo.put("package", entry.getKey());
+            
+            List<Map<String, Object>> classes = new ArrayList<>();
+            for (String typeName : entry.getValue().stream().distinct().sorted().collect(Collectors.toList())) {
+                Map<String, Object> cls = new LinkedHashMap<>();
+                cls.put("name", typeName.contains(".") ? typeName.substring(typeName.lastIndexOf('.') + 1) : typeName);
+                classes.add(cls);
+            }
+            if (!classes.isEmpty()) {
+                depInfo.put("classes", classes);
+            }
+            
+            result.add(depInfo);
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Resolve a type name to its package using collected import statements.
+     * This is rigorous - it only returns a package if we found an explicit import.
+     */
+    private static String resolvePackageFromImports(String typeName) {
+        // If it already has a package prefix, use it
+        if (typeName.contains(".")) {
+            int lastDot = typeName.lastIndexOf('.');
+            return typeName.substring(0, lastDot);
+        }
+        
+        // Look up in import map (collected from source files)
+        return importMap.get(typeName);
+    }
+    
+    /**
+     * Collect import statements from a compilation unit.
+     * Maps simple type names to their fully qualified packages.
+     */
+    private static void collectImports(CompilationUnit cu) {
+        for (ImportDeclaration imp : cu.getImports()) {
+            if (imp.isStatic()) continue; // Skip static imports
+            
+            String importName = imp.getNameAsString();
+            if (imp.isAsterisk()) {
+                // Wildcard import like "import com.azure.core.*"
+                // We can't map specific types, but we note the package exists
+                continue;
+            }
+            
+            // Regular import like "import com.azure.core.ClientOptions"
+            // Map the simple name to the package
+            int lastDot = importName.lastIndexOf('.');
+            if (lastDot > 0) {
+                String simpleName = importName.substring(lastDot + 1);
+                String packageName = importName.substring(0, lastDot);
+                importMap.put(simpleName, packageName);
+            }
+        }
     }
 
     static void extractType(TypeDeclaration<?> type, Map<String, Object> pkgInfo) {
@@ -458,8 +760,12 @@ public class ExtractApi {
 
     static Map<String, Object> extractClassOrInterface(ClassOrInterfaceDeclaration cid) {
         Map<String, Object> info = new LinkedHashMap<>();
-        info.put("name", cid.getNameAsString());
+        String typeName = cid.getNameAsString();
+        info.put("name", typeName);
         boolean isInterface = cid.isInterface();
+        
+        // Register this type as defined
+        typeCollector.addDefinedType(typeName);
 
         List<String> mods = getModifiers(cid);
         if (!mods.isEmpty()) info.put("modifiers", mods);
@@ -468,16 +774,27 @@ public class ExtractApi {
             info.put("typeParams", cid.getTypeParameters().stream()
                 .map(tp -> tp.toString())
                 .collect(Collectors.joining(", ")));
+            // Collect type parameter bounds
+            for (var tp : cid.getTypeParameters()) {
+                for (var bound : tp.getTypeBound()) {
+                    typeCollector.collectFromType(bound);
+                }
+            }
         }
 
         if (!cid.getExtendedTypes().isEmpty()) {
-            info.put("extends", cid.getExtendedTypes().get(0).toString());
+            ClassOrInterfaceType extType = cid.getExtendedTypes().get(0);
+            info.put("extends", extType.toString());
+            typeCollector.collectFromType(extType);
         }
 
         if (!cid.getImplementedTypes().isEmpty()) {
             info.put("implements", cid.getImplementedTypes().stream()
                 .map(t -> t.toString())
                 .collect(Collectors.toList()));
+            for (ClassOrInterfaceType implType : cid.getImplementedTypes()) {
+                typeCollector.collectFromType(implType);
+            }
         }
 
         getDocString(cid).ifPresent(doc -> info.put("doc", doc));
@@ -516,7 +833,11 @@ public class ExtractApi {
 
     static Map<String, Object> extractEnum(EnumDeclaration ed) {
         Map<String, Object> info = new LinkedHashMap<>();
-        info.put("name", ed.getNameAsString());
+        String enumName = ed.getNameAsString();
+        info.put("name", enumName);
+        
+        // Register this enum as a defined type
+        typeCollector.addDefinedType(enumName);
 
         getDocString(ed).ifPresent(doc -> info.put("doc", doc));
 
@@ -546,6 +867,17 @@ public class ExtractApi {
             info.put("typeParams", cd.getTypeParameters().stream()
                 .map(tp -> tp.toString())
                 .collect(Collectors.joining(", ")));
+            // Collect type parameter bounds
+            for (var tp : cd.getTypeParameters()) {
+                for (var bound : tp.getTypeBound()) {
+                    typeCollector.collectFromType(bound);
+                }
+            }
+        }
+
+        // Collect parameter types via AST
+        for (var param : cd.getParameters()) {
+            typeCollector.collectFromType(param.getType());
         }
 
         String sig = cd.getParameters().stream()
@@ -554,13 +886,19 @@ public class ExtractApi {
         info.put("sig", sig);
 
         if (cd instanceof MethodDeclaration) {
-            info.put("ret", ((MethodDeclaration) cd).getType().toString());
+            com.github.javaparser.ast.type.Type retType = ((MethodDeclaration) cd).getType();
+            info.put("ret", retType.toString());
+            typeCollector.collectFromType(retType);
         }
 
         if (!cd.getThrownExceptions().isEmpty()) {
             info.put("throws", cd.getThrownExceptions().stream()
                 .map(t -> t.toString())
                 .collect(Collectors.toList()));
+            // Collect thrown exception types
+            for (var thrown : cd.getThrownExceptions()) {
+                typeCollector.collectFromType(thrown);
+            }
         }
 
         getDocString(cd).ifPresent(doc -> info.put("doc", doc));
@@ -571,7 +909,10 @@ public class ExtractApi {
     static Map<String, Object> extractField(FieldDeclaration fd, VariableDeclarator vd) {
         Map<String, Object> info = new LinkedHashMap<>();
         info.put("name", vd.getNameAsString());
-        info.put("type", vd.getType().toString());
+        
+        com.github.javaparser.ast.type.Type fieldType = vd.getType();
+        info.put("type", fieldType.toString());
+        typeCollector.collectFromType(fieldType);
 
         List<String> mods = getModifiers(fd);
         if (!mods.isEmpty()) info.put("modifiers", mods);

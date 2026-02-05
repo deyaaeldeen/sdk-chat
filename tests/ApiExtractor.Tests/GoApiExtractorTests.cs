@@ -199,16 +199,16 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
     [SkippableFact]
     public void Extract_ProducesSmallerOutputThanSource()
     {
-        // For small test fixtures, API surface can be 80-110% of source size
-        // (metadata like entryPoint flags add overhead for tiny test cases).
+        // For small test fixtures, API surface can be 80-120% of source size
+        // (metadata like entryPoint, reExportedFrom add overhead for tiny test cases).
         // Real SDK packages (100s of KB) show >90% reduction.
         var api = GetApi();
         var json = JsonSerializer.Serialize(api);
         var sourceSize = Directory.GetFiles(_fixture.FixturePath, "*.go", SearchOption.AllDirectories)
             .Where(f => !f.EndsWith("_test.go"))
             .Sum(f => new FileInfo(f).Length);
-        var maxAllowedSize = (int)(sourceSize * 1.1); // Allow 10% overhead for small fixtures
+        var maxAllowedSize = (int)(sourceSize * 1.2); // Allow 20% overhead for small fixtures
         Assert.True(json.Length <= maxAllowedSize,
-            $"JSON ({json.Length}) should be <= 110% of source ({sourceSize})");
+            $"JSON ({json.Length}) should be <= 120% of source ({sourceSize})");
     }
 }

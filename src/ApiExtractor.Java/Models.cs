@@ -16,6 +16,11 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("packages")]
     public IReadOnlyList<PackageInfo> Packages { get; init; } = [];
 
+    /// <summary>Types from external dependencies that are referenced in the public API.</summary>
+    [JsonPropertyName("dependencies")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
+
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
         Packages.SelectMany(p => p.Classes ?? []);
@@ -29,6 +34,29 @@ public sealed record ApiIndex : IApiIndex
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => JavaFormatter.Format(this);
+}
+
+/// <summary>Information about types from a dependency package.</summary>
+public sealed record DependencyInfo
+{
+    /// <summary>The package/group ID (e.g., "com.azure:azure-core").</summary>
+    [JsonPropertyName("package")]
+    public string Package { get; init; } = "";
+
+    /// <summary>Classes from this dependency that are referenced in the API.</summary>
+    [JsonPropertyName("classes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ClassInfo>? Classes { get; init; }
+
+    /// <summary>Interfaces from this dependency that are referenced in the API.</summary>
+    [JsonPropertyName("interfaces")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ClassInfo>? Interfaces { get; init; }
+
+    /// <summary>Enums from this dependency that are referenced in the API.</summary>
+    [JsonPropertyName("enums")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<EnumInfo>? Enums { get; init; }
 }
 
 /// <summary>A Java package containing types.</summary>
@@ -55,6 +83,10 @@ public sealed record ClassInfo
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
+
+    /// <summary>External package this type is re-exported from.</summary>
+    [JsonPropertyName("reExportedFrom")]
+    public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("extends")]
     public string? Extends { get; init; }

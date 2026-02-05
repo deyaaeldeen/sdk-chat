@@ -3,6 +3,7 @@
 
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Xml.Linq;
 using ApiExtractor.Contracts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -69,9 +70,10 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         
         // Resolve entry point namespaces from project configuration
         var entryPointNamespaces = ResolveEntryPointNamespaces(rootPath);
-
-        // Parallelize Roslyn parsing - cap at 8 cores to prevent memory pressure
-        // Beyond 8 cores, memory bandwidth dominates and additional parallelism hurts
+        
+        // Parse all files into syntax trees (parallel)
+        var syntaxTrees = new ConcurrentBag<SyntaxTree>();
+        
         await Parallel.ForEachAsync(
             files,
             new ParallelOptions
@@ -82,7 +84,9 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             async (file, token) =>
             {
                 var code = await File.ReadAllTextAsync(file, token).ConfigureAwait(false);
-                var tree = CSharpSyntaxTree.ParseText(code, cancellationToken: token);
+                var tree = CSharpSyntaxTree.ParseText(code, path: file, cancellationToken: token);
+                syntaxTrees.Add(tree);
+                
                 var root = await tree.GetRootAsync(token).ConfigureAwait(false);
                 ExtractFromRoot(root, typeMap, entryPointNamespaces);
             }).ConfigureAwait(false);
@@ -99,8 +103,446 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             })
             .ToList();
 
-        return new ApiIndex { Package = packageName, Namespaces = namespaces };
+        // Resolve transitive dependencies using semantic analysis
+        var dependencies = ResolveTransitiveDependencies(rootPath, syntaxTrees.ToList(), namespaces, ct);
+
+        return new ApiIndex { Package = packageName, Namespaces = namespaces, Dependencies = dependencies };
     }
+    
+    #region Transitive Dependency Resolution (Semantic Analysis)
+    
+    /// <summary>
+    /// .NET system assemblies that should be excluded from dependencies.
+    /// These are part of the runtime/BCL and not external packages.
+    /// </summary>
+    private static readonly HashSet<string> SystemAssemblyPrefixes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "System", "mscorlib", "netstandard", "Microsoft.CSharp",
+        "Microsoft.VisualBasic", "Microsoft.Win32", "WindowsBase",
+    };
+    
+    /// <summary>
+    /// Checks if an assembly is a system/runtime assembly (not an external dependency).
+    /// </summary>
+    private static bool IsSystemAssembly(string? assemblyName)
+    {
+        if (string.IsNullOrEmpty(assemblyName)) return true;
+        return SystemAssemblyPrefixes.Any(prefix => 
+            assemblyName.Equals(prefix, StringComparison.OrdinalIgnoreCase) ||
+            assemblyName.StartsWith(prefix + ".", StringComparison.OrdinalIgnoreCase));
+    }
+    
+    /// <summary>
+    /// Resolves transitive dependencies using Roslyn semantic analysis.
+    /// Creates a compilation with NuGet package references to properly resolve external types.
+    /// </summary>
+    private static IReadOnlyList<DependencyInfo>? ResolveTransitiveDependencies(
+        string rootPath,
+        IReadOnlyList<SyntaxTree> syntaxTrees,
+        IReadOnlyList<NamespaceInfo> namespaces,
+        CancellationToken ct)
+    {
+        if (syntaxTrees.Count == 0) return null;
+        
+        // Collect all defined type names (to exclude from dependencies)
+        var definedTypes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var ns in namespaces)
+        foreach (var type in ns.Types)
+        {
+            definedTypes.Add(type.Name.Split('<')[0]);
+            // Also add fully qualified name
+            if (!string.IsNullOrEmpty(ns.Name))
+            {
+                definedTypes.Add($"{ns.Name}.{type.Name.Split('<')[0]}");
+            }
+        }
+        
+        // Load metadata references from NuGet packages
+        var references = LoadMetadataReferences(rootPath);
+        
+        // Create compilation with all syntax trees and references
+        var compilation = CSharpCompilation.Create(
+            "ApiExtraction",
+            syntaxTrees,
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                .WithNullableContextOptions(NullableContextOptions.Enable));
+        
+        // Collect external type symbols from all public API surfaces
+        var externalTypes = new Dictionary<string, (ITypeSymbol Symbol, string AssemblyName)>(StringComparer.Ordinal);
+        
+        foreach (var tree in syntaxTrees)
+        {
+            ct.ThrowIfCancellationRequested();
+            
+            var semanticModel = compilation.GetSemanticModel(tree);
+            var root = tree.GetRoot(ct);
+            
+            // Collect type references from all type declarations
+            foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+            {
+                if (!typeDecl.Modifiers.Any(SyntaxKind.PublicKeyword)) continue;
+                
+                // Base types and interfaces
+                if (typeDecl.BaseList != null)
+                {
+                    foreach (var baseType in typeDecl.BaseList.Types)
+                    {
+                        CollectExternalTypeSymbol(baseType.Type, semanticModel, definedTypes, externalTypes);
+                    }
+                }
+                
+                // Members
+                foreach (var member in typeDecl.Members)
+                {
+                    if (!member.Modifiers.Any(SyntaxKind.PublicKeyword)) continue;
+                    
+                    CollectTypesFromMember(member, semanticModel, definedTypes, externalTypes);
+                }
+            }
+        }
+        
+        if (externalTypes.Count == 0) return null;
+        
+        // Group by assembly (package) name
+        var byPackage = externalTypes
+            .GroupBy(kv => kv.Value.AssemblyName, StringComparer.Ordinal)
+            .Where(g => !IsSystemAssembly(g.Key))
+            .OrderBy(g => g.Key)
+            .Select(g => new DependencyInfo
+            {
+                Package = g.Key,
+                Types = g.Select(kv => new TypeInfo
+                {
+                    Name = kv.Key,
+                    Kind = GetTypeKindFromSymbol(kv.Value.Symbol)
+                }).OrderBy(t => t.Name).ToList()
+            })
+            .ToList();
+        
+        return byPackage.Count > 0 ? byPackage : null;
+    }
+    
+    /// <summary>
+    /// Collects type symbols from a member declaration (method, property, etc.)
+    /// </summary>
+    private static void CollectTypesFromMember(
+        MemberDeclarationSyntax member,
+        SemanticModel semanticModel,
+        HashSet<string> definedTypes,
+        Dictionary<string, (ITypeSymbol, string)> externalTypes)
+    {
+        switch (member)
+        {
+            case MethodDeclarationSyntax method:
+                CollectExternalTypeSymbol(method.ReturnType, semanticModel, definedTypes, externalTypes);
+                foreach (var param in method.ParameterList.Parameters)
+                {
+                    if (param.Type != null)
+                        CollectExternalTypeSymbol(param.Type, semanticModel, definedTypes, externalTypes);
+                }
+                // Collect from type constraints
+                foreach (var constraint in method.ConstraintClauses)
+                foreach (var typeConstraint in constraint.Constraints.OfType<TypeConstraintSyntax>())
+                {
+                    CollectExternalTypeSymbol(typeConstraint.Type, semanticModel, definedTypes, externalTypes);
+                }
+                break;
+                
+            case PropertyDeclarationSyntax prop:
+                CollectExternalTypeSymbol(prop.Type, semanticModel, definedTypes, externalTypes);
+                break;
+                
+            case IndexerDeclarationSyntax indexer:
+                CollectExternalTypeSymbol(indexer.Type, semanticModel, definedTypes, externalTypes);
+                foreach (var param in indexer.ParameterList.Parameters)
+                {
+                    if (param.Type != null)
+                        CollectExternalTypeSymbol(param.Type, semanticModel, definedTypes, externalTypes);
+                }
+                break;
+                
+            case EventDeclarationSyntax evt:
+                CollectExternalTypeSymbol(evt.Type, semanticModel, definedTypes, externalTypes);
+                break;
+                
+            case FieldDeclarationSyntax field:
+                CollectExternalTypeSymbol(field.Declaration.Type, semanticModel, definedTypes, externalTypes);
+                break;
+                
+            case ConstructorDeclarationSyntax ctor:
+                foreach (var param in ctor.ParameterList.Parameters)
+                {
+                    if (param.Type != null)
+                        CollectExternalTypeSymbol(param.Type, semanticModel, definedTypes, externalTypes);
+                }
+                break;
+        }
+    }
+    
+    /// <summary>
+    /// Collects an external type symbol if it's from an external assembly.
+    /// Recursively collects generic type arguments.
+    /// </summary>
+    private static void CollectExternalTypeSymbol(
+        TypeSyntax typeSyntax,
+        SemanticModel semanticModel,
+        HashSet<string> definedTypes,
+        Dictionary<string, (ITypeSymbol, string)> externalTypes)
+    {
+        var typeInfo = semanticModel.GetTypeInfo(typeSyntax);
+        var typeSymbol = typeInfo.Type;
+        
+        if (typeSymbol == null) return;
+        
+        CollectExternalTypeSymbolRecursive(typeSymbol, definedTypes, externalTypes);
+    }
+    
+    /// <summary>
+    /// Recursively collects external type symbols, including generic type arguments.
+    /// </summary>
+    private static void CollectExternalTypeSymbolRecursive(
+        ITypeSymbol typeSymbol,
+        HashSet<string> definedTypes,
+        Dictionary<string, (ITypeSymbol, string)> externalTypes)
+    {
+        // Unwrap nullable
+        if (typeSymbol is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
+        {
+            var underlyingType = nullable.TypeArguments.FirstOrDefault();
+            if (underlyingType != null)
+                CollectExternalTypeSymbolRecursive(underlyingType, definedTypes, externalTypes);
+            return;
+        }
+        
+        // Handle arrays
+        if (typeSymbol is IArrayTypeSymbol arrayType)
+        {
+            CollectExternalTypeSymbolRecursive(arrayType.ElementType, definedTypes, externalTypes);
+            return;
+        }
+        
+        // Skip type parameters (generics)
+        if (typeSymbol.TypeKind == TypeKind.TypeParameter) return;
+        
+        // Skip special types (primitives, etc.)
+        if (typeSymbol.SpecialType != SpecialType.None) return;
+        
+        // Skip error types
+        if (typeSymbol.TypeKind == TypeKind.Error) return;
+        
+        // Get the containing assembly
+        var assembly = typeSymbol.ContainingAssembly;
+        if (assembly == null) return;
+        
+        var assemblyName = assembly.Name;
+        
+        // Skip system assemblies
+        if (IsSystemAssembly(assemblyName)) return;
+        
+        // Get the type name
+        var typeName = typeSymbol.Name;
+        var fullName = typeSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).Split('<')[0];
+        
+        // Skip if it's a locally defined type
+        if (definedTypes.Contains(typeName) || definedTypes.Contains(fullName)) return;
+        
+        // Add to external types if not already present
+        if (!externalTypes.ContainsKey(typeName))
+        {
+            externalTypes[typeName] = (typeSymbol, assemblyName);
+        }
+        
+        // Recursively process generic type arguments
+        if (typeSymbol is INamedTypeSymbol namedType && namedType.TypeArguments.Length > 0)
+        {
+            foreach (var typeArg in namedType.TypeArguments)
+            {
+                CollectExternalTypeSymbolRecursive(typeArg, definedTypes, externalTypes);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Gets the kind string for a type symbol.
+    /// </summary>
+    private static string GetTypeKindFromSymbol(ITypeSymbol symbol) => symbol.TypeKind switch
+    {
+        TypeKind.Class => symbol.IsRecord ? "record" : "class",
+        TypeKind.Interface => "interface",
+        TypeKind.Struct => symbol.IsRecord ? "record struct" : "struct",
+        TypeKind.Enum => "enum",
+        TypeKind.Delegate => "delegate",
+        _ => "type"
+    };
+    
+    /// <summary>
+    /// Loads metadata references from NuGet packages and the runtime.
+    /// </summary>
+    private static IReadOnlyList<MetadataReference> LoadMetadataReferences(string rootPath)
+    {
+        var references = new List<MetadataReference>();
+        
+        // Add runtime references (required for compilation)
+        // Use AppContext.BaseDirectory for single-file app compatibility
+        var runtimeDir = AppContext.BaseDirectory;
+        if (!string.IsNullOrEmpty(runtimeDir))
+        {
+            var runtimeAssemblies = new[]
+            {
+                "System.Runtime.dll",
+                "System.Collections.dll",
+                "System.Linq.dll",
+                "System.Threading.Tasks.dll",
+                "System.IO.dll",
+                "netstandard.dll",
+            };
+            
+            foreach (var asm in runtimeAssemblies)
+            {
+                var path = Path.Combine(runtimeDir, asm);
+                if (File.Exists(path))
+                {
+                    try { references.Add(MetadataReference.CreateFromFile(path)); }
+                    catch { /* Ignore inaccessible assemblies */ }
+                }
+            }
+        }
+        
+        // Look for NuGet packages in common locations
+        var nugetPackagesDir = FindNuGetPackagesDirectory(rootPath);
+        if (nugetPackagesDir != null)
+        {
+            // Parse project file to find package references
+            var packageRefs = ParseProjectPackageReferences(rootPath);
+            
+            foreach (var (packageName, version) in packageRefs)
+            {
+                var packageDir = Path.Combine(nugetPackagesDir, packageName.ToLowerInvariant(), version);
+                if (!Directory.Exists(packageDir))
+                {
+                    // Try without version for floating versions
+                    var packageBaseDir = Path.Combine(nugetPackagesDir, packageName.ToLowerInvariant());
+                    if (Directory.Exists(packageBaseDir))
+                    {
+                        // Get the latest version
+                        var versions = Directory.GetDirectories(packageBaseDir)
+                            .Select(Path.GetFileName)
+                            .OrderByDescending(v => v)
+                            .FirstOrDefault();
+                        if (versions != null)
+                        {
+                            packageDir = Path.Combine(packageBaseDir, versions);
+                        }
+                    }
+                }
+                
+                if (Directory.Exists(packageDir))
+                {
+                    // Find the lib folder with the appropriate target framework
+                    var libDir = FindBestTargetFramework(packageDir);
+                    if (libDir != null)
+                    {
+                        foreach (var dll in Directory.GetFiles(libDir, "*.dll"))
+                        {
+                            try { references.Add(MetadataReference.CreateFromFile(dll)); }
+                            catch { /* Ignore inaccessible assemblies */ }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return references;
+    }
+    
+    /// <summary>
+    /// Finds the NuGet packages directory.
+    /// </summary>
+    private static string? FindNuGetPackagesDirectory(string rootPath)
+    {
+        // Check for local packages folder
+        var localPackages = Path.Combine(rootPath, "packages");
+        if (Directory.Exists(localPackages)) return localPackages;
+        
+        // Check NUGET_PACKAGES environment variable
+        var envPackages = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (!string.IsNullOrEmpty(envPackages) && Directory.Exists(envPackages))
+            return envPackages;
+        
+        // Default locations
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var defaultDir = Path.Combine(homeDir, ".nuget", "packages");
+        if (Directory.Exists(defaultDir)) return defaultDir;
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Parses package references from the project file.
+    /// </summary>
+    private static IReadOnlyList<(string Name, string Version)> ParseProjectPackageReferences(string rootPath)
+    {
+        var results = new List<(string, string)>();
+        
+        var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
+                  ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
+        
+        if (csproj == null) return results;
+        
+        try
+        {
+            var doc = XDocument.Load(csproj);
+            var packageRefs = doc.Descendants()
+                .Where(e => e.Name.LocalName == "PackageReference");
+            
+            foreach (var pr in packageRefs)
+            {
+                var name = pr.Attribute("Include")?.Value;
+                var version = pr.Attribute("Version")?.Value ?? pr.Element(XName.Get("Version", pr.Name.NamespaceName))?.Value;
+                
+                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(version))
+                {
+                    results.Add((name, version));
+                }
+            }
+        }
+        catch
+        {
+            // Ignore parse errors
+        }
+        
+        return results;
+    }
+    
+    /// <summary>
+    /// Finds the best target framework folder in a NuGet package.
+    /// </summary>
+    private static string? FindBestTargetFramework(string packageDir)
+    {
+        var libDir = Path.Combine(packageDir, "lib");
+        if (!Directory.Exists(libDir)) return null;
+        
+        // Prefer newer frameworks
+        var preferredFrameworks = new[]
+        {
+            "net8.0", "net7.0", "net6.0", "net5.0",
+            "netstandard2.1", "netstandard2.0", "netstandard1.6", "netstandard1.0",
+            "netcoreapp3.1", "netcoreapp3.0", "netcoreapp2.1", "netcoreapp2.0",
+            "net48", "net472", "net471", "net47", "net462", "net461", "net46", "net45"
+        };
+        
+        foreach (var fw in preferredFrameworks)
+        {
+            var fwDir = Path.Combine(libDir, fw);
+            if (Directory.Exists(fwDir)) return fwDir;
+        }
+        
+        // Fall back to any framework folder
+        return Directory.GetDirectories(libDir).FirstOrDefault();
+    }
+    
+    #endregion
     
     #region Entry Point Detection
     

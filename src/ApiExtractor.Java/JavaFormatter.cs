@@ -186,6 +186,42 @@ public static class JavaFormatter
             }
         }
 
+        // Add dependency types section
+        if (api.Dependencies?.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine("// Dependency Types (from external packages)");
+            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine();
+
+            foreach (var dep in api.Dependencies)
+            {
+                if (sb.Length >= maxLength) break;
+
+                sb.AppendLine($"// From: {dep.Package}");
+                sb.AppendLine();
+
+                foreach (var iface in dep.Interfaces ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    FormatType(sb, iface, "interface");
+                }
+
+                foreach (var cls in dep.Classes ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    FormatType(sb, cls, "class");
+                }
+
+                foreach (var e in dep.Enums ?? [])
+                {
+                    if (sb.Length >= maxLength) break;
+                    FormatEnums(sb, [e]);
+                }
+            }
+        }
+
         return sb.ToString();
     }
 
