@@ -83,16 +83,74 @@ public class ApiEntityCommand : Command
             var language = new Option<string?>("--language") { Description = "Override language detection" };
             var json = new Option<bool>("--json") { Description = "Output as JSON for CI/automation" };
             var uncoveredOnly = new Option<bool>("--uncovered-only") { Description = "Only show operations that need samples" };
+            var monorepo = new Option<bool>("--monorepo") { Description = "Analyze all SDK packages in a monorepo (batch coverage)" };
+            var report = new Option<string?>("--report") { Description = "Write a Markdown report to file (monorepo only)" };
+            var quiet = new Option<bool>("--quiet") { Description = "Suppress progress output" };
+            var skipEmpty = new Option<bool>("--skip-empty") { Description = "Omit packages with 0 operations from report (monorepo only)" };
 
             Add(pathArg);
             Add(samples);
             Add(language);
             Add(json);
             Add(uncoveredOnly);
+            Add(monorepo);
+            Add(report);
+            Add(quiet);
+            Add(skipEmpty);
 
             this.SetAction(async (ctx, ct) =>
             {
                 var service = new PackageInfoService();
+                var isMonorepo = ctx.GetValue(monorepo);
+                var reportPath = ctx.GetValue(report);
+
+                if (isMonorepo)
+                {
+                    var progress = ctx.GetValue(quiet)
+                        ? null
+                        : new Progress<string>(message => Console.Error.WriteLine(message));
+
+                    var batch = await service.AnalyzeCoverageMonorepoAsync(
+                        ctx.GetValue(pathArg)!,
+                        ctx.GetValue(samples),
+                        ctx.GetValue(language),
+                        progress,
+                        ct);
+
+                    if (!batch.Success)
+                    {
+                        ConsoleUx.Error(batch.ErrorMessage ?? "Coverage analysis failed");
+                        Environment.ExitCode = 1;
+                        return;
+                    }
+
+                    if (ctx.GetValue(json))
+                    {
+                        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(batch, PackageInfoJsonContext.Default.CoverageBatchResult));
+                    }
+                    else
+                    {
+                        var markdown = RenderCoverageMarkdown(batch, ctx.GetValue(uncoveredOnly), ctx.GetValue(skipEmpty));
+                        if (!string.IsNullOrWhiteSpace(reportPath))
+                        {
+                            var directory = Path.GetDirectoryName(reportPath);
+                            if (!string.IsNullOrWhiteSpace(directory))
+                            {
+                                Directory.CreateDirectory(directory);
+                            }
+                            await File.WriteAllTextAsync(reportPath, markdown, ct);
+                            ConsoleUx.Success($"Wrote coverage report to {reportPath}");
+                        }
+                        else
+                        {
+                            Console.WriteLine(markdown);
+                        }
+                    }
+
+                    Environment.ExitCode = 0;
+                    return;
+                }
+
                 var result = await service.AnalyzeCoverageAsync(
                     ctx.GetValue(pathArg)!,
                     ctx.GetValue(samples),
@@ -147,6 +205,87 @@ public class ApiEntityCommand : Command
 
                 Environment.ExitCode = 0;
             });
+        }
+
+        private static string RenderCoverageMarkdown(CoverageBatchResult batch, bool uncoveredOnly, bool skipEmpty)
+        {
+            var sb = new System.Text.StringBuilder();
+
+            sb.AppendLine("# SDK Coverage Report");
+            sb.AppendLine();
+            sb.AppendLine($"Generated: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ssZ}");
+            sb.AppendLine();
+            sb.AppendLine("## Summary");
+            sb.AppendLine();
+            sb.AppendLine($"- Root: {batch.RootPath}");
+            sb.AppendLine($"- Packages: {batch.TotalPackages}");
+            sb.AppendLine($"- Analyzed: {batch.AnalyzedPackages}");
+            sb.AppendLine($"- Skipped (no samples): {batch.SkippedPackages}");
+            sb.AppendLine($"- Failed: {batch.FailedPackages}");
+            sb.AppendLine($"- Total operations: {batch.TotalOperations}");
+            sb.AppendLine($"- Covered: {batch.CoveredCount}");
+            sb.AppendLine($"- Uncovered: {batch.UncoveredCount}");
+            sb.AppendLine($"- Coverage: {batch.CoveragePercent:F2}%");
+            sb.AppendLine();
+
+            foreach (var item in batch.Packages ?? [])
+            {
+                // Skip empty packages if requested
+                if (skipEmpty && item.Success && item.Result?.TotalOperations == 0)
+                {
+                    continue;
+                }
+
+                sb.AppendLine($"## {item.RelativePath}");
+                sb.AppendLine();
+
+                if (item.SkippedNoSamples)
+                {
+                    sb.AppendLine("Skipped (no samples detected).");
+                    sb.AppendLine();
+                    continue;
+                }
+
+                if (!item.Success || item.Result == null)
+                {
+                    sb.AppendLine("Coverage analysis failed.");
+                    if (!string.IsNullOrWhiteSpace(item.ErrorCode) || !string.IsNullOrWhiteSpace(item.ErrorMessage))
+                    {
+                        sb.AppendLine();
+                        sb.AppendLine($"{item.ErrorCode}: {item.ErrorMessage}");
+                    }
+                    sb.AppendLine();
+                    continue;
+                }
+
+                sb.AppendLine($"Coverage: {item.Result.CoveredCount}/{item.Result.TotalOperations} ({item.Result.CoveragePercent:F2}%)");
+                sb.AppendLine();
+                if (!uncoveredOnly)
+                {
+                    sb.AppendLine("### Covered APIs");
+                    sb.AppendLine();
+                    if (item.Result.CoveredOperations?.Length > 0)
+                    {
+                        foreach (var op in item.Result.CoveredOperations)
+                        {
+                            sb.AppendLine($"- {op.ClientType}.{op.Operation} ({op.File}:{op.Line})");
+                        }
+                    }
+                    sb.AppendLine();
+                }
+                sb.AppendLine("### Uncovered APIs");
+                sb.AppendLine();
+                if (item.Result.UncoveredOperations?.Length > 0)
+                {
+                    foreach (var op in item.Result.UncoveredOperations)
+                    {
+                        sb.AppendLine($"- {op.ClientType}.{op.Operation}: {op.Signature}");
+                    }
+                }
+                sb.AppendLine();
+            }
+
+            return sb.ToString();
         }
     }
 }

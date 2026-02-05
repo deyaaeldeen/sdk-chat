@@ -68,6 +68,10 @@ export OPENAI_API_KEY="sk-..."
 | `--samples <dir>` | Auto | Samples folder path |
 | `--uncovered-only` | `false` | Show only gaps |
 | `--json` | `false` | JSON output |
+| `--monorepo` | `false` | Analyze all packages in a monorepo |
+| `--report <file>` | stdout | Write Markdown report to file (monorepo only) |
+| `--quiet` | `false` | Suppress progress output |
+| `--skip-empty` | `false` | Omit packages with 0 operations (monorepo only) |
 
 ### `package api extract`
 

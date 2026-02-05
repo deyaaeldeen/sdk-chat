@@ -167,18 +167,178 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 		os.Exit(1)
 	}
 
-	// Build client methods map
-	clientMethods := make(map[string]map[string]string) // client -> method -> signature
+	allStructs := []StructApi{}
+	allInterfaces := []IfaceApi{}
+	allTypeNames := make(map[string]bool)
 	for _, pkg := range apiIndex.Packages {
 		for _, s := range pkg.Structs {
-			if strings.HasSuffix(s.Name, "Client") {
-				methods := make(map[string]string)
-				for _, m := range s.Methods {
-					methods[m.Name] = m.Sig
+			allStructs = append(allStructs, s)
+			allTypeNames[s.Name] = true
+		}
+		for _, iface := range pkg.Interfaces {
+			allInterfaces = append(allInterfaces, iface)
+			allTypeNames[iface.Name] = true
+		}
+	}
+
+	interfaceMethods := make(map[string]map[string]bool)
+	for _, iface := range allInterfaces {
+		methods := make(map[string]bool)
+		for _, m := range iface.Methods {
+			methods[m.Name] = true
+		}
+		if len(methods) > 0 {
+			interfaceMethods[iface.Name] = methods
+		}
+	}
+
+	interfaceImplementers := make(map[string][]StructApi)
+	for ifaceName, methods := range interfaceMethods {
+		for _, s := range allStructs {
+			structMethods := make(map[string]bool)
+			for _, m := range s.Methods {
+				structMethods[m.Name] = true
+			}
+			implements := true
+			for methodName := range methods {
+				if !structMethods[methodName] {
+					implements = false
+					break
 				}
-				if len(methods) > 0 {
-					clientMethods[s.Name] = methods
+			}
+			if implements {
+				interfaceImplementers[ifaceName] = append(interfaceImplementers[ifaceName], s)
+			}
+		}
+	}
+
+	references := make(map[string]map[string]bool)
+	for _, s := range allStructs {
+		references[s.Name] = getReferencedTypes(s, allTypeNames)
+	}
+	for _, iface := range allInterfaces {
+		references[iface.Name] = getReferencedTypesForInterface(iface, allTypeNames)
+	}
+
+	referencedBy := make(map[string]int)
+	for _, refs := range references {
+		for ref := range refs {
+			referencedBy[ref] = referencedBy[ref] + 1
+		}
+	}
+
+	operationTypes := make(map[string]bool)
+	for _, s := range allStructs {
+		if len(s.Methods) > 0 {
+			operationTypes[s.Name] = true
+		}
+	}
+	for _, iface := range allInterfaces {
+		if len(iface.Methods) > 0 {
+			operationTypes[iface.Name] = true
+		}
+	}
+
+	rootStructs := []StructApi{}
+	for _, s := range allStructs {
+		_, isReferenced := referencedBy[s.Name]
+		refs := references[s.Name]
+		referencesOperations := false
+		for ref := range refs {
+			if operationTypes[ref] {
+				referencesOperations = true
+				break
+			}
+		}
+		// Client types are always roots - they're SDK entry points even if referenced by options/builders
+		isClientType := strings.HasSuffix(s.Name, "Client")
+		if isClientType || (!isReferenced && (len(s.Methods) > 0 || referencesOperations)) {
+			rootStructs = append(rootStructs, s)
+		}
+	}
+
+	if len(rootStructs) == 0 {
+		for _, s := range allStructs {
+			refs := references[s.Name]
+			referencesOperations := false
+			for ref := range refs {
+				if operationTypes[ref] {
+					referencesOperations = true
+					break
 				}
+			}
+			if len(s.Methods) > 0 || referencesOperations {
+				rootStructs = append(rootStructs, s)
+			}
+		}
+	}
+
+	reachable := make(map[string]bool)
+	queue := []string{}
+	for _, s := range rootStructs {
+		if !reachable[s.Name] {
+			reachable[s.Name] = true
+			queue = append(queue, s.Name)
+		}
+	}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		if refs, ok := references[current]; ok {
+			for ref := range refs {
+				if !reachable[ref] {
+					reachable[ref] = true
+					queue = append(queue, ref)
+				}
+			}
+		}
+
+		for _, impl := range interfaceImplementers[current] {
+			if !reachable[impl.Name] {
+				reachable[impl.Name] = true
+				queue = append(queue, impl.Name)
+			}
+		}
+	}
+
+	usageStructs := []StructApi{}
+	for _, s := range allStructs {
+		if reachable[s.Name] && len(s.Methods) > 0 {
+			usageStructs = append(usageStructs, s)
+		}
+	}
+
+	usageInterfaces := []IfaceApi{}
+	for _, iface := range allInterfaces {
+		if reachable[iface.Name] && len(iface.Methods) > 0 {
+			usageInterfaces = append(usageInterfaces, iface)
+		}
+	}
+
+	// Build client methods map
+	clientMethods := make(map[string]map[string]string) // client -> method -> signature
+	for _, s := range usageStructs {
+		methods := make(map[string]string)
+		for _, m := range s.Methods {
+			methods[m.Name] = m.Sig
+		}
+		if len(methods) > 0 {
+			if _, exists := clientMethods[s.Name]; !exists {
+				clientMethods[s.Name] = methods
+			}
+		}
+	}
+
+	for _, iface := range usageInterfaces {
+		methods := make(map[string]string)
+		for _, m := range iface.Methods {
+			methods[m.Name] = m.Sig
+		}
+		if len(methods) > 0 {
+			if _, exists := clientMethods[iface.Name]; !exists {
+				clientMethods[iface.Name] = methods
 			}
 		}
 	}
@@ -326,6 +486,42 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 
 	output, _ := json.Marshal(result)
 	fmt.Println(string(output))
+}
+
+func getReferencedTypes(s StructApi, allTypeNames map[string]bool) map[string]bool {
+	refs := make(map[string]bool)
+
+	for _, m := range s.Methods {
+		for typeName := range allTypeNames {
+			if strings.Contains(m.Sig, typeName) || (m.Ret != "" && strings.Contains(m.Ret, typeName)) {
+				refs[typeName] = true
+			}
+		}
+	}
+
+	for _, f := range s.Fields {
+		for typeName := range allTypeNames {
+			if strings.Contains(f.Type, typeName) {
+				refs[typeName] = true
+			}
+		}
+	}
+
+	return refs
+}
+
+func getReferencedTypesForInterface(i IfaceApi, allTypeNames map[string]bool) map[string]bool {
+	refs := make(map[string]bool)
+
+	for _, m := range i.Methods {
+		for typeName := range allTypeNames {
+			if strings.Contains(m.Sig, typeName) || (m.Ret != "" && strings.Contains(m.Ret, typeName)) {
+				refs[typeName] = true
+			}
+		}
+	}
+
+	return refs
 }
 
 func extractPackage(rootPath string) (*ApiIndex, error) {

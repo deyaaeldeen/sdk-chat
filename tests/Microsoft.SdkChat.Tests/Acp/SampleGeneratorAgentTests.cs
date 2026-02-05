@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Collections.Concurrent;
 using System.IO.Pipes;
-using System.Text.Json;
 using AgentClientProtocol.Sdk;
 using AgentClientProtocol.Sdk.JsonRpc;
 using AgentClientProtocol.Sdk.Schema;
@@ -57,19 +57,17 @@ public class SampleGeneratorAgentTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    #region IAgent Interface Tests
+    #region IAgent Interface Tests (via SDK client)
 
     [Fact]
     public async Task InitializeAsync_ReturnsProtocolInfo()
     {
-        var agent = CreateAgent();
-        var request = new InitializeRequest
+        await using var harness = await CreateHarnessAsync();
+        var response = await harness.Client.InitializeAsync(new InitializeRequest
         {
             ProtocolVersion = Protocol.Version,
             ClientCapabilities = new ClientCapabilities()
-        };
-
-        var response = await agent.InitializeAsync(request);
+        });
 
         Assert.NotNull(response);
         Assert.Equal(Protocol.Version, response.ProtocolVersion);
@@ -81,14 +79,12 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task InitializeAsync_ReturnsSessionCapabilities()
     {
-        var agent = CreateAgent();
-        var request = new InitializeRequest
+        await using var harness = await CreateHarnessAsync();
+        var response = await harness.Client.InitializeAsync(new InitializeRequest
         {
             ProtocolVersion = Protocol.Version,
             ClientCapabilities = new ClientCapabilities()
-        };
-
-        var response = await agent.InitializeAsync(request);
+        });
 
         Assert.NotNull(response.AgentCapabilities);
         Assert.NotNull(response.AgentCapabilities.SessionCapabilities);
@@ -97,11 +93,11 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task NewSessionAsync_CreatesUniqueSession()
     {
-        var agent = CreateAgent();
+        await using var harness = await CreateHarnessAsync();
         var request = new NewSessionRequest { Cwd = _testRoot, McpServers = [] };
 
-        var response1 = await agent.NewSessionAsync(request);
-        var response2 = await agent.NewSessionAsync(request);
+        var response1 = await harness.Client.NewSessionAsync(request);
+        var response2 = await harness.Client.NewSessionAsync(request);
 
         Assert.NotNull(response1.SessionId);
         Assert.NotNull(response2.SessionId);
@@ -113,23 +109,24 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task PromptAsync_WithUnknownSession_ThrowsRequestError()
     {
-        var agent = CreateAgent();
+        await using var harness = await CreateHarnessAsync();
         var request = new PromptRequest
         {
             SessionId = "unknown-session-id",
-            Prompt = new ContentBlock[] { new TextContent { Text = "test" } }
+            Prompt = [new TextContent { Text = "test" }]
         };
 
-        await Assert.ThrowsAsync<RequestError>(() => agent.PromptAsync(request));
+        var ex = await Assert.ThrowsAsync<RequestError>(() => harness.Client.PromptAsync(request));
+        Assert.Equal(-32001, ex.Code); // SessionNotFound error code
     }
 
     [Fact]
     public async Task CancelAsync_DoesNotThrow()
     {
-        var agent = CreateAgent();
+        await using var harness = await CreateHarnessAsync();
         var notification = new CancelNotification { SessionId = "any-session" };
 
-        await agent.CancelAsync(notification);
+        await harness.Client.CancelAsync(notification);
     }
 
     #endregion
@@ -139,16 +136,12 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task PromptAsync_InitialPhase_AsksForSdkPath()
     {
-        var agent = CreateAgentWithConnection();
+        await using var harness = await CreateHarnessAsync();
         CreateDotNetProject();
 
-        var session = await agent.NewSessionAsync(new NewSessionRequest { Cwd = _testRoot, McpServers = [] });
+        var sessionId = await CreateSessionAsync(harness.Client);
 
-        var response = await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "Generate samples" } }
-        });
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, "Generate samples"));
 
         Assert.NotNull(response);
         Assert.Equal(StopReason.EndTurn, response.StopReason);
@@ -158,24 +151,16 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task PromptAsync_UnknownLanguage_ReturnsEndTurn()
     {
-        var agent = CreateAgentWithConnection();
+        await using var harness = await CreateHarnessAsync();
         // Empty directory - no project files
 
-        var session = await agent.NewSessionAsync(new NewSessionRequest { Cwd = _testRoot, McpServers = [] });
+        var sessionId = await CreateSessionAsync(harness.Client);
 
         // Phase 1: Initial - asks for SDK path
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "Generate" } }
-        });
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, "Generate"));
 
         // Phase 2: Provide SDK path (use default workspace)
-        var response = await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } }
-        });
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, ""));
 
         Assert.NotNull(response);
         Assert.Equal(StopReason.EndTurn, response.StopReason);
@@ -184,31 +169,19 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task PromptAsync_OutputFolderPhase_AsksForSampleCount()
     {
-        var agent = CreateAgentWithConnection();
+        await using var harness = await CreateHarnessAsync();
         CreateDotNetProject();
 
-        var session = await agent.NewSessionAsync(new NewSessionRequest { Cwd = _testRoot, McpServers = [] });
+        var sessionId = await CreateSessionAsync(harness.Client);
 
         // Phase 1: Initial - asks for SDK path
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "Generate" } }
-        });
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, "Generate"));
 
         // Phase 2: Provide SDK path (use default)
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } }
-        });
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, ""));
 
         // Phase 3: Provide output folder (empty = use default)
-        var response = await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } }
-        });
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, ""));
 
         Assert.NotNull(response);
         Assert.Equal(StopReason.EndTurn, response.StopReason);
@@ -218,45 +191,18 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task PromptAsync_ConfirmationPhase_ReturnsPromptData()
     {
-        var agent = CreateAgentWithConnection();
+        await using var harness = await CreateHarnessAsync();
         CreateDotNetProject();
 
-        var session = await agent.NewSessionAsync(new NewSessionRequest { Cwd = _testRoot, McpServers = [] });
+        var sessionId = await CreateSessionAsync(harness.Client);
 
-        // Phase 1: Initial - asks for SDK path
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "Generate" } }
-        });
-
-        // Phase 2: Provide SDK path (use default)
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } }
-        });
-
-        // Phase 3: Provide output folder
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } }
-        });
+        await AdvanceToSampleCountAsync(harness.Client, sessionId);
 
         // Phase 4: Provide sample count
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "3" } }
-        });
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, "3"));
 
         // Phase 5: Confirm to get prompt
-        var response = await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "generate" } }
-        });
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, "generate"));
 
         Assert.NotNull(response);
         Assert.Equal(StopReason.EndTurn, response.StopReason);
@@ -267,45 +213,16 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task PromptAsync_SamplesPhase_WritesFiles()
     {
-        var agent = CreateAgentWithConnection();
+        await using var harness = await CreateHarnessAsync();
         CreateDotNetProject();
 
-        var session = await agent.NewSessionAsync(new NewSessionRequest { Cwd = _testRoot, McpServers = [] });
+        var sessionId = await CreateSessionAsync(harness.Client);
 
-        // Phase 1-5: Get to samples phase
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "Generate" } }
-        });
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } } // default SDK path
-        });
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } } // default output folder
-        });
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } } // default sample count
-        });
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "generate" } }
-        });
+        await AdvanceToSamplesPhaseAsync(harness.Client, sessionId);
 
-        // Phase 5: Send samples JSON
+        // Phase 6: Send samples JSON
         var samplesJson = """[{"name":"HelloWorld","description":"A hello world sample","code":"Console.WriteLine(\"Hello\");","filePath":"HelloWorld.cs"}]""";
-        var response = await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = samplesJson } }
-        });
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, samplesJson));
 
         Assert.NotNull(response);
         Assert.Equal(StopReason.EndTurn, response.StopReason);
@@ -320,39 +237,167 @@ public class SampleGeneratorAgentTests : IDisposable
     [Fact]
     public async Task PromptAsync_CancelDuringConfirmation_Exits()
     {
-        var agent = CreateAgentWithConnection();
+        await using var harness = await CreateHarnessAsync();
         CreateDotNetProject();
 
-        var session = await agent.NewSessionAsync(new NewSessionRequest { Cwd = _testRoot, McpServers = [] });
+        var sessionId = await CreateSessionAsync(harness.Client);
 
-        // Phase 1-4: Get to confirmation phase
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "Generate" } }
-        });
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } } // default SDK path
-        });
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } } // default output folder
-        });
-        await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "" } } // default sample count
-        });
+        await AdvanceToConfirmationPhaseAsync(harness.Client, sessionId);
 
         // Cancel instead of confirm
-        var response = await agent.PromptAsync(new PromptRequest
-        {
-            SessionId = session.SessionId,
-            Prompt = new ContentBlock[] { new TextContent { Text = "cancel" } }
-        });
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, "cancel"));
+
+        Assert.NotNull(response);
+        Assert.Equal(StopReason.EndTurn, response.StopReason);
+
+        await Assert.ThrowsAsync<RequestError>(() => harness.Client.PromptAsync(CreatePrompt(sessionId, "generate")));
+    }
+
+    #endregion
+
+    #region Additional Scenario Coverage
+
+    [Fact]
+    public async Task PromptAsync_SdkPath_AllowsRetryAfterUnknownLanguage()
+    {
+        await using var harness = await CreateHarnessAsync();
+
+        var sessionId = await CreateSessionAsync(harness.Client);
+
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, "Generate"));
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, ""));
+
+        var sdkDir = Path.Combine(_testRoot, "sdk");
+        CreateDotNetProject(sdkDir);
+
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, sdkDir));
+
+        Assert.NotNull(response);
+        Assert.Equal(StopReason.EndTurn, response.StopReason);
+    }
+
+    [Fact]
+    public async Task PromptAsync_SampleCount_InvalidThenValid_ReturnsPromptData()
+    {
+        await using var harness = await CreateHarnessAsync();
+        CreateDotNetProject();
+
+        var sessionId = await CreateSessionAsync(harness.Client);
+
+        await AdvanceToSampleCountAsync(harness.Client, sessionId);
+
+        var invalidResponse = await harness.Client.PromptAsync(CreatePrompt(sessionId, "0"));
+        Assert.Equal(StopReason.EndTurn, invalidResponse.StopReason);
+
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, "2"));
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, "generate"));
+
+        Assert.NotNull(response.Meta);
+        Assert.True(response.Meta.ContainsKey("promptData"));
+    }
+
+    [Fact]
+    public async Task PromptAsync_ConfirmationPhase_AcceptsEmptyInput()
+    {
+        await using var harness = await CreateHarnessAsync();
+        CreateDotNetProject();
+
+        var sessionId = await CreateSessionAsync(harness.Client);
+
+        await AdvanceToConfirmationPhaseAsync(harness.Client, sessionId);
+
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, ""));
+
+        Assert.NotNull(response.Meta);
+        Assert.True(response.Meta.ContainsKey("promptData"));
+    }
+
+    [Fact]
+    public async Task PromptAsync_ConfirmationPhase_RejectsUnexpectedInput()
+    {
+        await using var harness = await CreateHarnessAsync();
+        CreateDotNetProject();
+
+        var sessionId = await CreateSessionAsync(harness.Client);
+
+        await AdvanceToConfirmationPhaseAsync(harness.Client, sessionId);
+
+        var reject = await harness.Client.PromptAsync(CreatePrompt(sessionId, "nope"));
+        Assert.Null(reject.Meta);
+
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, ""));
+        Assert.NotNull(response.Meta);
+        Assert.True(response.Meta.ContainsKey("promptData"));
+    }
+
+    [Fact]
+    public async Task PromptAsync_SamplesPhase_InvalidJsonThenValid_WritesFiles()
+    {
+        await using var harness = await CreateHarnessAsync();
+        CreateDotNetProject();
+
+        var sessionId = await CreateSessionAsync(harness.Client);
+        await AdvanceToSamplesPhaseAsync(harness.Client, sessionId);
+
+        var invalidResponse = await harness.Client.PromptAsync(CreatePrompt(sessionId, "{not-json"));
+        Assert.Equal(StopReason.EndTurn, invalidResponse.StopReason);
+
+        var samplesJson = """[{"name":"RetrySample","description":"retry","code":"Console.WriteLine(\"Retry\");","filePath":"RetrySample.cs"}]""";
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, samplesJson));
+
+        Assert.Equal(StopReason.EndTurn, response.StopReason);
+
+        var outputPath = Path.Combine(_testRoot, "examples", "RetrySample.cs");
+        Assert.True(File.Exists(outputPath), $"Expected file at {outputPath}");
+    }
+
+    [Fact]
+    public async Task PromptAsync_SamplesPhase_EmptyArrayThenValid_WritesFiles()
+    {
+        await using var harness = await CreateHarnessAsync();
+        CreateDotNetProject();
+
+        var sessionId = await CreateSessionAsync(harness.Client);
+        await AdvanceToSamplesPhaseAsync(harness.Client, sessionId);
+
+        var emptyResponse = await harness.Client.PromptAsync(CreatePrompt(sessionId, "[]"));
+        Assert.Equal(StopReason.EndTurn, emptyResponse.StopReason);
+
+        var samplesJson = """[{"name":"SecondTry","description":"retry","code":"Console.WriteLine(\"Second\");","filePath":"SecondTry.cs"}]""";
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, samplesJson));
+
+        var outputPath = Path.Combine(_testRoot, "examples", "SecondTry.cs");
+        Assert.True(File.Exists(outputPath), $"Expected file at {outputPath}");
+    }
+
+    [Fact]
+    public async Task PromptAsync_SamplesPhase_SkipsOutsideOutputFolder()
+    {
+        await using var harness = await CreateHarnessAsync();
+        CreateDotNetProject();
+
+        var sessionId = await CreateSessionAsync(harness.Client);
+        await AdvanceToSamplesPhaseAsync(harness.Client, sessionId);
+
+        var samplesJson = """[{"name":"Escape","description":"bad","code":"Console.WriteLine(\"Escape\");","filePath":"../escape.cs"}]""";
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, samplesJson));
+
+        var outputPath = Path.Combine(_testRoot, "escape.cs");
+        Assert.False(File.Exists(outputPath), $"Did not expect file at {outputPath}");
+    }
+
+    [Fact]
+    public async Task PromptAsync_SdkPath_RelativeToCwd_Works()
+    {
+        await using var harness = await CreateHarnessAsync();
+
+        var sdkDir = Path.Combine(_testRoot, "relative-sdk");
+        CreateDotNetProject(sdkDir);
+
+        var sessionId = await CreateSessionAsync(harness.Client);
+
+        await harness.Client.PromptAsync(CreatePrompt(sessionId, "Generate"));
+        var response = await harness.Client.PromptAsync(CreatePrompt(sessionId, "relative-sdk"));
 
         Assert.NotNull(response);
         Assert.Equal(StopReason.EndTurn, response.StopReason);
@@ -360,87 +405,165 @@ public class SampleGeneratorAgentTests : IDisposable
 
     #endregion
 
-    #region Wire Protocol Tests
-
-    [Fact]
-    public async Task JsonRpcFlow_InitializeRequest()
-    {
-        var (inputPipe, outputPipe) = CreatePipePair();
-
-        var agentStream = new NdJsonStream(
-            new StreamReader(inputPipe.reader),
-            new StreamWriter(outputPipe.writer) { AutoFlush = true });
-
-        var agent = CreateAgent();
-        var connection = new AgentSideConnection(agent, agentStream);
-
-        var agentTask = Task.Run(async () =>
-        {
-            try { await connection.RunAsync(); } catch { }
-        });
-
-        var clientWriter = new StreamWriter(inputPipe.writer) { AutoFlush = true };
-        var initRequest = new JsonRpcRequest
-        {
-            Id = 1,
-            Method = "initialize",
-            Params = JsonSerializer.SerializeToElement(new InitializeRequest
-            {
-                ProtocolVersion = Protocol.Version,
-                ClientCapabilities = new ClientCapabilities()
-            })
-        };
-        await clientWriter.WriteLineAsync(JsonSerializer.Serialize(initRequest));
-
-        var clientReader = new StreamReader(outputPipe.reader);
-        var responseLine = await clientReader.ReadLineAsync();
-
-        Assert.NotNull(responseLine);
-        var response = JsonSerializer.Deserialize<JsonRpcResponse>(responseLine);
-        Assert.NotNull(response);
-        Assert.Equal(1, ((JsonElement)response.Id!).GetInt32());
-        Assert.NotNull(response.Result);
-
-        clientWriter.Close();
-        try { await agentTask.WaitAsync(TimeSpan.FromMilliseconds(500)); } catch { }
-    }
-
-    #endregion
-
     #region Helper Methods
 
-    private SampleGeneratorAgent CreateAgent()
+    private async Task<AcpHarness> CreateHarnessAsync()
     {
         var logger = _services.GetRequiredService<ILogger<SampleGeneratorAgent>>();
-        return new SampleGeneratorAgent(_services, logger);
+        var agent = new SampleGeneratorAgent(_services, logger);
+        var clientImpl = new TestClient();
+
+        var (agentStream, clientStream, streams) = CreateDuplexStreams();
+
+        var agentConnection = new AgentSideConnection(agent, agentStream);
+        var clientConnection = new ClientSideConnection(clientImpl, clientStream);
+
+        agent.SetConnection(agentConnection);
+
+        var cts = new CancellationTokenSource();
+        var agentTask = agentConnection.RunAsync(cts.Token);
+        var clientTask = clientConnection.RunAsync(cts.Token);
+
+        // Give the loops a moment to start.
+        await Task.Yield();
+
+        return new AcpHarness(
+            agent,
+            clientConnection,
+            clientImpl,
+            agentConnection,
+            cts,
+            agentTask,
+            clientTask,
+            streams);
     }
 
-    private SampleGeneratorAgent CreateAgentWithConnection()
+    private static (NdJsonStream agentStream, NdJsonStream clientStream, Stream[] streams) CreateDuplexStreams()
     {
-        var agent = CreateAgent();
-        var mockStream = new NdJsonStream(new StringReader(""), new StringWriter());
-        var connection = new AgentSideConnection(agent, mockStream);
-        agent.SetConnection(connection);
-        return agent;
+        var agentToClient = new AnonymousPipeServerStream(PipeDirection.Out);
+        var clientFromAgent = new AnonymousPipeClientStream(PipeDirection.In, agentToClient.ClientSafePipeHandle);
+
+        var clientToAgent = new AnonymousPipeServerStream(PipeDirection.Out);
+        var agentFromClient = new AnonymousPipeClientStream(PipeDirection.In, clientToAgent.ClientSafePipeHandle);
+
+        var agentStream = new NdJsonStream(
+            new StreamReader(agentFromClient),
+            new StreamWriter(agentToClient) { AutoFlush = true });
+
+        var clientStream = new NdJsonStream(
+            new StreamReader(clientFromAgent),
+            new StreamWriter(clientToAgent) { AutoFlush = true });
+
+        return (agentStream, clientStream, [agentToClient, clientFromAgent, clientToAgent, agentFromClient]);
     }
 
-    private static ((Stream reader, Stream writer) input, (Stream reader, Stream writer) output) CreatePipePair()
+    private async Task<string> CreateSessionAsync(ClientSideConnection client)
     {
-        var inputPipe = new AnonymousPipeServerStream(PipeDirection.Out);
-        var inputClient = new AnonymousPipeClientStream(PipeDirection.In, inputPipe.ClientSafePipeHandle);
-
-        var outputPipe = new AnonymousPipeServerStream(PipeDirection.In);
-        var outputClient = new AnonymousPipeClientStream(PipeDirection.Out, outputPipe.ClientSafePipeHandle);
-
-        return ((inputClient, inputPipe), (outputPipe, outputClient));
+        var session = await client.NewSessionAsync(new NewSessionRequest { Cwd = _testRoot, McpServers = [] });
+        return session.SessionId;
     }
 
-    private void CreateDotNetProject()
+    private static PromptRequest CreatePrompt(string sessionId, string text) => new()
     {
-        var srcDir = Path.Combine(_testRoot, "src");
+        SessionId = sessionId,
+        Prompt = [new TextContent { Text = text }]
+    };
+
+    private async Task AdvanceToSampleCountAsync(ClientSideConnection client, string sessionId, string? sdkPath = null, string? outputPath = null)
+    {
+        await client.PromptAsync(CreatePrompt(sessionId, "Generate"));
+        await client.PromptAsync(CreatePrompt(sessionId, sdkPath ?? ""));
+        await client.PromptAsync(CreatePrompt(sessionId, outputPath ?? ""));
+    }
+
+    private async Task AdvanceToConfirmationPhaseAsync(ClientSideConnection client, string sessionId)
+    {
+        await AdvanceToSampleCountAsync(client, sessionId);
+        await client.PromptAsync(CreatePrompt(sessionId, ""));
+    }
+
+    private async Task AdvanceToSamplesPhaseAsync(ClientSideConnection client, string sessionId)
+    {
+        await AdvanceToConfirmationPhaseAsync(client, sessionId);
+        await client.PromptAsync(CreatePrompt(sessionId, "generate"));
+    }
+
+    private void CreateDotNetProject(string? root = null)
+    {
+        var projectRoot = root ?? _testRoot;
+        var srcDir = Path.Combine(projectRoot, "src");
         Directory.CreateDirectory(srcDir);
         File.WriteAllText(Path.Combine(srcDir, "MyProject.csproj"), "<Project />");
         File.WriteAllText(Path.Combine(srcDir, "Client.cs"), "public class Client { }");
+    }
+
+    private sealed class TestClient : IClient
+    {
+        public ConcurrentQueue<SessionNotification> Updates { get; } = new();
+
+        public Task<RequestPermissionResponse> RequestPermissionAsync(RequestPermissionRequest request, CancellationToken ct = default)
+        {
+            return Task.FromResult(new RequestPermissionResponse
+            {
+                Outcome = new SelectedPermissionOutcome { OptionId = PermissionOptionKind.AllowOnce }
+            });
+        }
+
+        public Task SessionUpdateAsync(SessionNotification notification, CancellationToken ct = default)
+        {
+            Updates.Enqueue(notification);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class AcpHarness : IAsyncDisposable
+    {
+        private readonly AgentSideConnection _agentConnection;
+        private readonly CancellationTokenSource _cts;
+        private readonly Task _agentTask;
+        private readonly Task _clientTask;
+        private readonly Stream[] _streams;
+
+        public AcpHarness(
+            SampleGeneratorAgent agent,
+            ClientSideConnection client,
+            TestClient clientImpl,
+            AgentSideConnection agentConnection,
+            CancellationTokenSource cts,
+            Task agentTask,
+            Task clientTask,
+            Stream[] streams)
+        {
+            Agent = agent;
+            Client = client;
+            ClientImpl = clientImpl;
+            _agentConnection = agentConnection;
+            _cts = cts;
+            _agentTask = agentTask;
+            _clientTask = clientTask;
+            _streams = streams;
+        }
+
+        public SampleGeneratorAgent Agent { get; }
+        public ClientSideConnection Client { get; }
+        public TestClient ClientImpl { get; }
+
+        public async ValueTask DisposeAsync()
+        {
+            _cts.Cancel();
+
+            await _agentConnection.DisposeAsync();
+            await Client.DisposeAsync();
+
+            try { await Task.WhenAll(_agentTask, _clientTask).WaitAsync(TimeSpan.FromMilliseconds(500)); } catch { }
+
+            foreach (var stream in _streams)
+            {
+                try { stream.Dispose(); } catch { }
+            }
+
+            _cts.Dispose();
+        }
     }
 
     #endregion

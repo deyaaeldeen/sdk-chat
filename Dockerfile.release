@@ -142,6 +142,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+RUN groupadd -g ${GROUP_ID} sdkchat && \
+    useradd -u ${USER_ID} -g sdkchat -m -s /bin/bash sdkchat
+
 WORKDIR /app
 
 # Copy all binaries
@@ -155,7 +160,12 @@ COPY --from=build-copilot /usr/local/bin/copilot /usr/local/bin/copilot
 # Copy CA certificates for HTTPS
 COPY --from=build-dotnet /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
+RUN chown -R sdkchat:sdkchat /app
+
+ENV HOME="/home/sdkchat"
 ENV PATH="/usr/local/bin:$PATH"
+
+USER sdkchat
 
 ENTRYPOINT ["/app/sdk-chat"]
 CMD ["--help"]

@@ -40,7 +40,10 @@ fi
 # Build image if requested or if it doesn't exist
 if [[ "$BUILD_IMAGE" == "true" ]]; then
     echo "Building Docker image: ${IMAGE}..."
-    docker build -f "${REPO_ROOT}/Dockerfile.release" -t "${IMAGE}" "${REPO_ROOT}"
+    docker build \
+        --build-arg USER_ID="$(id -u)" \
+        --build-arg GROUP_ID="$(id -g)" \
+        -f "${REPO_ROOT}/Dockerfile.release" -t "${IMAGE}" "${REPO_ROOT}"
     echo ""
 elif ! docker image inspect "${IMAGE}" &>/dev/null; then
     echo "Docker image '${IMAGE}' not found."

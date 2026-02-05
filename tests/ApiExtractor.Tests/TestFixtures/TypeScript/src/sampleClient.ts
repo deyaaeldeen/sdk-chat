@@ -69,6 +69,9 @@ export interface SampleClientOptions {
 export class SampleClient {
     /** The service endpoint. */
     public readonly endpoint: string;
+
+    /** Subclient for widget operations. */
+    public readonly widgets: WidgetClient;
     
     private readonly options: Required<SampleClientOptions>;
     
@@ -84,6 +87,7 @@ export class SampleClient {
             timeout: options?.timeout ?? 30000,
             apiVersion: options?.apiVersion ?? '2024-01-01'
         };
+        this.widgets = new WidgetClient(this);
     }
     
     /**
@@ -145,6 +149,74 @@ export class SampleClient {
     static fromConnectionString(connectionString: string, options?: SampleClientOptions): SampleClient {
         // Parse connection string
         return new SampleClient('https://example.com', options);
+    }
+}
+
+/**
+ * Subclient for widget operations.
+ */
+export class WidgetClient {
+    private readonly parent: SampleClient;
+
+    constructor(parent: SampleClient) {
+        this.parent = parent;
+    }
+
+    /**
+     * Lists widgets.
+     */
+    listWidgets(): string[] {
+        return [this.parent.endpoint];
+    }
+}
+
+/**
+ * Client with no methods, only subclient properties.
+ */
+export class EmptyClient {
+    public readonly widgets: WidgetClient;
+
+    constructor(endpoint: string) {
+        this.widgets = new WidgetClient(new SampleClient(endpoint));
+    }
+}
+
+/**
+ * Interface for recommendations operations.
+ */
+export interface RecommendationsClient {
+    /**
+     * Lists recommendations.
+     */
+    listRecommendations(): string[];
+}
+
+/**
+ * Implementation for recommendations operations.
+ */
+export class RecommendationsClientImpl implements RecommendationsClient {
+    private readonly parent: SampleClient;
+
+    constructor(parent: SampleClient) {
+        this.parent = parent;
+    }
+
+    /**
+     * Lists recommendations.
+     */
+    listRecommendations(): string[] {
+        return [`${this.parent.endpoint}/recommendations`];
+    }
+}
+
+/**
+ * Client with interface-typed subclient.
+ */
+export class InterfaceClient {
+    public readonly recommendations: RecommendationsClient;
+
+    constructor(endpoint: string) {
+        this.recommendations = new RecommendationsClientImpl(new SampleClient(endpoint));
     }
 }
 

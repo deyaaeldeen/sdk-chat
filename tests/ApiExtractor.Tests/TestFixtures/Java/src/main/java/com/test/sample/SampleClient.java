@@ -16,6 +16,7 @@ public class SampleClient implements AutoCloseable {
     
     private final String endpoint;
     private final SampleClientOptions options;
+    private final WidgetsClient widgetsClient;
     
     /**
      * Creates a new SampleClient instance.
@@ -35,6 +36,7 @@ public class SampleClient implements AutoCloseable {
     public SampleClient(String endpoint, SampleClientOptions options) {
         this.endpoint = endpoint;
         this.options = options;
+        this.widgetsClient = new WidgetsClient(this);
     }
     
     /**
@@ -44,6 +46,15 @@ public class SampleClient implements AutoCloseable {
      */
     public String getEndpoint() {
         return endpoint;
+    }
+
+    /**
+     * Gets the widgets subclient.
+     *
+     * @return The widgets client.
+     */
+    public WidgetsClient getWidgetsClient() {
+        return widgetsClient;
     }
     
     /**
@@ -119,6 +130,21 @@ public class SampleClient implements AutoCloseable {
     @Override
     public void close() {
         // Cleanup resources
+    }
+}
+
+/**
+ * Client with no methods, only subclient properties.
+ */
+class EmptyClient {
+    private final WidgetsClient widgetsClient;
+
+    EmptyClient(String endpoint) {
+        this.widgetsClient = new WidgetsClient(new SampleClient(endpoint));
+    }
+
+    public WidgetsClient getWidgetsClient() {
+        return widgetsClient;
     }
 }
 

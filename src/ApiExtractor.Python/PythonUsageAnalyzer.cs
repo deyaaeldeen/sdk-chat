@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using ApiExtractor.Contracts;
@@ -18,6 +18,10 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         AppContext.BaseDirectory,
         "extract_api.py");
 
+    private static readonly string[] PythonCandidates = { "python3", "python" };
+
+    private ExtractorAvailabilityResult? _availability;
+
     /// <inheritdoc />
     public string Language => "python";
 
@@ -29,13 +33,14 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
 
-        // Find Python
-        var python = FindPython();
-        if (python == null)
-            return new UsageIndex { FileCount = 0 }; // Python not available, return empty
+        var clientClasses = GetClientAndSubclientClasses(apiIndex);
 
         // Get client classes from API - if none, no point analyzing
-        if (!apiIndex.GetClientClasses().Any())
+        if (!clientClasses.Any())
+            return new UsageIndex { FileCount = 0 };
+
+        var availability = GetAvailability();
+        if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
         // Write API index to temp file for the script
@@ -45,28 +50,8 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             var apiJson = apiIndex.ToJson();
             await File.WriteAllTextAsync(tempApiFile, apiJson, ct);
 
-            // Call Python script in --usage mode
-            var psi = new ProcessStartInfo
-            {
-                FileName = python,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            psi.ArgumentList.Add(ScriptPath);
-            psi.ArgumentList.Add("--usage");
-            psi.ArgumentList.Add(tempApiFile);
-            psi.ArgumentList.Add(normalizedPath);
-
-            using var process = Process.Start(psi);
-            if (process == null)
-                return new UsageIndex { FileCount = 0 };
-
-            var output = await process.StandardOutput.ReadToEndAsync(ct);
-            await process.WaitForExitAsync(ct);
-
-            if (process.ExitCode != 0)
+            var output = await AnalyzeUsageAsync(availability, tempApiFile, normalizedPath, ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(output))
                 return new UsageIndex { FileCount = 0 };
 
             // Parse the JSON output
@@ -132,30 +117,183 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         return sb.ToString();
     }
 
-    private static string? FindPython()
+    private ExtractorAvailabilityResult GetAvailability()
     {
-        foreach (var name in new[] { "python3", "python" })
+        return _availability ??= ExtractorAvailability.Check(
+            language: "python",
+            nativeBinaryName: "python_extractor",
+            runtimeToolName: "python",
+            runtimeCandidates: PythonCandidates,
+            nativeValidationArgs: "--help",
+            runtimeValidationArgs: "--version");
+    }
+
+    private static async Task<string?> AnalyzeUsageAsync(
+        ExtractorAvailabilityResult availability,
+        string apiJsonPath,
+        string samplesPath,
+        CancellationToken ct)
+    {
+        if (availability.Mode == ExtractorMode.NativeBinary)
         {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = name,
-                    Arguments = "--version",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var p = Process.Start(psi);
-                p?.WaitForExit(3000);
-                if (p?.ExitCode == 0) return name;
-            }
-            catch { /* Command not found or failed - try next candidate */ }
+            var result = await ProcessSandbox.ExecuteAsync(
+                availability.ExecutablePath!,
+                ["--usage", apiJsonPath, samplesPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            return result.Success ? result.StandardOutput : null;
         }
-        return null;
+
+        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
+            return null;
+
+        var scriptPath = GetScriptPath();
+        var runtimeResult = await ProcessSandbox.ExecuteAsync(
+            availability.ExecutablePath!,
+            [scriptPath, "--usage", apiJsonPath, samplesPath],
+            cancellationToken: ct
+        ).ConfigureAwait(false);
+
+        return runtimeResult.Success ? runtimeResult.StandardOutput : null;
+    }
+
+    private static string GetScriptPath()
+    {
+        if (File.Exists(ScriptPath))
+            return ScriptPath;
+
+        throw new FileNotFoundException(
+            $"Corrupt installation: extract_api.py not found at {ScriptPath}. " +
+            "Reinstall the application to resolve this issue.");
     }
 
     // AOT-safe deserialization using source-generated context
     private static UsageResult? DeserializeResult(string json) =>
         JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.UsageResult);
+
+    private static IReadOnlyList<ClassInfo> GetClientAndSubclientClasses(ApiIndex apiIndex)
+    {
+        var allClasses = apiIndex.GetAllClasses().ToList();
+        var allTypeNames = allClasses
+            .Select(c => c.Name.Split('[')[0])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var references = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cls in allClasses)
+        {
+            var name = cls.Name.Split('[')[0];
+            references[name] = cls.GetReferencedTypes(allTypeNames);
+        }
+
+        var referencedBy = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var refs in references.Values)
+        {
+            foreach (var target in refs)
+            {
+                referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
+            }
+        }
+
+        var operationTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cls in allClasses)
+        {
+            if (cls.Methods?.Any() ?? false)
+            {
+                operationTypes.Add(cls.Name.Split('[')[0]);
+            }
+        }
+
+        var rootClasses = allClasses
+            .Where(cls =>
+            {
+                var name = cls.Name.Split('[')[0];
+                var hasOperations = cls.Methods?.Any() ?? false;
+                var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
+                var isReferenced = referencedBy.ContainsKey(name);
+                return !isReferenced && (hasOperations || referencesOperations);
+            })
+            .ToList();
+
+        if (rootClasses.Count == 0)
+        {
+            rootClasses = allClasses
+                .Where(cls =>
+                {
+                    var name = cls.Name.Split('[')[0];
+                    var hasOperations = cls.Methods?.Any() ?? false;
+                    var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
+                    return hasOperations || referencesOperations;
+                })
+                .ToList();
+        }
+
+        var derivedByBase = new Dictionary<string, List<ClassInfo>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cls in allClasses)
+        {
+            if (string.IsNullOrWhiteSpace(cls.Base))
+            {
+                continue;
+            }
+
+            var baseName = cls.Base.Split('[')[0];
+            if (!derivedByBase.TryGetValue(baseName, out var list))
+            {
+                list = new List<ClassInfo>();
+                derivedByBase[baseName] = list;
+            }
+            list.Add(cls);
+        }
+
+        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>();
+
+        foreach (var root in rootClasses)
+        {
+            var name = root.Name.Split('[')[0];
+            if (reachable.Add(name))
+            {
+                queue.Enqueue(name);
+            }
+        }
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            var cls = allClasses.FirstOrDefault(c => current.Equals(c.Name.Split('[')[0], StringComparison.OrdinalIgnoreCase));
+            if (cls == null)
+            {
+                continue;
+            }
+
+            if (references.TryGetValue(current, out var refs))
+            {
+                foreach (var typeName in refs)
+                {
+                    if (reachable.Add(typeName))
+                    {
+                        queue.Enqueue(typeName);
+                    }
+                }
+            }
+
+            if (derivedByBase.TryGetValue(current, out var derived))
+            {
+                foreach (var child in derived)
+                {
+                    var childName = child.Name.Split('[')[0];
+                    if (reachable.Add(childName))
+                    {
+                        queue.Enqueue(childName);
+                    }
+                }
+            }
+        }
+
+        return allClasses
+            .Where(c => reachable.Contains(c.Name.Split('[')[0]) && (c.Methods?.Any() ?? false))
+            .GroupBy(c => c.Name.Split('[')[0], StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+    }
 }

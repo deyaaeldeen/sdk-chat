@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Text.Json;
 using Xunit;
 
 namespace Microsoft.SdkChat.IntegrationTests;
@@ -163,6 +164,84 @@ public class ReleaseContainerTests
 
         // Coverage may fail if no samples, but should not crash
         Assert.True(exitCode >= 0, $"[{language}] Unexpected exit code. Error: {error}");
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(SupportedLanguages))]
+    public async Task ApiCoverage_DetectsSubclientOperations(string language)
+    {
+        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+
+        var langFlag = ReleaseContainerFixture.GetLanguageFlag(language);
+        var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
+            "package api coverage", language, $"--language {langFlag} --json");
+
+        Assert.True(exitCode == 0, $"[{language}] Exit code {exitCode}. Error: {error}. Output: {output}");
+
+        using var doc = JsonDocument.Parse(output);
+        var root = doc.RootElement;
+
+        Assert.True(root.GetProperty("success").GetBoolean(), $"[{language}] coverage failed: {output}");
+        Assert.True(root.GetProperty("totalOperations").GetInt32() > 0, $"[{language}] Expected operations > 0");
+
+        var expected = language switch
+        {
+            "DotNet" => (Client: "WidgetClient", Operation: "ListWidgetsAsync"),
+            "Python" => (Client: "WidgetClient", Operation: "list_widgets"),
+            "Go" => (Client: "WidgetsClient", Operation: "ListWidgets"),
+            "Java" => (Client: "WidgetsClient", Operation: "listWidgets"),
+            "TypeScript" => (Client: "WidgetClient", Operation: "listWidgets"),
+            _ => (Client: "", Operation: "")
+        };
+
+        var covered = root.GetProperty("coveredOperations");
+        var matched = covered.EnumerateArray().Any(op =>
+            op.GetProperty("clientType").GetString() == expected.Client &&
+            op.GetProperty("operation").GetString() == expected.Operation);
+
+        Assert.True(matched, $"[{language}] Expected covered operation {expected.Client}.{expected.Operation}. Output: {output}");
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(SupportedLanguages))]
+    public async Task ApiCoverage_DetectsInterfaceSubclientOperations(string language)
+    {
+        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+
+        var langFlag = ReleaseContainerFixture.GetLanguageFlag(language);
+        var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
+            "package api coverage", language, $"--language {langFlag} --json");
+
+        Assert.True(exitCode == 0, $"[{language}] Exit code {exitCode}. Error: {error}. Output: {output}");
+
+        using var doc = JsonDocument.Parse(output);
+        var root = doc.RootElement;
+
+        Assert.True(root.GetProperty("success").GetBoolean(), $"[{language}] coverage failed: {output}");
+        Assert.True(root.GetProperty("totalOperations").GetInt32() > 0, $"[{language}] Expected operations > 0");
+
+        var expected = language switch
+        {
+            "DotNet" => (Interface: "IRecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "ListRecommendationsAsync"),
+            "Python" => (Interface: "RecommendationsClientBase", Implementation: "RecommendationsClientImpl", Operation: "list_recommendations"),
+            "Go" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "ListRecommendations"),
+            "Java" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "listRecommendations"),
+            "TypeScript" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "listRecommendations"),
+            _ => (Interface: "", Implementation: "", Operation: "")
+        };
+
+        var covered = root.GetProperty("coveredOperations");
+        var matched = covered.EnumerateArray().Any(op =>
+        {
+            var clientType = op.GetProperty("clientType").GetString();
+            var operation = op.GetProperty("operation").GetString();
+
+            return operation == expected.Operation &&
+                (clientType == expected.Interface || clientType == expected.Implementation);
+        });
+
+        Assert.True(matched,
+            $"[{language}] Expected covered operation {expected.Interface}|{expected.Implementation}.{expected.Operation}. Output: {output}");
     }
 
     #endregion

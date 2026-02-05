@@ -140,6 +140,25 @@ function extractInterfaceMethod(method) {
         result.doc = doc;
     return result;
 }
+function extractInterfaceCallableProperty(prop) {
+    if (!Node.isPropertySignature(prop))
+        return undefined;
+    const typeNode = prop.getTypeNode();
+    if (!typeNode || !Node.isFunctionTypeNode(typeNode))
+        return undefined;
+    const params = typeNode.getParameters().map(formatParameter).join(", ");
+    const ret = typeNode.getReturnType()?.getText();
+    const result = {
+        name: prop.getName(),
+        sig: params,
+    };
+    if (ret && ret !== "void")
+        result.ret = simplifyType(ret);
+    const doc = getDocString(prop);
+    if (doc)
+        result.doc = doc;
+    return result;
+}
 function extractInterfaceProperty(prop) {
     if (!Node.isPropertySignature(prop))
         return undefined;
@@ -172,19 +191,26 @@ function extractInterface(iface) {
     if (doc)
         result.doc = doc;
     // Methods
-    const methods = iface
+    const methods = [];
+    methods.push(...iface
         .getMethods()
         .filter((m) => !m.getName().startsWith("_"))
         .map((m) => extractInterfaceMethod(m))
-        .filter((m) => m !== undefined);
+        .filter((m) => m !== undefined));
+    // Properties
+    const props = [];
+    for (const prop of iface.getProperties().filter((p) => !p.getName().startsWith("_"))) {
+        const callable = extractInterfaceCallableProperty(prop);
+        if (callable) {
+            methods.push(callable);
+            continue;
+        }
+        const extracted = extractInterfaceProperty(prop);
+        if (extracted)
+            props.push(extracted);
+    }
     if (methods.length)
         result.methods = methods;
-    // Properties
-    const props = iface
-        .getProperties()
-        .filter((p) => !p.getName().startsWith("_"))
-        .map((p) => extractInterfaceProperty(p))
-        .filter((p) => p !== undefined);
     if (props.length)
         result.properties = props;
     return result;
@@ -490,18 +516,130 @@ Examples:
     }
 }
 function analyzeUsage(samplesPath, api) {
-    // Build map of client methods from API
-    const clientMethods = new Map();
+    const allClasses = [];
+    const allInterfaces = [];
+    const allTypeNames = new Set();
+    const interfaceNames = new Set();
     for (const mod of api.modules) {
         for (const cls of mod.classes || []) {
-            if (cls.name.endsWith("Client") || cls.name.endsWith("Service") || cls.name.endsWith("Manager")) {
-                const methods = new Set();
-                for (const method of cls.methods || []) {
-                    methods.add(method.name);
+            allClasses.push(cls);
+            allTypeNames.add(cls.name.split("<")[0]);
+        }
+        for (const iface of mod.interfaces || []) {
+            allInterfaces.push(iface);
+            interfaceNames.add(iface.name.split("<")[0]);
+            allTypeNames.add(iface.name.split("<")[0]);
+        }
+    }
+    const interfaceImplementers = new Map();
+    for (const cls of allClasses) {
+        for (const iface of cls.implements || []) {
+            const ifaceName = iface.split("<")[0];
+            const list = interfaceImplementers.get(ifaceName) || [];
+            list.push(cls);
+            interfaceImplementers.set(ifaceName, list);
+        }
+    }
+    const interfacesByName = new Map();
+    for (const iface of allInterfaces) {
+        const name = iface.name.split("<")[0];
+        if (!interfacesByName.has(name)) {
+            interfacesByName.set(name, iface);
+        }
+    }
+    const references = new Map();
+    for (const cls of allClasses) {
+        references.set(cls.name.split("<")[0], getReferencedTypes(cls, allTypeNames));
+    }
+    for (const iface of allInterfaces) {
+        references.set(iface.name.split("<")[0], getReferencedTypesForInterface(iface, allTypeNames));
+    }
+    const referencedBy = new Map();
+    for (const refs of references.values()) {
+        for (const target of refs) {
+            referencedBy.set(target, (referencedBy.get(target) ?? 0) + 1);
+        }
+    }
+    const operationTypes = new Set();
+    for (const cls of allClasses) {
+        if ((cls.methods?.length ?? 0) > 0) {
+            operationTypes.add(cls.name.split("<")[0]);
+        }
+    }
+    for (const iface of allInterfaces) {
+        if ((iface.methods?.length ?? 0) > 0) {
+            operationTypes.add(iface.name.split("<")[0]);
+        }
+    }
+    let rootClasses = allClasses.filter((cls) => {
+        const name = cls.name.split("<")[0];
+        const hasOperations = (cls.methods?.length ?? 0) > 0;
+        const refs = references.get(name);
+        const referencesOperations = refs ? Array.from(refs).some((r) => operationTypes.has(r)) : false;
+        return !referencedBy.has(name) && (hasOperations || referencesOperations);
+    });
+    if (rootClasses.length === 0) {
+        rootClasses = allClasses.filter((cls) => {
+            const name = cls.name.split("<")[0];
+            const hasOperations = (cls.methods?.length ?? 0) > 0;
+            const refs = references.get(name);
+            const referencesOperations = refs ? Array.from(refs).some((r) => operationTypes.has(r)) : false;
+            return hasOperations || referencesOperations;
+        });
+    }
+    const reachable = new Set();
+    const queue = [];
+    for (const cls of rootClasses) {
+        const name = cls.name.split("<")[0];
+        if (!reachable.has(name)) {
+            reachable.add(name);
+            queue.push(name);
+        }
+    }
+    while (queue.length > 0) {
+        const current = queue.shift();
+        const refs = references.get(current);
+        if (refs) {
+            for (const ref of refs) {
+                if (!reachable.has(ref)) {
+                    reachable.add(ref);
+                    queue.push(ref);
                 }
-                if (methods.size > 0) {
-                    clientMethods.set(cls.name, methods);
+            }
+        }
+        if (interfaceNames.has(current)) {
+            for (const impl of interfaceImplementers.get(current) || []) {
+                const implName = impl.name.split("<")[0];
+                if (!reachable.has(implName)) {
+                    reachable.add(implName);
+                    queue.push(implName);
                 }
+            }
+        }
+    }
+    const usageClasses = allClasses.filter((cls) => reachable.has(cls.name.split("<")[0]) && (cls.methods?.length ?? 0) > 0);
+    const usageInterfaces = allInterfaces.filter((iface) => reachable.has(iface.name.split("<")[0]) && (iface.methods?.length ?? 0) > 0);
+    // Build map of client methods from API
+    const clientMethods = new Map();
+    for (const cls of usageClasses) {
+        const methods = new Set();
+        for (const method of cls.methods || []) {
+            methods.add(method.name);
+        }
+        if (methods.size > 0) {
+            if (!clientMethods.has(cls.name)) {
+                clientMethods.set(cls.name, methods);
+            }
+        }
+    }
+    for (const iface of usageInterfaces) {
+        const methods = new Set();
+        for (const method of iface.methods || []) {
+            methods.add(method.name);
+        }
+        if (methods.size > 0) {
+            if (!clientMethods.has(iface.name)) {
+                clientMethods.set(iface.name, methods);
             }
         }
     }
@@ -578,6 +716,63 @@ function analyzeUsage(samplesPath, api) {
         uncovered,
         patterns: Array.from(patterns).sort(),
     };
+}
+function getReferencedTypes(cls, allTypeNames) {
+    const refs = new Set();
+    if (cls.extends) {
+        const baseName = cls.extends.split("<")[0];
+        if (allTypeNames.has(baseName)) {
+            refs.add(baseName);
+        }
+    }
+    for (const iface of cls.implements || []) {
+        const ifaceName = iface.split("<")[0];
+        if (allTypeNames.has(ifaceName)) {
+            refs.add(ifaceName);
+        }
+    }
+    for (const method of cls.methods || []) {
+        for (const typeName of allTypeNames) {
+            if (method.sig.includes(typeName) || ((method.ret?.includes(typeName)) ?? false)) {
+                refs.add(typeName);
+            }
+        }
+    }
+    for (const prop of cls.properties || []) {
+        for (const typeName of allTypeNames) {
+            if (prop.type.includes(typeName)) {
+                refs.add(typeName);
+            }
+        }
+    }
+    return refs;
+}
+function getReferencedTypesForInterface(iface, allTypeNames) {
+    const refs = new Set();
+    if (iface.extends) {
+        const bases = iface.extends.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+        for (const entry of bases) {
+            const baseName = entry.split("<")[0];
+            if (allTypeNames.has(baseName)) {
+                refs.add(baseName);
+            }
+        }
+    }
+    for (const method of iface.methods || []) {
+        for (const typeName of allTypeNames) {
+            if (method.sig.includes(typeName) || ((method.ret?.includes(typeName)) ?? false)) {
+                refs.add(typeName);
+            }
+        }
+    }
+    for (const prop of iface.properties || []) {
+        for (const typeName of allTypeNames) {
+            if (prop.type.includes(typeName)) {
+                refs.add(typeName);
+            }
+        }
+    }
+    return refs;
 }
 function detectPatterns(sourceFile, patterns) {
     const text = sourceFile.getFullText().toLowerCase();

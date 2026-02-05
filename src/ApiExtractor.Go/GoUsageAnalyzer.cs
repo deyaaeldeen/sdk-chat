@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using ApiExtractor.Contracts;
@@ -14,6 +13,10 @@ namespace ApiExtractor.Go;
 /// </summary>
 public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 {
+    private static readonly string[] GoCandidates = { "go", "/usr/local/go/bin/go", "/opt/go/bin/go" };
+
+    private ExtractorAvailabilityResult? _availability;
+
     /// <inheritdoc />
     public string Language => "go";
 
@@ -25,12 +28,11 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
 
-        // Check if Go is available
-        if (!IsGoAvailable())
+        if (!HasReachableOperations(apiIndex))
             return new UsageIndex { FileCount = 0 };
 
-        // Get client structs from API - if none, no point analyzing
-        if (!apiIndex.GetClientStructs().Any())
+        var availability = GetAvailability();
+        if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
         // Write API index to temp file for the script
@@ -40,34 +42,8 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             var apiJson = JsonSerializer.Serialize(apiIndex, SourceGenerationContext.Default.ApiIndex);
             await File.WriteAllTextAsync(tempApiFile, apiJson, ct);
 
-            // Get script path
-            var scriptDir = GetScriptDir();
-            var scriptPath = Path.Combine(scriptDir, "extract_api.go");
-
-            // Call Go script in -usage mode
-            var psi = new ProcessStartInfo
-            {
-                FileName = "go",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = scriptDir
-            };
-            psi.ArgumentList.Add("run");
-            psi.ArgumentList.Add(scriptPath);
-            psi.ArgumentList.Add("-usage");
-            psi.ArgumentList.Add(tempApiFile);
-            psi.ArgumentList.Add(normalizedPath);
-
-            using var process = Process.Start(psi);
-            if (process == null)
-                return new UsageIndex { FileCount = 0 };
-
-            var output = await process.StandardOutput.ReadToEndAsync(ct);
-            await process.WaitForExitAsync(ct);
-
-            if (process.ExitCode != 0)
+            var output = await AnalyzeUsageAsync(availability, tempApiFile, normalizedPath, ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(output))
                 return new UsageIndex { FileCount = 0 };
 
             // Parse the JSON output
@@ -133,31 +109,235 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         return sb.ToString();
     }
 
-    private static bool IsGoAvailable()
+    private ExtractorAvailabilityResult GetAvailability()
     {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "go",
-                Arguments = "version",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var p = Process.Start(psi);
-            p?.WaitForExit(3000);
-            return p?.ExitCode == 0;
-        }
-        catch { return false; }
+        return _availability ??= ExtractorAvailability.Check(
+            language: "go",
+            nativeBinaryName: "go_extractor",
+            runtimeToolName: "go",
+            runtimeCandidates: GoCandidates,
+            nativeValidationArgs: "--help",
+            runtimeValidationArgs: "version");
     }
 
-    private static string GetScriptDir()
+    private static string GetScriptDir() => AppContext.BaseDirectory;
+
+    private static async Task<string?> AnalyzeUsageAsync(
+        ExtractorAvailabilityResult availability,
+        string apiJsonPath,
+        string samplesPath,
+        CancellationToken ct)
     {
-        return AppContext.BaseDirectory;
+        if (availability.Mode == ExtractorMode.NativeBinary)
+        {
+            var result = await ProcessSandbox.ExecuteAsync(
+                availability.ExecutablePath!,
+                ["-usage", apiJsonPath, samplesPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            return result.Success ? result.StandardOutput : null;
+        }
+
+        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
+            return null;
+
+        var scriptDir = GetScriptDir();
+        var scriptPath = Path.Combine(scriptDir, "extract_api.go");
+
+        var runtimeResult = await ProcessSandbox.ExecuteAsync(
+            availability.ExecutablePath!,
+            ["run", scriptPath, "-usage", apiJsonPath, samplesPath],
+            workingDirectory: scriptDir,
+            cancellationToken: ct
+        ).ConfigureAwait(false);
+
+        return runtimeResult.Success ? runtimeResult.StandardOutput : null;
     }
 
     // AOT-safe deserialization using source-generated context
     private static UsageResult? DeserializeResult(string json) =>
         JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.UsageResult);
+
+    private static bool HasReachableOperations(ApiIndex apiIndex)
+    {
+        var reachable = GetReachableTypeNames(apiIndex, out var allStructs, out var allInterfaces);
+
+        if (allStructs.Any(s => reachable.Contains(s.Name) && (s.Methods?.Any() ?? false)))
+        {
+            return true;
+        }
+
+        return allInterfaces.Any(i => reachable.Contains(i.Name) && (i.Methods?.Any() ?? false));
+    }
+
+    private static HashSet<string> GetReachableTypeNames(
+        ApiIndex apiIndex,
+        out List<StructApi> allStructs,
+        out List<IfaceApi> allInterfaces)
+    {
+        allStructs = apiIndex.GetAllStructs().ToList();
+        allInterfaces = apiIndex.Packages
+            .SelectMany(p => p.Interfaces ?? [])
+            .ToList();
+
+        var allTypeNames = allStructs
+            .Select(s => s.Name)
+            .Concat(allInterfaces.Select(i => i.Name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var interfaceMethods = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var iface in allInterfaces)
+        {
+            var methods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var method in iface.Methods ?? [])
+            {
+                methods.Add(method.Name);
+            }
+
+            if (methods.Count > 0)
+            {
+                interfaceMethods[iface.Name] = methods;
+            }
+        }
+
+        var interfaceImplementers = new Dictionary<string, List<StructApi>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var iface in interfaceMethods)
+        {
+            foreach (var strct in allStructs)
+            {
+                var structMethods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var method in strct.Methods ?? [])
+                {
+                    structMethods.Add(method.Name);
+                }
+
+                if (iface.Value.All(structMethods.Contains))
+                {
+                    if (!interfaceImplementers.TryGetValue(iface.Key, out var list))
+                    {
+                        list = new List<StructApi>();
+                        interfaceImplementers[iface.Key] = list;
+                    }
+                    list.Add(strct);
+                }
+            }
+        }
+
+        var references = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var strct in allStructs)
+        {
+            references[strct.Name] = strct.GetReferencedTypes(allTypeNames);
+        }
+
+        foreach (var iface in allInterfaces)
+        {
+            references[iface.Name] = GetReferencedTypes(iface, allTypeNames);
+        }
+
+        var referencedBy = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var refs in references.Values)
+        {
+            foreach (var target in refs)
+            {
+                referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
+            }
+        }
+
+        var operationTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var strct in allStructs)
+        {
+            if (strct.Methods?.Any() ?? false)
+            {
+                operationTypes.Add(strct.Name);
+            }
+        }
+
+        foreach (var iface in allInterfaces)
+        {
+            if (iface.Methods?.Any() ?? false)
+            {
+                operationTypes.Add(iface.Name);
+            }
+        }
+
+        var rootStructs = allStructs
+            .Where(strct =>
+            {
+                var hasOperations = strct.Methods?.Any() ?? false;
+                var referencesOperations = references.TryGetValue(strct.Name, out var refs) && refs.Any(operationTypes.Contains);
+                var isReferenced = referencedBy.ContainsKey(strct.Name);
+                return !isReferenced && (hasOperations || referencesOperations);
+            })
+            .ToList();
+
+        if (rootStructs.Count == 0)
+        {
+            rootStructs = allStructs
+                .Where(strct =>
+                {
+                    var hasOperations = strct.Methods?.Any() ?? false;
+                    var referencesOperations = references.TryGetValue(strct.Name, out var refs) && refs.Any(operationTypes.Contains);
+                    return hasOperations || referencesOperations;
+                })
+                .ToList();
+        }
+
+        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>();
+
+        foreach (var root in rootStructs)
+        {
+            if (reachable.Add(root.Name))
+            {
+                queue.Enqueue(root.Name);
+            }
+        }
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (references.TryGetValue(current, out var refs))
+            {
+                foreach (var typeName in refs)
+                {
+                    if (reachable.Add(typeName))
+                    {
+                        queue.Enqueue(typeName);
+                    }
+                }
+            }
+
+            if (interfaceImplementers.TryGetValue(current, out var implementers))
+            {
+                foreach (var impl in implementers)
+                {
+                    if (reachable.Add(impl.Name))
+                    {
+                        queue.Enqueue(impl.Name);
+                    }
+                }
+            }
+        }
+
+        return reachable;
+    }
+
+    private static HashSet<string> GetReferencedTypes(IfaceApi iface, HashSet<string> allTypeNames)
+    {
+        var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var method in iface.Methods ?? [])
+        {
+            foreach (var typeName in allTypeNames)
+            {
+                if (method.Sig.Contains(typeName) || (method.Ret?.Contains(typeName) ?? false))
+                {
+                    refs.Add(typeName);
+                }
+            }
+        }
+
+        return refs;
+    }
 }

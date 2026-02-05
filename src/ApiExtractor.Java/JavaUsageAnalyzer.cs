@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using ApiExtractor.Contracts;
@@ -14,6 +13,10 @@ namespace ApiExtractor.Java;
 /// </summary>
 public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 {
+    private static readonly string[] JBangCandidates = { "jbang" };
+
+    private ExtractorAvailabilityResult? _availability;
+
     /// <inheritdoc />
     public string Language => "java";
 
@@ -25,12 +28,14 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
 
-        // Check if JBang is available
-        if (!IsJBangAvailable())
-            return new UsageIndex { FileCount = 0 };
+        var clientClasses = GetClientAndSubclientClasses(apiIndex);
 
         // Get client classes from API - if none, no point analyzing
-        if (!apiIndex.GetClientClasses().Any())
+        if (!clientClasses.Any())
+            return new UsageIndex { FileCount = 0 };
+
+        var availability = GetAvailability();
+        if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
         // Write API index to temp file for the script
@@ -40,33 +45,8 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             var apiJson = JsonSerializer.Serialize(apiIndex, SourceGenerationContext.Default.ApiIndex);
             await File.WriteAllTextAsync(tempApiFile, apiJson, ct);
 
-            // Get script path
-            var scriptDir = GetScriptDir();
-            var scriptPath = Path.Combine(scriptDir, "ExtractApi.java");
-
-            // Call JBang script in --usage mode
-            var psi = new ProcessStartInfo
-            {
-                FileName = "jbang",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = scriptDir
-            };
-            psi.ArgumentList.Add(scriptPath);
-            psi.ArgumentList.Add("--usage");
-            psi.ArgumentList.Add(tempApiFile);
-            psi.ArgumentList.Add(normalizedPath);
-
-            using var process = Process.Start(psi);
-            if (process == null)
-                return new UsageIndex { FileCount = 0 };
-
-            var output = await process.StandardOutput.ReadToEndAsync(ct);
-            await process.WaitForExitAsync(ct);
-
-            if (process.ExitCode != 0)
+            var output = await AnalyzeUsageAsync(availability, tempApiFile, normalizedPath, ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(output))
                 return new UsageIndex { FileCount = 0 };
 
             // Parse the JSON output
@@ -132,31 +112,186 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         return sb.ToString();
     }
 
-    private static bool IsJBangAvailable()
+    private ExtractorAvailabilityResult GetAvailability()
     {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "jbang",
-                Arguments = "--version",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var p = Process.Start(psi);
-            p?.WaitForExit(5000);
-            return p?.ExitCode == 0;
-        }
-        catch { return false; }
+        return _availability ??= ExtractorAvailability.Check(
+            language: "java",
+            nativeBinaryName: "java_extractor",
+            runtimeToolName: "jbang",
+            runtimeCandidates: JBangCandidates,
+            nativeValidationArgs: "--help",
+            runtimeValidationArgs: "--version");
     }
 
-    private static string GetScriptDir()
+    private static string GetScriptDir() => AppContext.BaseDirectory;
+
+    private static async Task<string?> AnalyzeUsageAsync(
+        ExtractorAvailabilityResult availability,
+        string apiJsonPath,
+        string samplesPath,
+        CancellationToken ct)
     {
-        return AppContext.BaseDirectory;
+        if (availability.Mode == ExtractorMode.NativeBinary)
+        {
+            var result = await ProcessSandbox.ExecuteAsync(
+                availability.ExecutablePath!,
+                ["--usage", apiJsonPath, samplesPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            return result.Success ? result.StandardOutput : null;
+        }
+
+        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
+            return null;
+
+        var scriptDir = GetScriptDir();
+        var scriptPath = Path.Combine(scriptDir, "ExtractApi.java");
+
+        var runtimeResult = await ProcessSandbox.ExecuteAsync(
+            availability.ExecutablePath!,
+            [scriptPath, "--usage", apiJsonPath, samplesPath],
+            workingDirectory: scriptDir,
+            cancellationToken: ct
+        ).ConfigureAwait(false);
+
+        return runtimeResult.Success ? runtimeResult.StandardOutput : null;
     }
 
     // AOT-safe deserialization using source-generated context
     private static UsageResult? DeserializeResult(string json) =>
         JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.UsageResult);
+
+    private static IReadOnlyList<ClassInfo> GetClientAndSubclientClasses(ApiIndex apiIndex)
+    {
+        var concreteClasses = apiIndex.Packages
+            .SelectMany(p => p.Classes ?? [])
+            .ToList();
+
+        var allInterfaces = apiIndex.Packages
+            .SelectMany(p => p.Interfaces ?? [])
+            .ToList();
+
+        var allClasses = concreteClasses
+            .Concat(allInterfaces)
+            .ToList();
+
+        var allTypeNames = allClasses
+            .Select(c => c.Name.Split('<')[0])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var interfaceNames = apiIndex.Packages
+            .SelectMany(p => p.Interfaces ?? [])
+            .Select(i => i.Name.Split('<')[0])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var interfaceImplementers = new Dictionary<string, List<ClassInfo>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cls in allClasses)
+        {
+            foreach (var iface in cls.Implements ?? [])
+            {
+                var ifaceName = iface.Split('<')[0];
+                if (!interfaceImplementers.TryGetValue(ifaceName, out var list))
+                {
+                    list = new List<ClassInfo>();
+                    interfaceImplementers[ifaceName] = list;
+                }
+                list.Add(cls);
+            }
+        }
+
+        var references = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cls in allClasses)
+        {
+            var name = cls.Name.Split('<')[0];
+            references[name] = cls.GetReferencedTypes(allTypeNames);
+        }
+
+        var referencedBy = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var refs in references.Values)
+        {
+            foreach (var target in refs)
+            {
+                referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
+            }
+        }
+
+        var operationTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cls in allClasses)
+        {
+            if (cls.Methods?.Any() ?? false)
+            {
+                operationTypes.Add(cls.Name.Split('<')[0]);
+            }
+        }
+
+        var rootClasses = concreteClasses
+            .Where(cls =>
+            {
+                var name = cls.Name.Split('<')[0];
+                var hasOperations = cls.Methods?.Any() ?? false;
+                var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
+                var isReferenced = referencedBy.ContainsKey(name);
+                return !isReferenced && (hasOperations || referencesOperations);
+            })
+            .ToList();
+
+        if (rootClasses.Count == 0)
+        {
+            rootClasses = concreteClasses
+                .Where(cls =>
+                {
+                    var name = cls.Name.Split('<')[0];
+                    var hasOperations = cls.Methods?.Any() ?? false;
+                    var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
+                    return hasOperations || referencesOperations;
+                })
+                .ToList();
+        }
+
+        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>();
+
+        foreach (var client in rootClasses)
+        {
+            var name = client.Name.Split('<')[0];
+            if (reachable.Add(name))
+            {
+                queue.Enqueue(name);
+            }
+        }
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (references.TryGetValue(current, out var refs))
+            {
+                foreach (var typeName in refs)
+                {
+                    if (reachable.Add(typeName))
+                    {
+                        queue.Enqueue(typeName);
+                    }
+                }
+            }
+
+            if (interfaceNames.Contains(current) && interfaceImplementers.TryGetValue(current, out var implementers))
+            {
+                foreach (var impl in implementers)
+                {
+                    var implName = impl.Name.Split('<')[0];
+                    if (reachable.Add(implName))
+                    {
+                        queue.Enqueue(implName);
+                    }
+                }
+            }
+        }
+
+        return allClasses
+            .Where(c => reachable.Contains(c.Name.Split('<')[0]) && (c.Methods?.Any() ?? false))
+            .GroupBy(c => c.Name.Split('<')[0], StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+    }
 }

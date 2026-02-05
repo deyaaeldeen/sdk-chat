@@ -196,6 +196,10 @@ dotnet test --filter "DisplayName~streaming"
 
 # Run from host (uses container)
 docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet test
+
+# Integration tests (run on host, not inside dev container)
+# These tests invoke the release container themselves.
+dotnet test tests/Microsoft.SdkChat.IntegrationTests --filter "Category=Integration"
 ```
 
 ## Do Not

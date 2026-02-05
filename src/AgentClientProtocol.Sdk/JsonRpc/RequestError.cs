@@ -55,11 +55,11 @@ public class RequestError : Exception
 
     [StackTraceHidden]
     public static RequestError SessionNotFound(string? sessionId = null) =>
-        new(-32001, $"Session not found{(sessionId != null ? $": {sessionId}" : "")}", sessionId != null ? new { sessionId } : null);
+        new(-32001, $"Session not found{(sessionId != null ? $": {sessionId}" : "")}", sessionId != null ? new Dictionary<string, object?> { ["sessionId"] = sessionId } : null);
 
     [StackTraceHidden]
     public static RequestError ResourceNotFound(string? uri = null) =>
-        new(-32002, $"Resource not found{(uri != null ? $": {uri}" : "")}", uri != null ? new { uri } : null);
+        new(-32002, $"Resource not found{(uri != null ? $": {uri}" : "")}", uri != null ? new Dictionary<string, object?> { ["uri"] = uri } : null);
 
     [StackTraceHidden]
     public static RequestError PermissionDenied(object? data = null, string? additional = null) =>
@@ -67,7 +67,7 @@ public class RequestError : Exception
 
     [StackTraceHidden]
     public static RequestError TerminalNotFound(string? terminalId = null) =>
-        new(-32004, $"Terminal not found{(terminalId != null ? $": {terminalId}" : "")}", terminalId != null ? new { terminalId } : null);
+        new(-32004, $"Terminal not found{(terminalId != null ? $": {terminalId}" : "")}", terminalId != null ? new Dictionary<string, object?> { ["terminalId"] = terminalId } : null);
 
     [StackTraceHidden]
     public static RequestError Cancelled() =>

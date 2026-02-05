@@ -139,6 +139,9 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(SessionMode[]))]
 [JsonSerializable(typeof(string[]))]
 
+// Dictionary types for error data
+[JsonSerializable(typeof(Dictionary<string, object?>))]
+
 public partial class AcpJsonContext : JsonSerializerContext
 {
     private static System.Text.Json.JsonSerializerOptions? _flexibleOptions;

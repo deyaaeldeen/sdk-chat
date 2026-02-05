@@ -44,7 +44,7 @@ public class UsageAnalyzerTests
         var (tempDir, _) = await SetupTestFilesAsync(
             ("sample.cs", """
                 using TestSdk;
-                
+
                 var client = new ChatClient();
                 var result = await client.GetCompletionAsync("Hello");
                 Console.WriteLine(result);
@@ -78,7 +78,7 @@ public class UsageAnalyzerTests
                 var chatClient = new ChatClient();
                 var completion = await chatClient.GetCompletionAsync("Hi");
                 var stream = chatClient.GetStreamingCompletionAsync("Hi");
-                
+
                 var embedClient = new EmbeddingClient();
                 var embeddings = await embedClient.GetEmbeddingsAsync(["text"]);
                 """));
@@ -132,6 +132,33 @@ public class UsageAnalyzerTests
             // EmbeddingClient.GetEmbeddingsAsync should also be uncovered
             Assert.Contains(result.UncoveredOperations,
                 o => o.ClientType == "EmbeddingClient" && o.Operation == "GetEmbeddingsAsync");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_DetectsSubclientMethodCall()
+    {
+        // Arrange
+        var (tempDir, _) = await SetupTestFilesAsync(
+            ("sample.cs", """
+                var client = new EmptyClient();
+                await client.Widgets.ListWidgetsAsync();
+                """));
+
+        try
+        {
+            var apiIndex = CreateTestApiIndex();
+
+            // Act
+            var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
+
+            // Assert
+            Assert.Contains(result.CoveredOperations,
+                o => o.ClientType == "WidgetClient" && o.Operation == "ListWidgetsAsync");
         }
         finally
         {
@@ -277,7 +304,26 @@ public class UsageAnalyzerTests
                         Members =
                         [
                             new MemberInfo { Name = "GetCompletionAsync", Kind = "method", Signature = "Task<string> GetCompletionAsync(string prompt)" },
-                            new MemberInfo { Name = "GetStreamingCompletionAsync", Kind = "method", Signature = "IAsyncEnumerable<string> GetStreamingCompletionAsync(string prompt)" }
+                            new MemberInfo { Name = "GetStreamingCompletionAsync", Kind = "method", Signature = "IAsyncEnumerable<string> GetStreamingCompletionAsync(string prompt)" },
+                            new MemberInfo { Name = "Widgets", Kind = "property", Signature = "WidgetClient Widgets { get; }" }
+                        ]
+                    },
+                    new TypeInfo
+                    {
+                        Name = "EmptyClient",
+                        Kind = "class",
+                        Members =
+                        [
+                            new MemberInfo { Name = "Widgets", Kind = "property", Signature = "WidgetClient Widgets { get; }" }
+                        ]
+                    },
+                    new TypeInfo
+                    {
+                        Name = "WidgetClient",
+                        Kind = "class",
+                        Members =
+                        [
+                            new MemberInfo { Name = "ListWidgetsAsync", Kind = "method", Signature = "Task<IReadOnlyList<string>> ListWidgetsAsync()" }
                         ]
                     },
                     new TypeInfo

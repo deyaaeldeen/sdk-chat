@@ -55,6 +55,7 @@ type SampleClientOptions struct {
 type SampleClient struct {
 	endpoint string
 	options  SampleClientOptions
+	Widgets  *WidgetsClient
 }
 
 // NewSampleClient creates a new SampleClient instance.
@@ -77,10 +78,12 @@ func NewSampleClient(endpoint string, options *SampleClientOptions) (*SampleClie
 			opts.APIVersion = options.APIVersion
 		}
 	}
-	return &SampleClient{
+	client := &SampleClient{
 		endpoint: endpoint,
 		options:  opts,
-	}, nil
+	}
+	client.Widgets = &WidgetsClient{parent: client}
+	return client, nil
 }
 
 // Endpoint returns the service endpoint.
@@ -142,6 +145,54 @@ func (c *SampleClient) UpdateResource(ctx context.Context, resourceID string, re
 // Close releases any resources held by the client.
 func (c *SampleClient) Close() error {
 	return nil
+}
+
+// WidgetsClient provides widget operations.
+type WidgetsClient struct {
+	parent *SampleClient
+}
+
+// ListWidgets lists widgets.
+func (w *WidgetsClient) ListWidgets(ctx context.Context) ([]string, error) {
+	return []string{w.parent.endpoint}, nil
+}
+
+// EmptyClient has no methods, only a subclient field.
+type EmptyClient struct {
+	Widgets *WidgetsClient
+}
+
+// NewEmptyClient creates a new EmptyClient.
+func NewEmptyClient(endpoint string) *EmptyClient {
+	parent, _ := NewSampleClient(endpoint, nil)
+	return &EmptyClient{Widgets: &WidgetsClient{parent: parent}}
+}
+
+// RecommendationsClient defines the interface for recommendations operations.
+type RecommendationsClient interface {
+	// ListRecommendations lists recommendations.
+	ListRecommendations(ctx context.Context) ([]string, error)
+}
+
+// RecommendationsClientImpl is the implementation of RecommendationsClient.
+type RecommendationsClientImpl struct {
+	parent *SampleClient
+}
+
+// ListRecommendations lists recommendations.
+func (r *RecommendationsClientImpl) ListRecommendations(ctx context.Context) ([]string, error) {
+	return []string{r.parent.endpoint + "/recommendations"}, nil
+}
+
+// InterfaceClient has an interface-typed subclient.
+type InterfaceClient struct {
+	Recommendations RecommendationsClient
+}
+
+// NewInterfaceClient creates a new InterfaceClient.
+func NewInterfaceClient(endpoint string) *InterfaceClient {
+	parent, _ := NewSampleClient(endpoint, nil)
+	return &InterfaceClient{Recommendations: &RecommendationsClientImpl{parent: parent}}
 }
 
 // ResourceOperations defines the interface for resource operations.

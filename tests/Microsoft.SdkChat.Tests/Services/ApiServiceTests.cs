@@ -208,4 +208,226 @@ class Sample
     }
 
     #endregion
+
+    #region AnalyzeCoverageMonorepoAsync Tests
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_NonExistentPath_ReturnsError()
+    {
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(
+            Path.Combine(TestRoot, "nonexistent"), null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("ROOT_NOT_FOUND", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_NoSdkFolder_ReturnsError()
+    {
+        // Arrange - Empty directory with no sdk/ folder
+        File.WriteAllText(Path.Combine(TestRoot, "readme.txt"), "empty");
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("NO_PACKAGES_FOUND", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_TypeScriptPackages_FindsPackages()
+    {
+        // Arrange - TypeScript monorepo structure
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "storage-blob");
+        var pkg2 = Path.Combine(TestRoot, "sdk", "keyvault", "keyvault-secrets");
+        Directory.CreateDirectory(Path.Combine(pkg1, "src"));
+        Directory.CreateDirectory(Path.Combine(pkg2, "src"));
+
+        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), "export class BlobClient {}");
+
+        File.WriteAllText(Path.Combine(pkg2, "package.json"), "{\"name\": \"@azure/keyvault-secrets\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg2, "src", "index.ts"), "export class SecretClient {}");
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}, ErrorMessage={result.ErrorMessage}");
+        Assert.Equal(TestRoot, result.RootPath);
+        Assert.Equal(2, result.TotalPackages);
+        // Both will be skipped (no samples)
+        Assert.Equal(2, result.SkippedPackages);
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_DotNetPackages_FindsPackages()
+    {
+        // Arrange - .NET monorepo structure
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "Azure.Storage.Blobs");
+        var pkg1Src = Path.Combine(pkg1, "src");
+        Directory.CreateDirectory(pkg1Src);
+
+        File.WriteAllText(Path.Combine(pkg1Src, "Azure.Storage.Blobs.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(pkg1Src, "BlobClient.cs"), "public class BlobClient {}");
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalPackages);
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_PythonPackages_FindsPackages()
+    {
+        // Arrange - Python monorepo structure
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "azure-storage-blob");
+        Directory.CreateDirectory(Path.Combine(pkg1, "azure", "storage", "blob"));
+
+        File.WriteAllText(Path.Combine(pkg1, "pyproject.toml"), "[project]\nname = \"azure-storage-blob\"");
+        File.WriteAllText(Path.Combine(pkg1, "azure", "storage", "blob", "__init__.py"), "");
+        File.WriteAllText(Path.Combine(pkg1, "azure", "storage", "blob", "_blob_client.py"), "class BlobClient: pass");
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalPackages);
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_GoPackages_FindsPackages()
+    {
+        // Arrange - Go monorepo structure
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "azblob");
+        Directory.CreateDirectory(pkg1);
+
+        File.WriteAllText(Path.Combine(pkg1, "go.mod"), "module github.com/Azure/azure-sdk-for-go/sdk/storage/azblob");
+        File.WriteAllText(Path.Combine(pkg1, "client.go"), "package azblob\n\ntype Client struct {}");
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalPackages);
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_JavaPackages_FindsPackages()
+    {
+        // Arrange - Java Maven monorepo structure
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "azure-storage-blob");
+        var pkg1Src = Path.Combine(pkg1, "src", "main", "java", "com", "azure", "storage", "blob");
+        Directory.CreateDirectory(pkg1Src);
+
+        File.WriteAllText(Path.Combine(pkg1, "pom.xml"), "<project></project>");
+        File.WriteAllText(Path.Combine(pkg1Src, "BlobClient.java"), "package com.azure.storage.blob;\npublic class BlobClient {}");
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalPackages);
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_WithProgress_ReportsProgress()
+    {
+        // Arrange
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "storage-blob");
+        Directory.CreateDirectory(Path.Combine(pkg1, "src"));
+        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), "export class Client {}");
+
+        var progressMessages = new List<string>();
+        var progress = new Progress<string>(msg => progressMessages.Add(msg));
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, progress, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}");
+        Assert.NotEmpty(progressMessages);
+        Assert.Contains(progressMessages, m => m.Contains("Found"));
+        Assert.Contains(progressMessages, m => m.Contains("[1/1]"));
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_SkipsNodeModules()
+    {
+        // Arrange - Package with node_modules
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "storage-blob");
+        var nodeModules = Path.Combine(pkg1, "node_modules", "some-dep");
+        Directory.CreateDirectory(Path.Combine(pkg1, "src"));
+        Directory.CreateDirectory(nodeModules);
+
+        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), "export class Client {}");
+        File.WriteAllText(Path.Combine(nodeModules, "package.json"), "{\"name\": \"some-dep\"}"); // Should be ignored
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}");
+        Assert.Equal(1, result.TotalPackages); // Only the real package, not node_modules
+    }
+
+    [Fact]
+    public async Task AnalyzeCoverageMonorepoAsync_AggregatesStats()
+    {
+        // Arrange - Two packages, one with samples
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "storage-blob");
+        var pkg1Samples = Path.Combine(pkg1, "samples");
+        var pkg2 = Path.Combine(TestRoot, "sdk", "keyvault", "keyvault-secrets");
+
+        Directory.CreateDirectory(Path.Combine(pkg1, "src"));
+        Directory.CreateDirectory(pkg1Samples);
+        Directory.CreateDirectory(Path.Combine(pkg2, "src"));
+
+        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), @"
+export class BlobClient {
+    upload(): void {}
+    download(): void {}
+}
+");
+        File.WriteAllText(Path.Combine(pkg1Samples, "uploadSample.ts"), @"
+import { BlobClient } from '../src';
+const client = new BlobClient();
+client.upload();
+");
+
+        File.WriteAllText(Path.Combine(pkg2, "package.json"), "{\"name\": \"@azure/keyvault-secrets\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg2, "src", "index.ts"), "export class SecretClient {}");
+
+        // Act
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}");
+        Assert.Equal(2, result.TotalPackages);
+        Assert.NotNull(result.Packages);
+        Assert.Equal(2, result.Packages.Length);
+
+        // pkg2 should be skipped (no samples)
+        var pkg2Result = result.Packages.FirstOrDefault(p => p.RelativePath?.Contains("keyvault") == true);
+        Assert.NotNull(pkg2Result);
+        Assert.True(pkg2Result.SkippedNoSamples, "pkg2 should be skipped because it has no samples");
+
+        // pkg1 has samples - it should either be analyzed or failed (depends on extractor availability)
+        var pkg1Result = result.Packages.FirstOrDefault(p => p.RelativePath?.Contains("storage") == true);
+        Assert.NotNull(pkg1Result);
+        Assert.False(pkg1Result.SkippedNoSamples, "pkg1 should not be skipped - it has samples");
+    }
+
+    #endregion
 }

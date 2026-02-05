@@ -59,9 +59,15 @@ public class ExtractApi {
         String apiJson = Files.readString(apiJsonFile);
         JsonObject apiIndex = gson.fromJson(apiJson, JsonObject.class);
 
-        // Build map of client classes -> methods
+        // Build map of client + subclient classes -> methods
         Map<String, Set<String>> clientMethods = new HashMap<>();
         JsonArray packages = apiIndex.getAsJsonArray("packages");
+
+        List<JsonObject> concreteClasses = new ArrayList<>();
+        List<JsonObject> allClasses = new ArrayList<>();
+        Set<String> allTypeNames = new HashSet<>();
+        Set<String> interfaceNames = new HashSet<>();
+
         if (packages != null) {
             for (JsonElement pkgEl : packages) {
                 JsonObject pkg = pkgEl.getAsJsonObject();
@@ -69,21 +75,128 @@ public class ExtractApi {
                 if (classes != null) {
                     for (JsonElement clsEl : classes) {
                         JsonObject cls = clsEl.getAsJsonObject();
-                        String className = cls.get("name").getAsString();
-                        if (className.endsWith("Client") || className.endsWith("AsyncClient")) {
-                            Set<String> methods = new HashSet<>();
-                            JsonArray methodsArr = cls.getAsJsonArray("methods");
-                            if (methodsArr != null) {
-                                for (JsonElement mEl : methodsArr) {
-                                    methods.add(mEl.getAsJsonObject().get("name").getAsString());
-                                }
-                            }
-                            if (!methods.isEmpty()) {
-                                clientMethods.put(className, methods);
-                            }
-                        }
+                        concreteClasses.add(cls);
+                        allClasses.add(cls);
+                        allTypeNames.add(baseTypeName(getString(cls, "name")));
                     }
                 }
+
+                JsonArray interfaces = pkg.getAsJsonArray("interfaces");
+                if (interfaces != null) {
+                    for (JsonElement clsEl : interfaces) {
+                        JsonObject cls = clsEl.getAsJsonObject();
+                        allClasses.add(cls);
+                        String ifaceName = baseTypeName(getString(cls, "name"));
+                        allTypeNames.add(ifaceName);
+                        interfaceNames.add(ifaceName);
+                    }
+                }
+            }
+        }
+
+        Map<String, List<JsonObject>> interfaceImplementers = new HashMap<>();
+        for (JsonObject cls : allClasses) {
+            JsonArray implementsArr = cls.getAsJsonArray("implements");
+            if (implementsArr == null) {
+                continue;
+            }
+            for (JsonElement ifaceEl : implementsArr) {
+                String ifaceName = baseTypeName(ifaceEl.getAsString());
+                interfaceImplementers.computeIfAbsent(ifaceName, k -> new ArrayList<>()).add(cls);
+            }
+        }
+
+        Map<String, Set<String>> references = new HashMap<>();
+        for (JsonObject cls : allClasses) {
+            String name = baseTypeName(getString(cls, "name"));
+            references.put(name, getReferencedTypes(cls, allTypeNames));
+        }
+
+        Map<String, Integer> referencedBy = new HashMap<>();
+        for (Set<String> refs : references.values()) {
+            for (String target : refs) {
+                referencedBy.put(target, referencedBy.getOrDefault(target, 0) + 1);
+            }
+        }
+
+        Set<String> operationTypes = new HashSet<>();
+        for (JsonObject cls : allClasses) {
+            if (hasMethods(cls)) {
+                operationTypes.add(baseTypeName(getString(cls, "name")));
+            }
+        }
+
+        List<JsonObject> rootClasses = new ArrayList<>();
+        for (JsonObject cls : concreteClasses) {
+            String name = baseTypeName(getString(cls, "name"));
+            boolean hasOperations = hasMethods(cls);
+            boolean referencesOperations = references.getOrDefault(name, Set.of()).stream().anyMatch(operationTypes::contains);
+            boolean isReferenced = referencedBy.containsKey(name);
+            // Client classes are always roots - they're SDK entry points even if referenced by options/builders
+            boolean isClientClass = name.endsWith("Client") || name.endsWith("AsyncClient");
+            if (isClientClass || (!isReferenced && (hasOperations || referencesOperations))) {
+                rootClasses.add(cls);
+            }
+        }
+
+        if (rootClasses.isEmpty()) {
+            for (JsonObject cls : concreteClasses) {
+                String name = baseTypeName(getString(cls, "name"));
+                boolean hasOperations = hasMethods(cls);
+                boolean referencesOperations = references.getOrDefault(name, Set.of()).stream().anyMatch(operationTypes::contains);
+                if (hasOperations || referencesOperations) {
+                    rootClasses.add(cls);
+                }
+            }
+        }
+
+        Set<String> reachable = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+
+        for (JsonObject cls : rootClasses) {
+            String name = baseTypeName(getString(cls, "name"));
+            if (reachable.add(name)) {
+                queue.add(name);
+            }
+        }
+
+        while (!queue.isEmpty()) {
+            String current = queue.removeFirst();
+            for (String ref : references.getOrDefault(current, Set.of())) {
+                if (reachable.add(ref)) {
+                    queue.add(ref);
+                }
+            }
+
+            if (interfaceNames.contains(current)) {
+                for (JsonObject impl : interfaceImplementers.getOrDefault(current, List.of())) {
+                    String implName = baseTypeName(getString(impl, "name"));
+                    if (reachable.add(implName)) {
+                        queue.add(implName);
+                    }
+                }
+            }
+        }
+
+        List<JsonObject> usageClasses = new ArrayList<>();
+        for (JsonObject cls : allClasses) {
+            String className = baseTypeName(getString(cls, "name"));
+            if (reachable.contains(className) && hasMethods(cls)) {
+                usageClasses.add(cls);
+            }
+        }
+
+        for (JsonObject cls : usageClasses) {
+            String className = getString(cls, "name");
+            Set<String> methods = new HashSet<>();
+            JsonArray methodsArr = cls.getAsJsonArray("methods");
+            if (methodsArr != null) {
+                for (JsonElement mEl : methodsArr) {
+                    methods.add(mEl.getAsJsonObject().get("name").getAsString());
+                }
+            }
+            if (!methods.isEmpty()) {
+                clientMethods.putIfAbsent(className, methods);
             }
         }
 
@@ -179,6 +292,77 @@ public class ExtractApi {
         );
         System.out.println(gson.toJson(result));
     }
+
+        private static String getString(JsonObject obj, String prop) {
+            if (obj == null || !obj.has(prop) || obj.get(prop).isJsonNull()) {
+                return "";
+            }
+            return obj.get(prop).getAsString();
+        }
+
+        private static boolean hasMethods(JsonObject cls) {
+            JsonArray methods = cls.getAsJsonArray("methods");
+            return methods != null && methods.size() > 0;
+        }
+
+        private static String baseTypeName(String name) {
+            if (name == null) {
+                return "";
+            }
+            int idx = name.indexOf('<');
+            return idx >= 0 ? name.substring(0, idx) : name;
+        }
+
+        private static Set<String> getReferencedTypes(JsonObject cls, Set<String> allTypeNames) {
+            Set<String> refs = new HashSet<>();
+
+            String ext = getString(cls, "extends");
+            if (!ext.isEmpty()) {
+                String base = baseTypeName(ext);
+                if (allTypeNames.contains(base)) {
+                    refs.add(base);
+                }
+            }
+
+            JsonArray impls = cls.getAsJsonArray("implements");
+            if (impls != null) {
+                for (JsonElement el : impls) {
+                    String iface = baseTypeName(el.getAsString());
+                    if (allTypeNames.contains(iface)) {
+                        refs.add(iface);
+                    }
+                }
+            }
+
+            JsonArray methods = cls.getAsJsonArray("methods");
+            if (methods != null) {
+                for (JsonElement mEl : methods) {
+                    JsonObject m = mEl.getAsJsonObject();
+                    String sig = getString(m, "sig");
+                    String ret = getString(m, "ret");
+                    for (String typeName : allTypeNames) {
+                        if (sig.contains(typeName) || (!ret.isEmpty() && ret.contains(typeName))) {
+                            refs.add(typeName);
+                        }
+                    }
+                }
+            }
+
+            JsonArray fields = cls.getAsJsonArray("fields");
+            if (fields != null) {
+                for (JsonElement fEl : fields) {
+                    JsonObject f = fEl.getAsJsonObject();
+                    String type = getString(f, "type");
+                    for (String typeName : allTypeNames) {
+                        if (type.contains(typeName)) {
+                            refs.add(typeName);
+                        }
+                    }
+                }
+            }
+
+            return refs;
+        }
 
     static Map<String, Object> extractPackage(Path root) throws Exception {
         String packageName = detectPackageName(root);

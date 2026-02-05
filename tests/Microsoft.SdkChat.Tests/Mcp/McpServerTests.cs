@@ -73,14 +73,16 @@ public class McpServerTests
         Assert.Equal(delayTask, completedTask);
         Assert.False(serverTask.IsCompleted, $"SSE server with transport '{transport}' should not complete immediately");
 
-        // Ensure cleanup - wait for server to shut down
+        // Ensure cleanup - cancel and wait for server to shut down
+        await cts.CancelAsync();
         try
         {
-            await serverTask.WaitAsync(TimeSpan.FromSeconds(2));
+            await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
         }
         catch (TimeoutException)
         {
-            // Server didn't shut down cleanly, but test already passed
+            // If server still hasn't stopped, force it by ignoring
+            // The CTS is already cancelled, so the server should stop soon
         }
     }
 
@@ -182,14 +184,15 @@ public class McpServerTests
         Assert.NotNull(response);
         Assert.True(response.IsSuccessStatusCode, $"SSE endpoint should return success status code, but got {response.StatusCode}");
 
-        // Ensure cleanup - wait for server to shut down
+        // Ensure cleanup - cancel and wait for server to shut down
+        await cts.CancelAsync();
         try
         {
-            await serverTask.WaitAsync(TimeSpan.FromSeconds(2));
+            await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
         }
         catch (TimeoutException)
         {
-            // Server didn't shut down cleanly, but test already passed
+            // Server didn't shut down cleanly within timeout
         }
     }
 
@@ -273,17 +276,19 @@ public class McpServerTests
         Assert.NotNull(response2);
         Assert.True(response2.IsSuccessStatusCode, $"Server 2 should return success status code, but got {response2.StatusCode}");
 
-        // Ensure cleanup - wait for both servers to shut down
+        // Ensure cleanup - cancel both and wait for servers to shut down
+        await cts1.CancelAsync();
+        await cts2.CancelAsync();
         try
         {
             await Task.WhenAll(
-                server1Task.WaitAsync(TimeSpan.FromSeconds(2)),
-                server2Task.WaitAsync(TimeSpan.FromSeconds(2))
+                server1Task.WaitAsync(TimeSpan.FromSeconds(5)),
+                server2Task.WaitAsync(TimeSpan.FromSeconds(5))
             );
         }
         catch (TimeoutException)
         {
-            // Servers didn't shut down cleanly, but test already passed
+            // Servers didn't shut down cleanly within timeout
         }
     }
 
@@ -317,14 +322,15 @@ public class McpServerTests
         // Assert - Verify lowercase transport name is accepted and server keeps running
         Assert.False(taskLower.IsCompleted, $"Transport '{transport.ToLower()}' should be accepted");
 
-        // Ensure cleanup
+        // Ensure cleanup - cancel explicitly
+        await cts.CancelAsync();
         try
         {
-            await taskLower.WaitAsync(TimeSpan.FromSeconds(1));
+            await taskLower.WaitAsync(TimeSpan.FromSeconds(5));
         }
         catch (TimeoutException)
         {
-            // Server didn't shut down cleanly, but test already passed
+            // Server didn't shut down cleanly within timeout
         }
 
         // Test uppercase with new cancellation token and port
@@ -349,14 +355,15 @@ public class McpServerTests
         // Assert - Verify uppercase transport name is accepted and server keeps running
         Assert.False(taskUpper.IsCompleted, $"Transport '{transport.ToUpper()}' should be accepted");
 
-        // Ensure cleanup
+        // Ensure cleanup - cancel explicitly
+        await cts2.CancelAsync();
         try
         {
-            await taskUpper.WaitAsync(TimeSpan.FromSeconds(1));
+            await taskUpper.WaitAsync(TimeSpan.FromSeconds(5));
         }
         catch (TimeoutException)
         {
-            // Server didn't shut down cleanly, but test already passed
+            // Server didn't shut down cleanly within timeout
         }
     }
 

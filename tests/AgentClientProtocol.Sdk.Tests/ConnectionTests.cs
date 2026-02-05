@@ -182,6 +182,47 @@ public class ConnectionTests
         Assert.Contains("-32601", outputJson); // Method not found error code
     }
 
+    [Fact]
+    public async Task AgentSideConnection_HandlesRequestError_ReturnsError()
+    {
+        // Arrange: Agent throws RequestError.SessionNotFound
+        var promptRequest = new PromptRequest
+        {
+            SessionId = "unknown-session",
+            Prompt = [new TextContent { Text = "test" }]
+        };
+
+        var jsonRpcRequest = new JsonRpcRequest
+        {
+            Id = 42,
+            Method = "session/prompt",
+            Params = JsonSerializer.SerializeToElement(promptRequest)
+        };
+
+        var requestJson = JsonSerializer.Serialize(jsonRpcRequest);
+        var input = new StringReader(requestJson + "\n");
+        var output = new StringWriter();
+        var stream = new NdJsonStream(input, output);
+
+        var mockAgent = new Mock<IAgent>();
+        mockAgent
+            .Setup(a => a.PromptAsync(It.IsAny<PromptRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(RequestError.SessionNotFound("unknown-session"));
+
+        var connection = new AgentSideConnection(mockAgent.Object, stream);
+
+        // Act
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await connection.RunAsync(cts.Token);
+
+        // Assert: Should return an error response with SessionNotFound code
+        var outputJson = output.ToString();
+        Assert.NotEmpty(outputJson);
+        Assert.Contains("\"error\"", outputJson);
+        Assert.Contains("-32001", outputJson); // SessionNotFound error code
+        Assert.Contains("\"id\":42", outputJson);
+    }
+
     private IAcpStream CreateMockStream()
     {
         var input = new StringReader("");

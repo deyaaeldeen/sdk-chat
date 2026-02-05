@@ -54,6 +54,17 @@ public interface IPackageInfoService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Coverage analysis result with covered and uncovered operations.</returns>
     Task<CoverageAnalysisResult> AnalyzeCoverageAsync(string packagePath, string? samplesPath = null, string? language = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Analyzes API coverage across multiple packages in a monorepo.
+    /// </summary>
+    /// <param name="rootPath">Root path of the monorepo.</param>
+    /// <param name="samplesPath">Optional samples folder override for all packages.</param>
+    /// <param name="language">Optional language override.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Batch coverage analysis result.</returns>
+    Task<CoverageBatchResult> AnalyzeCoverageMonorepoAsync(string rootPath, string? samplesPath = null, string? language = null, IProgress<string>? progress = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -313,6 +324,315 @@ public sealed class PackageInfoService : IPackageInfoService
             return factory().Extractor;
         return null;
     }
+
+    public async Task<CoverageBatchResult> AnalyzeCoverageMonorepoAsync(
+        string rootPath,
+        string? samplesPath,
+        string? language,
+        IProgress<string>? progress,
+        CancellationToken ct)
+    {
+        if (!Directory.Exists(rootPath))
+        {
+            return new CoverageBatchResult
+            {
+                Success = false,
+                ErrorCode = "ROOT_NOT_FOUND",
+                ErrorMessage = $"Root path not found: {rootPath}",
+                RootPath = rootPath,
+            };
+        }
+
+        var packages = FindMonorepoPackages(rootPath).ToArray();
+        if (packages.Length == 0)
+        {
+            return new CoverageBatchResult
+            {
+                Success = false,
+                ErrorCode = "NO_PACKAGES_FOUND",
+                ErrorMessage = "No SDK packages found under the monorepo root.",
+                RootPath = rootPath,
+            };
+        }
+
+        var results = new List<CoverageBatchItem>(packages.Length);
+        var totalOperations = 0;
+        var covered = 0;
+        var uncovered = 0;
+        var analyzed = 0;
+        var skipped = 0;
+        var failed = 0;
+
+        progress?.Report($"Found {packages.Length} packages under {rootPath}");
+
+        for (var index = 0; index < packages.Length; index++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var packagePath = packages[index];
+            var step = index + 1;
+
+            var relativePath = Path.GetRelativePath(rootPath, packagePath).Replace("\\", "/");
+            var samplesFolder = samplesPath;
+
+            progress?.Report($"[{step}/{packages.Length}] {relativePath}: analyzing");
+
+            if (string.IsNullOrWhiteSpace(samplesFolder))
+            {
+                var samples = await DetectSamplesFolderAsync(packagePath, ct);
+                if (!samples.HasExistingSamples || string.IsNullOrWhiteSpace(samples.SamplesFolder))
+                {
+                    skipped++;
+                    progress?.Report($"[{step}/{packages.Length}] {relativePath}: skipped (no samples)");
+                    results.Add(new CoverageBatchItem
+                    {
+                        PackagePath = packagePath,
+                        RelativePath = relativePath,
+                        SamplesFolder = samples.SamplesFolder,
+                        SkippedNoSamples = true,
+                        Success = true,
+                    });
+                    continue;
+                }
+
+                samplesFolder = samples.SamplesFolder;
+            }
+
+            var analysis = await AnalyzeCoverageAsync(packagePath, samplesFolder, language, ct);
+            if (!analysis.Success)
+            {
+                failed++;
+                progress?.Report($"[{step}/{packages.Length}] {relativePath}: failed ({analysis.ErrorCode})");
+                results.Add(new CoverageBatchItem
+                {
+                    PackagePath = packagePath,
+                    RelativePath = relativePath,
+                    SamplesFolder = samplesFolder,
+                    Success = false,
+                    ErrorCode = analysis.ErrorCode,
+                    ErrorMessage = analysis.ErrorMessage,
+                });
+                continue;
+            }
+
+            analyzed++;
+            totalOperations += analysis.TotalOperations;
+            covered += analysis.CoveredCount;
+            uncovered += analysis.UncoveredCount;
+
+            progress?.Report($"[{step}/{packages.Length}] {relativePath}: {analysis.CoveredCount}/{analysis.TotalOperations} covered");
+
+            results.Add(new CoverageBatchItem
+            {
+                PackagePath = packagePath,
+                RelativePath = relativePath,
+                SamplesFolder = samplesFolder,
+                Success = true,
+                Result = analysis,
+            });
+        }
+
+        var coveragePercent = totalOperations > 0
+            ? (double)covered / totalOperations * 100.0
+            : 0.0;
+
+        return new CoverageBatchResult
+        {
+            Success = true,
+            RootPath = rootPath,
+            TotalPackages = packages.Length,
+            AnalyzedPackages = analyzed,
+            SkippedPackages = skipped,
+            FailedPackages = failed,
+            TotalOperations = totalOperations,
+            CoveredCount = covered,
+            UncoveredCount = uncovered,
+            CoveragePercent = coveragePercent,
+            Packages = results.ToArray(),
+        };
+    }
+
+    /// <summary>
+    /// Discovers SDK packages in a monorepo structure.
+    /// Uses a smart, defensive approach that:
+    /// 1. Searches multiple potential root directories (sdk/, packages/, libs/, src/, or root itself)
+    /// 2. Identifies packages by language-specific project markers
+    /// 3. Finds the package root by walking up from the project file
+    /// 4. Filters out test projects, examples, and build artifacts
+    /// </summary>
+    private static IEnumerable<string> FindMonorepoPackages(string rootPath)
+    {
+        // Track discovered packages to avoid duplicates
+        var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Directories to skip entirely
+        var skipDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "node_modules", "vendor", ".git", "bin", "obj", "dist", "build",
+            "__pycache__", ".tox", ".pytest_cache", "target", ".gradle",
+            "packages", // NuGet packages folder
+        };
+
+        // Patterns that indicate a test/sample project (case-insensitive contains)
+        var testPatterns = new[] { "test", "sample", "example", "demo", "benchmark", "perf" };
+
+        // Language-specific project file patterns
+        var projectPatterns = new[]
+        {
+            "package.json",      // TypeScript/JavaScript
+            "*.csproj",          // .NET C#
+            "*.fsproj",          // .NET F#
+            "pyproject.toml",    // Python (modern)
+            "setup.py",          // Python (legacy)
+            "go.mod",            // Go
+            "pom.xml",           // Java Maven
+            "build.gradle",      // Java Gradle
+            "build.gradle.kts",  // Java Gradle Kotlin DSL
+            "Cargo.toml",        // Rust
+        };
+
+        // Potential monorepo package roots to search
+        var searchRoots = new List<string>();
+
+        // Check for common monorepo structures
+        var sdkDir = Path.Combine(rootPath, "sdk");
+        var packagesDir = Path.Combine(rootPath, "packages");
+        var libsDir = Path.Combine(rootPath, "libs");
+        var srcDir = Path.Combine(rootPath, "src");
+
+        if (Directory.Exists(sdkDir))
+            searchRoots.Add(sdkDir);
+        if (Directory.Exists(packagesDir))
+            searchRoots.Add(packagesDir);
+        if (Directory.Exists(libsDir))
+            searchRoots.Add(libsDir);
+
+        // If none of the standard roots exist, search from the root itself
+        if (searchRoots.Count == 0)
+        {
+            // Check if src/ contains multiple packages or is itself a package
+            if (Directory.Exists(srcDir))
+            {
+                // If src/ has subdirectories with project files, treat src/ as monorepo root
+                var srcSubdirs = Directory.GetDirectories(srcDir);
+                if (srcSubdirs.Length > 1)
+                    searchRoots.Add(srcDir);
+            }
+
+            // Fall back to root path
+            if (searchRoots.Count == 0)
+                searchRoots.Add(rootPath);
+        }
+
+        foreach (var searchRoot in searchRoots)
+        {
+            foreach (var pattern in projectPatterns)
+            {
+                IEnumerable<string> projectFiles;
+                try
+                {
+                    projectFiles = Directory.EnumerateFiles(searchRoot, pattern, SearchOption.AllDirectories);
+                }
+                catch (Exception)
+                {
+                    // Permission denied or other IO error - skip this pattern
+                    continue;
+                }
+
+                foreach (var projectFile in projectFiles)
+                {
+                    // Skip files in excluded directories
+                    var relativePath = Path.GetRelativePath(searchRoot, projectFile);
+                    var pathSegments = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                    if (pathSegments.Any(seg => skipDirs.Contains(seg)))
+                        continue;
+
+                    // Skip test/sample projects
+                    var fileName = Path.GetFileNameWithoutExtension(projectFile);
+                    var dirName = Path.GetFileName(Path.GetDirectoryName(projectFile) ?? "");
+                    if (testPatterns.Any(p =>
+                        fileName.Contains(p, StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Contains(p, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    // Find the package root directory
+                    var packageDir = FindPackageRoot(projectFile, searchRoot, pattern);
+                    if (packageDir is null || discovered.Contains(packageDir))
+                        continue;
+
+                    // Validate it's a real package directory
+                    if (!Directory.Exists(packageDir))
+                        continue;
+
+                    // Skip if it's the search root itself (avoid treating entire repo as one package)
+                    if (string.Equals(packageDir, searchRoot, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(packageDir, rootPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    discovered.Add(packageDir);
+                    yield return packageDir;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finds the package root directory from a project file.
+    /// Walks up from the project file to find the logical package boundary.
+    /// </summary>
+    private static string? FindPackageRoot(string projectFile, string searchRoot, string pattern)
+    {
+        var projectDir = Path.GetDirectoryName(projectFile);
+        if (projectDir is null)
+            return null;
+
+        // For most project types, the project file is at the package root
+        // Exception: .NET projects are often in src/ subdirectory
+        if (pattern.EndsWith(".csproj") || pattern.EndsWith(".fsproj"))
+        {
+            // Check if we're in a src/ subdirectory
+            var parentDir = Path.GetDirectoryName(projectDir);
+            if (parentDir != null)
+            {
+                var parentName = Path.GetFileName(projectDir);
+                if (string.Equals(parentName, "src", StringComparison.OrdinalIgnoreCase))
+                {
+                    // The package root is one level up from src/
+                    return parentDir;
+                }
+            }
+        }
+
+        // For package.json, check if this is a workspace root (has workspaces field)
+        if (pattern == "package.json")
+        {
+            try
+            {
+                var content = File.ReadAllText(projectFile);
+                // Skip workspace root package.json files
+                if (content.Contains("\"workspaces\"") || content.Contains("\"private\": true"))
+                {
+                    // Could be a workspace root - check if it has meaningful exports
+                    if (!content.Contains("\"main\"") && !content.Contains("\"exports\"") && !content.Contains("\"types\""))
+                    {
+                        return null;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore read errors
+            }
+        }
+
+        // The project directory is the package root
+        return projectDir;
+    }
 }
 
 /// <summary>Result of source folder detection.</summary>
@@ -369,6 +689,37 @@ public sealed record CoverageAnalysisResult
     public UncoveredOperationInfo[]? UncoveredOperations { get; init; }
 }
 
+/// <summary>Result of monorepo coverage analysis.</summary>
+public sealed record CoverageBatchResult
+{
+    public required bool Success { get; init; }
+    public string? ErrorCode { get; init; }
+    public string? ErrorMessage { get; init; }
+    public string? RootPath { get; init; }
+    public int TotalPackages { get; init; }
+    public int AnalyzedPackages { get; init; }
+    public int SkippedPackages { get; init; }
+    public int FailedPackages { get; init; }
+    public int TotalOperations { get; init; }
+    public int CoveredCount { get; init; }
+    public int UncoveredCount { get; init; }
+    public double CoveragePercent { get; init; }
+    public CoverageBatchItem[]? Packages { get; init; }
+}
+
+/// <summary>Per-package coverage analysis result.</summary>
+public sealed record CoverageBatchItem
+{
+    public required string PackagePath { get; init; }
+    public required string RelativePath { get; init; }
+    public string? SamplesFolder { get; init; }
+    public bool SkippedNoSamples { get; init; }
+    public bool Success { get; init; }
+    public string? ErrorCode { get; init; }
+    public string? ErrorMessage { get; init; }
+    public CoverageAnalysisResult? Result { get; init; }
+}
+
 /// <summary>A covered API operation.</summary>
 public sealed record CoveredOperationInfo
 {
@@ -398,6 +749,8 @@ public sealed record UncoveredOperationInfo
 [JsonSerializable(typeof(SamplesFolderResult))]
 [JsonSerializable(typeof(ApiExtractionResult))]
 [JsonSerializable(typeof(CoverageAnalysisResult))]
+[JsonSerializable(typeof(CoverageBatchResult))]
+[JsonSerializable(typeof(CoverageBatchItem))]
 [JsonSerializable(typeof(CoveredOperationInfo[]))]
 [JsonSerializable(typeof(UncoveredOperationInfo[]))]
 public sealed partial class PackageInfoJsonContext : JsonSerializerContext

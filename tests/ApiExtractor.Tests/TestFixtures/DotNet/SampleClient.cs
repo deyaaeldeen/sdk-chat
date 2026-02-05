@@ -11,12 +11,16 @@ public class SampleClient : IDisposable
 {
     private readonly HttpClient _httpClient;
     private bool _disposed;
+    private readonly WidgetClient _widgetClient = new();
 
     /// <summary>Gets the endpoint URI.</summary>
     public Uri Endpoint { get; }
 
     /// <summary>Gets the API version.</summary>
     public string ApiVersion { get; init; } = "2024-01-01";
+
+    /// <summary>Gets the widget subclient.</summary>
+    public WidgetClient Widgets => _widgetClient;
 
     /// <summary>
     /// Creates a new instance of <see cref="SampleClient"/>.
@@ -68,6 +72,71 @@ public class SampleClient : IDisposable
             _disposed = true;
         }
         GC.SuppressFinalize(this);
+    }
+}
+
+/// <summary>
+/// Client with no methods, only subclient properties.
+/// </summary>
+public class EmptyClient
+{
+    private readonly WidgetClient _widgetClient = new();
+
+    /// <summary>Gets the widget subclient.</summary>
+    public WidgetClient Widgets => _widgetClient;
+}
+
+/// <summary>
+/// Interface for recommendations operations.
+/// </summary>
+public interface IRecommendationsClient
+{
+    /// <summary>Lists recommendations.</summary>
+    Task<IReadOnlyList<string>> ListRecommendationsAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Implementation for recommendations operations.
+/// </summary>
+public class RecommendationsClientImpl : IRecommendationsClient
+{
+    private readonly Uri _endpoint;
+
+    public RecommendationsClientImpl(Uri endpoint)
+    {
+        _endpoint = endpoint;
+    }
+
+    /// <summary>Lists recommendations.</summary>
+    public Task<IReadOnlyList<string>> ListRecommendationsAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<string>>(new[] { _endpoint + "/recommendations" });
+    }
+}
+
+/// <summary>
+/// Client with interface-typed subclient.
+/// </summary>
+public class InterfaceClient
+{
+    /// <summary>Gets the recommendations subclient.</summary>
+    public IRecommendationsClient Recommendations { get; }
+
+    public InterfaceClient(Uri endpoint)
+    {
+        Recommendations = new RecommendationsClientImpl(endpoint);
+    }
+}
+
+/// <summary>
+/// Subclient for widget operations.
+/// </summary>
+public class WidgetClient
+{
+    /// <summary>Lists widgets.</summary>
+    public Task<IReadOnlyList<string>> ListWidgetsAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<string>>(new[] { "widget" });
     }
 }
 
