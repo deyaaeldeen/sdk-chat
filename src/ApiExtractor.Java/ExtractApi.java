@@ -132,9 +132,9 @@ public class ExtractApi {
             boolean hasOperations = hasMethods(cls);
             boolean referencesOperations = references.getOrDefault(name, Set.of()).stream().anyMatch(operationTypes::contains);
             boolean isReferenced = referencedBy.containsKey(name);
-            // Client classes are always roots - they're SDK entry points even if referenced by options/builders
-            boolean isClientClass = name.endsWith("Client") || name.endsWith("AsyncClient");
-            if (isClientClass || (!isReferenced && (hasOperations || referencesOperations))) {
+            // Root classes: entry points (from package exports) with methods, or unreferenced types with operations
+            boolean isEntryPoint = getBoolean(cls, "entryPoint");
+            if ((isEntryPoint && hasOperations) || (!isReferenced && (hasOperations || referencesOperations))) {
                 rootClasses.add(cls);
             }
         }
@@ -205,6 +205,13 @@ public class ExtractApi {
             return;
         }
 
+        // Build set of known client type names for local type inference
+        Set<String> clientNames = new HashSet<>(clientMethods.keySet());
+
+        // Build method and function return type maps from API data for precise factory/getter resolution
+        Map<String, String> methodReturnTypeMap = buildMethodReturnTypeMap(usageClasses, clientNames);
+        Map<String, String> fieldTypeMap = buildFieldTypeMap(usageClasses, clientNames);
+
         // Find sample files
         List<Path> javaFiles = Files.walk(samplesPath)
             .filter(p -> p.toString().endsWith(".java"))
@@ -230,55 +237,127 @@ public class ExtractApi {
 
                 String relPath = samplesPath.relativize(file).toString().replace('\\', '/');
 
-                // Find method calls using AST
+                // Build variable → client type map for this file
+                Map<String, String> varTypes = buildVarTypeMap(cu, clientNames, methodReturnTypeMap, fieldTypeMap);
+
+                // Find method calls using AST - resolve receiver type via var tracking first
                 cu.walk(com.github.javaparser.ast.expr.MethodCallExpr.class, call -> {
                     String methodName = call.getNameAsString();
-                    String scope = call.getScope().map(s -> s.toString()).orElse("");
 
-                    for (Map.Entry<String, Set<String>> entry : clientMethods.entrySet()) {
-                        String clientName = entry.getKey();
-                        Set<String> methods = entry.getValue();
-                        String clientBase = clientName.replace("Client", "").replace("AsyncClient", "");
+                    // Strategy 1: Resolve receiver type from local variable tracking
+                    String resolvedClient = null;
+                    if (call.getScope().isPresent()) {
+                        Expression scope = call.getScope().get();
 
-                        if ((scope.toLowerCase().contains(clientBase.toLowerCase()) || scope.toLowerCase().contains("client"))
-                            && methods.contains(methodName)) {
-                            String key = clientName + "." + methodName;
-                            if (seenOps.add(key)) {
-                                int line = call.getBegin().map(p -> p.line).orElse(0);
-                                covered.add(Map.of("client", clientName, "method", methodName, "file", relPath, "line", line));
+                        if (scope instanceof NameExpr) {
+                            String varName = ((NameExpr) scope).getNameAsString();
+                            String varType = varTypes.get(varName);
+                            if (varType != null && clientMethods.containsKey(varType) && clientMethods.get(varType).contains(methodName)) {
+                                resolvedClient = varType;
                             }
+                        }
+
+                        // Strategy 1b: Chained call — receiver.getSubClient().method()
+                        if (resolvedClient == null && scope instanceof MethodCallExpr) {
+                            MethodCallExpr innerCall = (MethodCallExpr) scope;
+                            String innerMethodName = innerCall.getNameAsString();
+
+                            if (innerCall.getScope().isPresent() && innerCall.getScope().get() instanceof NameExpr) {
+                                String innerVarName = ((NameExpr) innerCall.getScope().get()).getNameAsString();
+
+                                // Static factory: ClientType.create().method()
+                                if (clientNames.contains(innerVarName)) {
+                                    String staticKey = innerVarName + "." + innerMethodName;
+                                    String retType = methodReturnTypeMap.get(staticKey);
+                                    if (retType != null && clientMethods.containsKey(retType) && clientMethods.get(retType).contains(methodName)) {
+                                        resolvedClient = retType;
+                                    }
+                                }
+
+                                // Instance method: service.getSubClient().method()
+                                if (resolvedClient == null) {
+                                    String receiverType = varTypes.get(innerVarName);
+                                    if (receiverType != null) {
+                                        String methodKey = receiverType + "." + innerMethodName;
+                                        String retType = methodReturnTypeMap.get(methodKey);
+                                        if (retType != null && clientMethods.containsKey(retType) && clientMethods.get(retType).contains(methodName)) {
+                                            resolvedClient = retType;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (resolvedClient != null) {
+                        String key = resolvedClient + "." + methodName;
+                        if (seenOps.add(key)) {
+                            int line = call.getBegin().map(p -> p.line).orElse(0);
+                            covered.add(Map.of("client", resolvedClient, "method", methodName, "file", relPath, "line", line));
                         }
                     }
                 });
 
-                // Detect patterns using AST
+                // Detect patterns using purely structural AST analysis — no keyword matching
                 cu.walk(Node.class, node -> {
                     if (node instanceof com.github.javaparser.ast.stmt.TryStmt) patterns.add("error-handling");
-                    if (node instanceof com.github.javaparser.ast.stmt.ForEachStmt) {
-                        String typeStr = node.toString().toLowerCase();
-                        if (typeStr.contains("page") || typeStr.contains("iterator")) patterns.add("pagination");
-                    }
                     if (node instanceof com.github.javaparser.ast.expr.LambdaExpr) patterns.add("async-callback");
                 });
-
-                // Check for common patterns in code
-                String code = Files.readString(file).toLowerCase();
-                if (code.contains("credential") || code.contains("authenticate")) patterns.add("authentication");
-                if (code.contains("stream") || code.contains("flux") || code.contains("mono")) patterns.add("streaming");
-                if (code.contains("retry") || code.contains("exponential")) patterns.add("retry");
 
             } catch (Exception e) {
                 // Skip problematic files
             }
         }
 
-        // Build uncovered list
+        // Build bidirectional interface ↔ implementation mapping for coverage cross-referencing
+        Map<String, List<String>> ifaceToImplNames = new HashMap<>();
+        Map<String, List<String>> implToIfaceNames = new HashMap<>();
+        for (JsonObject cls : allClasses) {
+            String clsName = getString(cls, "name");
+            JsonArray implementsArr = cls.getAsJsonArray("implements");
+            if (implementsArr != null) {
+                for (JsonElement ifaceEl : implementsArr) {
+                    String ifaceName = baseTypeName(ifaceEl.getAsString());
+                    ifaceToImplNames.computeIfAbsent(ifaceName, k -> new ArrayList<>()).add(clsName);
+                    implToIfaceNames.computeIfAbsent(clsName, k -> new ArrayList<>()).add(ifaceName);
+                }
+            }
+        }
+
+        // Build uncovered list with interface/implementation cross-referencing
         List<Map<String, Object>> uncovered = new ArrayList<>();
         for (Map.Entry<String, Set<String>> entry : clientMethods.entrySet()) {
             String clientName = entry.getKey();
             for (String method : entry.getValue()) {
                 String key = clientName + "." + method;
-                if (!seenOps.contains(key)) {
+                if (seenOps.contains(key)) {
+                    continue;
+                }
+
+                // Check if covered through an interface/implementation relationship
+                boolean coveredViaRelated = false;
+
+                // If this is an implementation, check if any of its interfaces has the method covered
+                List<String> implementedIfaces = implToIfaceNames.getOrDefault(clientName, List.of());
+                for (String iface : implementedIfaces) {
+                    if (seenOps.contains(iface + "." + method)) {
+                        coveredViaRelated = true;
+                        break;
+                    }
+                }
+
+                // If this is an interface, check if any implementation has the method covered
+                if (!coveredViaRelated) {
+                    List<String> implementations = ifaceToImplNames.getOrDefault(clientName, List.of());
+                    for (String impl : implementations) {
+                        if (seenOps.contains(impl + "." + method)) {
+                            coveredViaRelated = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!coveredViaRelated) {
                     uncovered.add(Map.of("client", clientName, "method", method, "sig", method + "(...)"));
                 }
             }
@@ -293,6 +372,202 @@ public class ExtractApi {
         System.out.println(gson.toJson(result));
     }
 
+    // =========================================================================
+    // Variable Tracking — API-data-driven type resolution
+    // =========================================================================
+
+    /**
+     * Unwrap Java async/wrapper return types.
+     * E.g., "CompletableFuture&lt;BlobClient&gt;" → "BlobClient", "Mono&lt;BlobClient&gt;" → "BlobClient"
+     */
+    private static String unwrapJavaReturnType(String ret) {
+        if (ret == null || ret.isEmpty()) return "";
+        String[] wrappers = {"CompletableFuture", "CompletionStage", "Future", "Mono", "Flux",
+                             "Single", "Observable", "Maybe", "Flow.Publisher", "Publisher",
+                             "Optional", "PagedIterable", "PagedFlux", "Response"};
+        for (String wrapper : wrappers) {
+            if (ret.startsWith(wrapper + "<") && ret.endsWith(">")) {
+                return ret.substring(wrapper.length() + 1, ret.length() - 1).trim();
+            }
+        }
+        return ret;
+    }
+
+    /**
+     * Build a map of "OwnerType.MethodName" → return type from API method data,
+     * only for methods that return a known client type.
+     */
+    private static Map<String, String> buildMethodReturnTypeMap(List<JsonObject> usageClasses, Set<String> clientNames) {
+        Map<String, String> map = new HashMap<>();
+        for (JsonObject cls : usageClasses) {
+            String className = baseTypeName(getString(cls, "name"));
+            JsonArray methods = cls.getAsJsonArray("methods");
+            if (methods == null) continue;
+            for (JsonElement mEl : methods) {
+                JsonObject m = mEl.getAsJsonObject();
+                String ret = getString(m, "ret");
+                if (!ret.isEmpty()) {
+                    String retType = baseTypeName(unwrapJavaReturnType(ret));
+                    if (clientNames.contains(retType)) {
+                        map.put(className + "." + getString(m, "name"), retType);
+                    }
+                }
+            }
+            // Also check constructors — they return the class type itself
+            JsonArray constructors = cls.getAsJsonArray("constructors");
+            if (constructors != null) {
+                for (JsonElement cEl : constructors) {
+                    JsonObject c = cEl.getAsJsonObject();
+                    // Constructor name equals class name
+                    if (clientNames.contains(className)) {
+                        map.put(className + "." + getString(c, "name"), className);
+                    }
+                }
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Build a map of "OwnerType.FieldName" → client type from API field data,
+     * for fields whose type is a known client type.
+     */
+    private static Map<String, String> buildFieldTypeMap(List<JsonObject> usageClasses, Set<String> clientNames) {
+        Map<String, String> map = new HashMap<>();
+        for (JsonObject cls : usageClasses) {
+            String className = baseTypeName(getString(cls, "name"));
+            JsonArray fields = cls.getAsJsonArray("fields");
+            if (fields == null) continue;
+            for (JsonElement fEl : fields) {
+                JsonObject f = fEl.getAsJsonObject();
+                String fieldType = baseTypeName(getString(f, "type"));
+                if (clientNames.contains(fieldType)) {
+                    map.put(className + "." + getString(f, "name"), fieldType);
+                }
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Build a variable → client type map for a compilation unit.
+     *
+     * Tracks patterns:
+     *   - BlobClient client = new BlobClient(...)    → client maps to BlobClient
+     *   - var client = new BlobClient(...)            → client maps to BlobClient
+     *   - BlobClient client = svc.getBlobClient(...)  → client maps to BlobClient (via method return type map)
+     *   - BlobClient client = BlobClientBuilder.build() → client maps to BlobClient
+     *
+     * All type resolution is driven by API index data — no name-based heuristics.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> buildVarTypeMap(CompilationUnit cu, Set<String> clientNames,
+                                                        Map<String, String> methodReturnTypeMap,
+                                                        Map<String, String> fieldTypeMap) {
+        Map<String, String> varTypes = new HashMap<>();
+
+        // Walk all variable declarations
+        cu.walk(VariableDeclarator.class, vd -> {
+            String varName = vd.getNameAsString();
+
+            // Check type annotation first: BlobClient client = ...
+            String declType = baseTypeName(vd.getType().asString());
+            if (clientNames.contains(declType)) {
+                varTypes.put(varName, declType);
+                return;
+            }
+
+            // Check initializer
+            if (vd.getInitializer().isPresent()) {
+                Expression init = vd.getInitializer().get();
+                String resolved = resolveExprType(init, clientNames, varTypes, methodReturnTypeMap, fieldTypeMap);
+                if (resolved != null) {
+                    varTypes.put(varName, resolved);
+                }
+            }
+        });
+
+        // Also track assignments: client = new BlobClient(...)
+        cu.walk(AssignExpr.class, assign -> {
+            Expression target = assign.getTarget();
+            if (target instanceof NameExpr) {
+                String varName = ((NameExpr) target).getNameAsString();
+                String resolved = resolveExprType(assign.getValue(), clientNames, varTypes, methodReturnTypeMap, fieldTypeMap);
+                if (resolved != null) {
+                    varTypes.put(varName, resolved);
+                }
+            }
+        });
+
+        return varTypes;
+    }
+
+    /**
+     * Resolve the client type of an expression using API data.
+     */
+    private static String resolveExprType(Expression expr, Set<String> clientNames,
+                                           Map<String, String> varTypes,
+                                           Map<String, String> methodReturnTypeMap,
+                                           Map<String, String> fieldTypeMap) {
+        // new BlobClient(...)
+        if (expr instanceof ObjectCreationExpr) {
+            String typeName = baseTypeName(((ObjectCreationExpr) expr).getType().asString());
+            if (clientNames.contains(typeName)) {
+                return typeName;
+            }
+        }
+
+        // Method call: svc.getBlobClient(...) or BlobClientBuilder.build()
+        if (expr instanceof MethodCallExpr) {
+            MethodCallExpr call = (MethodCallExpr) expr;
+            String calledMethod = call.getNameAsString();
+
+            if (call.getScope().isPresent() && call.getScope().get() instanceof NameExpr) {
+                String scopeName = ((NameExpr) call.getScope().get()).getNameAsString();
+
+                // Static factory: ClientType.create(...)
+                if (clientNames.contains(scopeName)) {
+                    String staticKey = scopeName + "." + calledMethod;
+                    String retType = methodReturnTypeMap.get(staticKey);
+                    if (retType != null) return retType;
+                }
+
+                // Instance method: service.getSubClient(...)
+                String receiverType = varTypes.get(scopeName);
+                if (receiverType != null) {
+                    String methodKey = receiverType + "." + calledMethod;
+                    String retType = methodReturnTypeMap.get(methodKey);
+                    if (retType != null) return retType;
+                }
+            }
+        }
+
+        // Cast expression: (BlobClient) expr
+        if (expr instanceof CastExpr) {
+            String castType = baseTypeName(((CastExpr) expr).getType().asString());
+            if (clientNames.contains(castType)) {
+                return castType;
+            }
+        }
+
+        // Field access: svc.blobField
+        if (expr instanceof FieldAccessExpr) {
+            FieldAccessExpr fieldAccess = (FieldAccessExpr) expr;
+            Expression scope = fieldAccess.getScope();
+            if (scope instanceof NameExpr) {
+                String scopeName = ((NameExpr) scope).getNameAsString();
+                String receiverType = varTypes.get(scopeName);
+                if (receiverType != null) {
+                    String fieldKey = receiverType + "." + fieldAccess.getNameAsString();
+                    String fieldType = fieldTypeMap.get(fieldKey);
+                    if (fieldType != null) return fieldType;
+                }
+            }
+        }
+
+        return null;
+    }
+
         private static String getString(JsonObject obj, String prop) {
             if (obj == null || !obj.has(prop) || obj.get(prop).isJsonNull()) {
                 return "";
@@ -300,9 +575,29 @@ public class ExtractApi {
             return obj.get(prop).getAsString();
         }
 
+        private static boolean getBoolean(JsonObject obj, String prop) {
+            if (obj == null || !obj.has(prop) || obj.get(prop).isJsonNull()) {
+                return false;
+            }
+            return obj.get(prop).getAsBoolean();
+        }
+
         private static boolean hasMethods(JsonObject cls) {
             JsonArray methods = cls.getAsJsonArray("methods");
             return methods != null && methods.size() > 0;
+        }
+
+        /**
+         * Mark all types in a package info map under the given key as entry points.
+         */
+        @SuppressWarnings("unchecked")
+        private static void markEntryPoints(Map<String, Object> pkgInfo, String key) {
+            List<Map<String, Object>> types = (List<Map<String, Object>>) pkgInfo.get(key);
+            if (types != null) {
+                for (Map<String, Object> type : types) {
+                    type.put("entryPoint", true);
+                }
+            }
         }
 
         private static String baseTypeName(String name) {
@@ -368,7 +663,7 @@ public class ExtractApi {
         // Reset the type collector and import map for this extraction
         typeCollector.clear();
         importMap.clear();
-        
+
         String packageName = detectPackageName(root);
         List<Map<String, Object>> packages = new ArrayList<>();
         Map<String, Map<String, Object>> packageMap = new TreeMap<>();
@@ -409,7 +704,7 @@ public class ExtractApi {
                 ParseResult<CompilationUnit> result = parser.parse(file);
                 if (!result.isSuccessful()) {
                     // Log parse failures to stderr for debugging
-                    System.err.println("Parse failed: " + file + " - " + 
+                    System.err.println("Parse failed: " + file + " - " +
                         result.getProblems().stream()
                             .map(p -> p.getMessage())
                             .collect(Collectors.joining("; ")));
@@ -418,7 +713,7 @@ public class ExtractApi {
 
                 CompilationUnit cu = result.getResult().orElse(null);
                 if (cu == null) continue;
-                
+
                 // Collect import statements for type-to-package resolution
                 collectImports(cu);
 
@@ -444,45 +739,65 @@ public class ExtractApi {
 
         packages.addAll(packageMap.values());
 
+        // Mark entry points: types in the shallowest (root) package are primary entry points.
+        // The root package is the one with the fewest dots (most top-level), matching how Java
+        // users import the SDK. Sub-packages (e.g., .models, .options) are supporting types.
+        if (!packageMap.isEmpty()) {
+            int minDepth = Integer.MAX_VALUE;
+            String rootPkg = "";
+            for (String pkg : packageMap.keySet()) {
+                int depth = pkg.isEmpty() ? 0 : (int) pkg.chars().filter(c -> c == '.').count();
+                if (depth < minDepth) {
+                    minDepth = depth;
+                    rootPkg = pkg;
+                }
+            }
+            Map<String, Object> rootPkgInfo = packageMap.get(rootPkg);
+            if (rootPkgInfo != null) {
+                markEntryPoints(rootPkgInfo, "classes");
+                markEntryPoints(rootPkgInfo, "interfaces");
+            }
+        }
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("package", packageName);
         result.put("packages", packages);
-        
+
         // Resolve transitive dependencies
         List<Map<String, Object>> dependencies = resolveTransitiveDependencies(packages);
         if (!dependencies.isEmpty()) {
             result.put("dependencies", dependencies);
         }
-        
+
         return result;
     }
-    
+
     // ===== Transitive Dependency Resolution =====
-    
+
     // Java builtin types - types from java.lang and common java.* packages
     private static final Set<String> JAVA_BUILTINS = Set.of(
         // Primitives and wrappers
         "boolean", "byte", "char", "short", "int", "long", "float", "double", "void",
         "Boolean", "Byte", "Character", "Short", "Integer", "Long", "Float", "Double", "Void",
         "Number", "Object", "String", "Class", "Enum",
-        
+
         // Collections
         "Collection", "List", "Set", "Map", "Queue", "Deque", "Iterator", "Iterable",
         "ArrayList", "LinkedList", "HashSet", "TreeSet", "LinkedHashSet",
         "HashMap", "TreeMap", "LinkedHashMap", "Hashtable",
         "Vector", "Stack", "Properties", "EnumSet", "EnumMap",
         "Collections", "Arrays",
-        
+
         // Streams
         "Stream", "IntStream", "LongStream", "DoubleStream",
         "Optional", "OptionalInt", "OptionalLong", "OptionalDouble",
         "Collector", "Collectors",
-        
+
         // Functions
         "Function", "BiFunction", "Consumer", "BiConsumer", "Supplier",
         "Predicate", "BiPredicate", "UnaryOperator", "BinaryOperator",
         "Runnable", "Callable", "Comparator",
-        
+
         // Exceptions
         "Exception", "RuntimeException", "Error", "Throwable",
         "IllegalArgumentException", "IllegalStateException", "NullPointerException",
@@ -490,36 +805,36 @@ public class ExtractApi {
         "ClassCastException", "UnsupportedOperationException", "NoSuchElementException",
         "IOException", "FileNotFoundException", "EOFException",
         "InterruptedException", "TimeoutException", "ExecutionException",
-        
+
         // IO/NIO
         "InputStream", "OutputStream", "Reader", "Writer",
         "File", "Path", "Paths", "Files", "URI", "URL",
         "ByteBuffer", "CharBuffer", "Channel", "FileChannel",
         "Closeable", "AutoCloseable", "Flushable",
-        
+
         // Time
         "Date", "Calendar", "TimeZone",
         "Instant", "Duration", "Period", "LocalDate", "LocalTime", "LocalDateTime",
         "ZonedDateTime", "OffsetDateTime", "OffsetTime", "ZoneId", "ZoneOffset",
         "DateTimeFormatter", "ChronoUnit", "TemporalUnit",
-        
+
         // Concurrency
         "Thread", "ThreadLocal", "Executor", "ExecutorService",
         "Future", "CompletableFuture", "CompletionStage",
         "Lock", "ReentrantLock", "Semaphore", "CountDownLatch",
         "AtomicBoolean", "AtomicInteger", "AtomicLong", "AtomicReference",
         "ConcurrentHashMap", "ConcurrentLinkedQueue", "BlockingQueue",
-        
+
         // Reflection
         "Method", "Field", "Constructor", "Annotation", "Type", "ParameterizedType",
-        
+
         // Misc
         "StringBuilder", "StringBuffer", "Pattern", "Matcher",
         "Random", "UUID", "Objects", "Math", "System",
         "Serializable", "Cloneable", "Comparable", "Appendable", "CharSequence",
         "BigInteger", "BigDecimal"
     );
-    
+
     // Java standard library packages
     private static final Set<String> JAVA_STDLIB_PACKAGES = Set.of(
         "java.lang", "java.util", "java.io", "java.nio", "java.net",
@@ -528,14 +843,14 @@ public class ExtractApi {
         "javax.crypto", "javax.net", "javax.security", "javax.sql",
         "sun.", "com.sun.", "jdk."
     );
-    
+
     private static boolean isBuiltinType(String typeName) {
         if (typeName == null || typeName.isEmpty()) return true;
         String baseName = typeName.contains("<") ? typeName.substring(0, typeName.indexOf('<')) : typeName;
         baseName = baseName.contains(".") ? baseName.substring(baseName.lastIndexOf('.') + 1) : baseName;
         return JAVA_BUILTINS.contains(baseName);
     }
-    
+
     private static boolean isStdlibPackage(String pkgName) {
         if (pkgName == null || pkgName.isEmpty()) return true;
         for (String stdlib : JAVA_STDLIB_PACKAGES) {
@@ -545,25 +860,25 @@ public class ExtractApi {
         }
         return false;
     }
-    
+
     // =========================================================================
     // AST-Based Type Reference Collection
     // =========================================================================
-    
+
     /**
      * Collector for type references during extraction using proper AST traversal.
      */
     private static class TypeReferenceCollector {
         private final Set<String> refs = new HashSet<>();
         private final Set<String> definedTypes = new HashSet<>();
-        
+
         void addDefinedType(String name) {
             if (name != null) {
                 String baseName = name.contains("<") ? name.substring(0, name.indexOf('<')) : name;
                 definedTypes.add(baseName);
             }
         }
-        
+
         /**
          * Collect type references from a JavaParser Type node.
          * Walks the AST properly handling:
@@ -576,7 +891,7 @@ public class ExtractApi {
          */
         void collectFromType(Type type) {
             if (type == null) return;
-            
+
             if (type.isClassOrInterfaceType()) {
                 ClassOrInterfaceType cit = type.asClassOrInterfaceType();
                 // Get the simple name (ignoring scope/package)
@@ -617,7 +932,7 @@ public class ExtractApi {
             }
             // PrimitiveType and VoidType are skipped (they're builtins)
         }
-        
+
         /**
          * Collect type references from a list of parameters.
          */
@@ -627,7 +942,7 @@ public class ExtractApi {
                 collectFromType(param.getType());
             }
         }
-        
+
         /**
          * Get external type references (not locally defined, not builtins).
          */
@@ -642,29 +957,29 @@ public class ExtractApi {
             }
             return result;
         }
-        
+
         void clear() {
             refs.clear();
             definedTypes.clear();
         }
     }
-    
+
     // Global collector (reset per extraction)
     private static final TypeReferenceCollector typeCollector = new TypeReferenceCollector();
-    
+
     // Maps simple type names to their fully qualified package from import statements
     // This enables rigorous resolution instead of heuristic guessing
     private static final Map<String, String> importMap = new HashMap<>();
-    
+
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> resolveTransitiveDependencies(List<Map<String, Object>> packages) {
         // Get externally referenced types from the AST collector
         Set<String> externalTypes = typeCollector.getExternalRefs();
-        
+
         if (externalTypes.isEmpty()) {
             return List.of();
         }
-        
+
         // Group by resolved package using import mappings
         Map<String, List<String>> byPackage = new TreeMap<>();
         for (String typeName : externalTypes) {
@@ -673,13 +988,13 @@ public class ExtractApi {
                 byPackage.computeIfAbsent(pkg, k -> new ArrayList<>()).add(typeName);
             }
         }
-        
+
         // Convert to dependency list
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<String, List<String>> entry : byPackage.entrySet()) {
             Map<String, Object> depInfo = new LinkedHashMap<>();
             depInfo.put("package", entry.getKey());
-            
+
             List<Map<String, Object>> classes = new ArrayList<>();
             for (String typeName : entry.getValue().stream().distinct().sorted().collect(Collectors.toList())) {
                 Map<String, Object> cls = new LinkedHashMap<>();
@@ -689,13 +1004,13 @@ public class ExtractApi {
             if (!classes.isEmpty()) {
                 depInfo.put("classes", classes);
             }
-            
+
             result.add(depInfo);
         }
-        
+
         return result;
     }
-    
+
     /**
      * Resolve a type name to its package using collected import statements.
      * This is rigorous - it only returns a package if we found an explicit import.
@@ -706,11 +1021,11 @@ public class ExtractApi {
             int lastDot = typeName.lastIndexOf('.');
             return typeName.substring(0, lastDot);
         }
-        
+
         // Look up in import map (collected from source files)
         return importMap.get(typeName);
     }
-    
+
     /**
      * Collect import statements from a compilation unit.
      * Maps simple type names to their fully qualified packages.
@@ -718,14 +1033,14 @@ public class ExtractApi {
     private static void collectImports(CompilationUnit cu) {
         for (ImportDeclaration imp : cu.getImports()) {
             if (imp.isStatic()) continue; // Skip static imports
-            
+
             String importName = imp.getNameAsString();
             if (imp.isAsterisk()) {
                 // Wildcard import like "import com.azure.core.*"
                 // We can't map specific types, but we note the package exists
                 continue;
             }
-            
+
             // Regular import like "import com.azure.core.ClientOptions"
             // Map the simple name to the package
             int lastDot = importName.lastIndexOf('.');
@@ -763,7 +1078,7 @@ public class ExtractApi {
         String typeName = cid.getNameAsString();
         info.put("name", typeName);
         boolean isInterface = cid.isInterface();
-        
+
         // Register this type as defined
         typeCollector.addDefinedType(typeName);
 
@@ -835,7 +1150,7 @@ public class ExtractApi {
         Map<String, Object> info = new LinkedHashMap<>();
         String enumName = ed.getNameAsString();
         info.put("name", enumName);
-        
+
         // Register this enum as a defined type
         typeCollector.addDefinedType(enumName);
 
@@ -909,7 +1224,7 @@ public class ExtractApi {
     static Map<String, Object> extractField(FieldDeclaration fd, VariableDeclarator vd) {
         Map<String, Object> info = new LinkedHashMap<>();
         info.put("name", vd.getNameAsString());
-        
+
         com.github.javaparser.ast.type.Type fieldType = vd.getType();
         info.put("type", fieldType.toString());
         typeCollector.collectFromType(fieldType);

@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using System.Text.Json;
 using ApiExtractor.Contracts;
 
@@ -84,6 +83,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
 
         if (availability.Mode == ExtractorMode.NativeBinary)
@@ -156,6 +156,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsTypeScriptAsync(string rootPath, CancellationToken ct = default)
     {
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
 
         if (availability.Mode == ExtractorMode.NativeBinary)
@@ -227,24 +228,22 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             // Double-check after acquiring lock
             if (Directory.Exists(nodeModules)) return;
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = "npm",
-                Arguments = "install --silent",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = scriptDir
-            };
+            // SECURITY: Route through ProcessSandbox for proper timeout, output limits, and argument escaping
+            // npm is resolved via PATH - ProcessSandbox will validate the executable
+            var result = await ProcessSandbox.ExecuteAsync(
+                "npm",
+                ["install", "--silent"],
+                workingDirectory: scriptDir,
+                timeout: TimeSpan.FromMinutes(5), // npm can be slow on cold cache
+                cancellationToken: ct
+            ).ConfigureAwait(false);
 
-            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start npm. Ensure Node.js is installed.");
-            await process.WaitForExitAsync(ct);
-
-            if (process.ExitCode != 0)
+            if (!result.Success)
             {
-                var error = await process.StandardError.ReadToEndAsync(ct);
-                throw new InvalidOperationException($"npm install failed: {error}");
+                var errorMsg = result.TimedOut
+                    ? "npm install timed out after 5 minutes"
+                    : $"npm install failed: {result.StandardError}";
+                throw new InvalidOperationException(errorMsg);
             }
         }
         finally

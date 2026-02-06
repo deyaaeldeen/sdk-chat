@@ -86,10 +86,10 @@ RUN jbang export native --fresh --force -O java_extractor ExtractApi.java
 # ============================================================================
 # Stage 4: Build Python extractor (PyInstaller, glibc-linked)
 # ============================================================================
-FROM debian:bookworm-slim AS build-python
+FROM debian:trixie-slim AS build-python
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv python3-dev binutils libpython3.11 \
+    python3 python3-pip python3-venv python3-dev binutils \
     && pip3 install --break-system-packages --no-cache-dir pyinstaller \
     && rm -rf /var/lib/apt/lists/*
 
@@ -120,7 +120,7 @@ RUN bun build --compile --minify ./dist/extract_api.js --outfile ts_extractor
 # ============================================================================
 # Stage 6: Download Copilot CLI
 # ============================================================================
-FROM debian:bookworm-slim AS build-copilot
+FROM debian:trixie-slim AS build-copilot
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
@@ -130,9 +130,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://gh.io/copilot-install | bash
 
 # ============================================================================
-# Stage 7: Runtime (debian slim - compatible glibc for all native extractors)
+# Stage 7: Runtime (debian trixie - compatible glibc for .NET 10 AOT and all native extractors)
 # ============================================================================
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/deyaaeldeen/sdk-chat"
 LABEL org.opencontainers.image.description="SDK Chat (Native AOT)"

@@ -8,7 +8,7 @@ namespace AgentClientProtocol.Sdk.JsonRpc;
 
 /// <summary>
 /// JSON-RPC 2.0 error with standard ACP error codes.
-/// Named "Error" (not "Exception") to match JSON-RPC 2.0 specification terminology.
+/// Intentionally named RequestError (not RequestException) to match JSON-RPC terminology.
 /// </summary>
 [SuppressMessage("Design", "CA1032:Implement standard exception constructors",
     Justification = "RequestError requires code+message; parameterless/message-only constructors are invalid for JSON-RPC errors")]

@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Xml.Linq;
 using ApiExtractor.Contracts;
@@ -17,6 +19,19 @@ namespace ApiExtractor.DotNet;
 /// </summary>
 public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 {
+    /// <summary>
+    /// Maximum number of syntax trees to process per batch during semantic analysis.
+    /// This limits memory consumption for very large repos (e.g., Azure SDK with 10K+ files).
+    /// Semantic models are released between batches to allow garbage collection.
+    /// </summary>
+    internal const int MaxSyntaxTreesPerBatch = 500;
+
+    /// <summary>
+    /// Cached runtime metadata references. These are the same for the lifetime of the process
+    /// (same AppContext.BaseDirectory), so we load them once.
+    /// </summary>
+    private static readonly Lazy<IReadOnlyList<MetadataReference>> s_runtimeReferences = new(LoadRuntimeReferences);
+
     /// <inheritdoc />
     public string Language => "csharp";
 
@@ -51,12 +66,12 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
     public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
-        var normalizedRoot = Path.GetFullPath(rootPath);
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var files = Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories)
             .Where(f =>
             {
                 // Only filter bin/obj directories that are INSIDE the rootPath
-                var relativePath = Path.GetRelativePath(normalizedRoot, f);
+                var relativePath = Path.GetRelativePath(rootPath, f);
                 return !relativePath.Contains("/obj/") && !relativePath.Contains("\\obj\\")
                     && !relativePath.Contains("/bin/") && !relativePath.Contains("\\bin\\")
                     && !relativePath.StartsWith("obj/") && !relativePath.StartsWith("obj\\")
@@ -67,13 +82,13 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Key: "namespace.TypeName", Value: merged type
         // Using ConcurrentDictionary for thread-safe parallel processing
         var typeMap = new ConcurrentDictionary<string, MergedType>();
-        
+
         // Resolve entry point namespaces from project configuration
         var entryPointNamespaces = ResolveEntryPointNamespaces(rootPath);
-        
+
         // Parse all files into syntax trees (parallel)
         var syntaxTrees = new ConcurrentBag<SyntaxTree>();
-        
+
         await Parallel.ForEachAsync(
             files,
             new ParallelOptions
@@ -86,10 +101,14 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 var code = await File.ReadAllTextAsync(file, token).ConfigureAwait(false);
                 var tree = CSharpSyntaxTree.ParseText(code, path: file, cancellationToken: token);
                 syntaxTrees.Add(tree);
-                
+
                 var root = await tree.GetRootAsync(token).ConfigureAwait(false);
                 ExtractFromRoot(root, typeMap, entryPointNamespaces);
             }).ConfigureAwait(false);
+
+        // Post-process: classify base types using locally-parsed type information
+        // instead of relying on naming conventions.
+        ClassifyBaseTypes(typeMap);
 
         var packageName = DetectPackageName(rootPath);
 
@@ -104,34 +123,50 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             .ToList();
 
         // Resolve transitive dependencies using semantic analysis
-        var dependencies = ResolveTransitiveDependencies(rootPath, syntaxTrees.ToList(), namespaces, ct);
+        // Snapshot ConcurrentBag to List once; ResolveTransitiveDependencies uses it directly
+        var treeList = syntaxTrees.ToList();
+        var dependencies = ResolveTransitiveDependencies(rootPath, treeList, namespaces, ct);
 
         return new ApiIndex { Package = packageName, Namespaces = namespaces, Dependencies = dependencies };
     }
-    
+
     #region Transitive Dependency Resolution (Semantic Analysis)
-    
+
     /// <summary>
     /// .NET system assemblies that should be excluded from dependencies.
     /// These are part of the runtime/BCL and not external packages.
+    /// Uses FrozenSet for zero-cost concurrent reads.
     /// </summary>
-    private static readonly HashSet<string> SystemAssemblyPrefixes = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly FrozenSet<string> SystemAssemblyPrefixes = new[]
     {
         "System", "mscorlib", "netstandard", "Microsoft.CSharp",
         "Microsoft.VisualBasic", "Microsoft.Win32", "WindowsBase",
-    };
-    
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Checks if an assembly is a system/runtime assembly (not an external dependency).
     /// </summary>
     private static bool IsSystemAssembly(string? assemblyName)
     {
         if (string.IsNullOrEmpty(assemblyName)) return true;
-        return SystemAssemblyPrefixes.Any(prefix => 
-            assemblyName.Equals(prefix, StringComparison.OrdinalIgnoreCase) ||
-            assemblyName.StartsWith(prefix + ".", StringComparison.OrdinalIgnoreCase));
+
+        // Exact match via FrozenSet O(1) lookup
+        if (SystemAssemblyPrefixes.Contains(assemblyName)) return true;
+
+        // Prefix match: check if assemblyName starts with any known prefix + "."
+        // Span-based comparison avoids string concatenation allocation on every iteration
+        // in the hot semantic-analysis path
+        var nameSpan = assemblyName.AsSpan();
+        foreach (var prefix in SystemAssemblyPrefixes)
+        {
+            if (nameSpan.Length > prefix.Length &&
+                nameSpan[prefix.Length] == '.' &&
+                nameSpan.StartsWith(prefix.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
-    
+
     /// <summary>
     /// Resolves transitive dependencies using Roslyn semantic analysis.
     /// Creates a compilation with NuGet package references to properly resolve external types.
@@ -143,7 +178,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         CancellationToken ct)
     {
         if (syntaxTrees.Count == 0) return null;
-        
+
         // Collect all defined type names (to exclude from dependencies)
         var definedTypes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var ns in namespaces)
@@ -156,10 +191,10 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 definedTypes.Add($"{ns.Name}.{type.Name.Split('<')[0]}");
             }
         }
-        
+
         // Load metadata references from NuGet packages
         var references = LoadMetadataReferences(rootPath);
-        
+
         // Create compilation with all syntax trees and references
         var compilation = CSharpCompilation.Create(
             "ApiExtraction",
@@ -167,43 +202,57 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
                 .WithNullableContextOptions(NullableContextOptions.Enable));
-        
+
         // Collect external type symbols from all public API surfaces
         var externalTypes = new Dictionary<string, (ITypeSymbol Symbol, string AssemblyName)>(StringComparer.Ordinal);
-        
-        foreach (var tree in syntaxTrees)
+
+        // Process syntax trees in batches to limit memory consumption
+        // Roslyn semantic models can consume significant memory for large repos
+        // Direct index-based loop avoids LINQ Skip/Take iterator allocations per batch
+        var batchCount = (syntaxTrees.Count + MaxSyntaxTreesPerBatch - 1) / MaxSyntaxTreesPerBatch;
+
+        for (int batchIndex = 0; batchIndex < batchCount; batchIndex++)
         {
             ct.ThrowIfCancellationRequested();
-            
-            var semanticModel = compilation.GetSemanticModel(tree);
-            var root = tree.GetRoot(ct);
-            
-            // Collect type references from all type declarations
-            foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+
+            var batchStart = batchIndex * MaxSyntaxTreesPerBatch;
+            var batchEnd = Math.Min(batchStart + MaxSyntaxTreesPerBatch, syntaxTrees.Count);
+
+            for (int i = batchStart; i < batchEnd; i++)
             {
-                if (!typeDecl.Modifiers.Any(SyntaxKind.PublicKeyword)) continue;
-                
-                // Base types and interfaces
-                if (typeDecl.BaseList != null)
+                ct.ThrowIfCancellationRequested();
+                var tree = syntaxTrees[i];
+
+                var semanticModel = compilation.GetSemanticModel(tree);
+                var root = tree.GetRoot(ct);
+
+                // Collect type references from all type declarations
+                foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
                 {
-                    foreach (var baseType in typeDecl.BaseList.Types)
+                    if (!typeDecl.Modifiers.Any(SyntaxKind.PublicKeyword)) continue;
+
+                    // Base types and interfaces
+                    if (typeDecl.BaseList != null)
                     {
-                        CollectExternalTypeSymbol(baseType.Type, semanticModel, definedTypes, externalTypes);
+                        foreach (var baseType in typeDecl.BaseList.Types)
+                        {
+                            CollectExternalTypeSymbol(baseType.Type, semanticModel, definedTypes, externalTypes);
+                        }
                     }
-                }
-                
-                // Members
-                foreach (var member in typeDecl.Members)
-                {
-                    if (!member.Modifiers.Any(SyntaxKind.PublicKeyword)) continue;
-                    
-                    CollectTypesFromMember(member, semanticModel, definedTypes, externalTypes);
+
+                    // Members
+                    foreach (var member in typeDecl.Members)
+                    {
+                        if (!member.Modifiers.Any(SyntaxKind.PublicKeyword)) continue;
+
+                        CollectTypesFromMember(member, semanticModel, definedTypes, externalTypes);
+                    }
                 }
             }
         }
-        
+
         if (externalTypes.Count == 0) return null;
-        
+
         // Group by assembly (package) name
         var byPackage = externalTypes
             .GroupBy(kv => kv.Value.AssemblyName, StringComparer.Ordinal)
@@ -219,10 +268,10 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 }).OrderBy(t => t.Name).ToList()
             })
             .ToList();
-        
+
         return byPackage.Count > 0 ? byPackage : null;
     }
-    
+
     /// <summary>
     /// Collects type symbols from a member declaration (method, property, etc.)
     /// </summary>
@@ -248,11 +297,11 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                     CollectExternalTypeSymbol(typeConstraint.Type, semanticModel, definedTypes, externalTypes);
                 }
                 break;
-                
+
             case PropertyDeclarationSyntax prop:
                 CollectExternalTypeSymbol(prop.Type, semanticModel, definedTypes, externalTypes);
                 break;
-                
+
             case IndexerDeclarationSyntax indexer:
                 CollectExternalTypeSymbol(indexer.Type, semanticModel, definedTypes, externalTypes);
                 foreach (var param in indexer.ParameterList.Parameters)
@@ -261,15 +310,15 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                         CollectExternalTypeSymbol(param.Type, semanticModel, definedTypes, externalTypes);
                 }
                 break;
-                
+
             case EventDeclarationSyntax evt:
                 CollectExternalTypeSymbol(evt.Type, semanticModel, definedTypes, externalTypes);
                 break;
-                
+
             case FieldDeclarationSyntax field:
                 CollectExternalTypeSymbol(field.Declaration.Type, semanticModel, definedTypes, externalTypes);
                 break;
-                
+
             case ConstructorDeclarationSyntax ctor:
                 foreach (var param in ctor.ParameterList.Parameters)
                 {
@@ -279,7 +328,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 break;
         }
     }
-    
+
     /// <summary>
     /// Collects an external type symbol if it's from an external assembly.
     /// Recursively collects generic type arguments.
@@ -292,12 +341,12 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     {
         var typeInfo = semanticModel.GetTypeInfo(typeSyntax);
         var typeSymbol = typeInfo.Type;
-        
+
         if (typeSymbol == null) return;
-        
+
         CollectExternalTypeSymbolRecursive(typeSymbol, definedTypes, externalTypes);
     }
-    
+
     /// <summary>
     /// Recursively collects external type symbols, including generic type arguments.
     /// </summary>
@@ -314,45 +363,45 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 CollectExternalTypeSymbolRecursive(underlyingType, definedTypes, externalTypes);
             return;
         }
-        
+
         // Handle arrays
         if (typeSymbol is IArrayTypeSymbol arrayType)
         {
             CollectExternalTypeSymbolRecursive(arrayType.ElementType, definedTypes, externalTypes);
             return;
         }
-        
+
         // Skip type parameters (generics)
         if (typeSymbol.TypeKind == TypeKind.TypeParameter) return;
-        
+
         // Skip special types (primitives, etc.)
         if (typeSymbol.SpecialType != SpecialType.None) return;
-        
+
         // Skip error types
         if (typeSymbol.TypeKind == TypeKind.Error) return;
-        
+
         // Get the containing assembly
         var assembly = typeSymbol.ContainingAssembly;
         if (assembly == null) return;
-        
+
         var assemblyName = assembly.Name;
-        
+
         // Skip system assemblies
         if (IsSystemAssembly(assemblyName)) return;
-        
+
         // Get the type name
         var typeName = typeSymbol.Name;
         var fullName = typeSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).Split('<')[0];
-        
+
         // Skip if it's a locally defined type
         if (definedTypes.Contains(typeName) || definedTypes.Contains(fullName)) return;
-        
+
         // Add to external types if not already present
         if (!externalTypes.ContainsKey(typeName))
         {
             externalTypes[typeName] = (typeSymbol, assemblyName);
         }
-        
+
         // Recursively process generic type arguments
         if (typeSymbol is INamedTypeSymbol namedType && namedType.TypeArguments.Length > 0)
         {
@@ -362,7 +411,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             }
         }
     }
-    
+
     /// <summary>
     /// Gets the kind string for a type symbol.
     /// </summary>
@@ -375,16 +424,13 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         TypeKind.Delegate => "delegate",
         _ => "type"
     };
-    
+
     /// <summary>
-    /// Loads metadata references from NuGet packages and the runtime.
+    /// Loads runtime metadata references (BCL assemblies). Cached for the process lifetime.
     /// </summary>
-    private static IReadOnlyList<MetadataReference> LoadMetadataReferences(string rootPath)
+    private static IReadOnlyList<MetadataReference> LoadRuntimeReferences()
     {
         var references = new List<MetadataReference>();
-        
-        // Add runtime references (required for compilation)
-        // Use AppContext.BaseDirectory for single-file app compatibility
         var runtimeDir = AppContext.BaseDirectory;
         if (!string.IsNullOrEmpty(runtimeDir))
         {
@@ -397,25 +443,34 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 "System.IO.dll",
                 "netstandard.dll",
             };
-            
+
             foreach (var asm in runtimeAssemblies)
             {
                 var path = Path.Combine(runtimeDir, asm);
                 if (File.Exists(path))
                 {
                     try { references.Add(MetadataReference.CreateFromFile(path)); }
-                    catch { /* Ignore inaccessible assemblies */ }
+                    catch (Exception ex) { Trace.TraceWarning("Failed to load runtime assembly '{0}': {1}", path, ex.Message); }
                 }
             }
         }
-        
+        return references;
+    }
+
+    /// <summary>
+    /// Loads metadata references from cached runtime assemblies and project-specific NuGet packages.
+    /// </summary>
+    private static IReadOnlyList<MetadataReference> LoadMetadataReferences(string rootPath)
+    {
+        var references = new List<MetadataReference>(s_runtimeReferences.Value);
+
         // Look for NuGet packages in common locations
         var nugetPackagesDir = FindNuGetPackagesDirectory(rootPath);
         if (nugetPackagesDir != null)
         {
             // Parse project file to find package references
             var packageRefs = ParseProjectPackageReferences(rootPath);
-            
+
             foreach (var (packageName, version) in packageRefs)
             {
                 var packageDir = Path.Combine(nugetPackagesDir, packageName.ToLowerInvariant(), version);
@@ -436,7 +491,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                         }
                     }
                 }
-                
+
                 if (Directory.Exists(packageDir))
                 {
                     // Find the lib folder with the appropriate target framework
@@ -446,16 +501,16 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                         foreach (var dll in Directory.GetFiles(libDir, "*.dll"))
                         {
                             try { references.Add(MetadataReference.CreateFromFile(dll)); }
-                            catch { /* Ignore inaccessible assemblies */ }
+                            catch (Exception ex) { Trace.TraceWarning("Failed to load NuGet assembly '{0}': {1}", dll, ex.Message); }
                         }
                     }
                 }
             }
         }
-        
+
         return references;
     }
-    
+
     /// <summary>
     /// Finds the NuGet packages directory.
     /// </summary>
@@ -464,57 +519,57 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Check for local packages folder
         var localPackages = Path.Combine(rootPath, "packages");
         if (Directory.Exists(localPackages)) return localPackages;
-        
+
         // Check NUGET_PACKAGES environment variable
         var envPackages = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
         if (!string.IsNullOrEmpty(envPackages) && Directory.Exists(envPackages))
             return envPackages;
-        
+
         // Default locations
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var defaultDir = Path.Combine(homeDir, ".nuget", "packages");
         if (Directory.Exists(defaultDir)) return defaultDir;
-        
+
         return null;
     }
-    
+
     /// <summary>
     /// Parses package references from the project file.
     /// </summary>
     private static IReadOnlyList<(string Name, string Version)> ParseProjectPackageReferences(string rootPath)
     {
         var results = new List<(string, string)>();
-        
+
         var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
                   ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
-        
+
         if (csproj == null) return results;
-        
+
         try
         {
             var doc = XDocument.Load(csproj);
             var packageRefs = doc.Descendants()
                 .Where(e => e.Name.LocalName == "PackageReference");
-            
+
             foreach (var pr in packageRefs)
             {
                 var name = pr.Attribute("Include")?.Value;
                 var version = pr.Attribute("Version")?.Value ?? pr.Element(XName.Get("Version", pr.Name.NamespaceName))?.Value;
-                
+
                 if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(version))
                 {
                     results.Add((name, version));
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore parse errors
+            Trace.TraceWarning("Failed to parse package references from '{0}': {1}", csproj, ex.Message);
         }
-        
+
         return results;
     }
-    
+
     /// <summary>
     /// Finds the best target framework folder in a NuGet package.
     /// </summary>
@@ -522,70 +577,69 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     {
         var libDir = Path.Combine(packageDir, "lib");
         if (!Directory.Exists(libDir)) return null;
-        
+
         // Prefer newer frameworks
         var preferredFrameworks = new[]
         {
-            "net8.0", "net7.0", "net6.0", "net5.0",
+            "net10.0", "net9.0", "net8.0", "net7.0", "net6.0", "net5.0",
             "netstandard2.1", "netstandard2.0", "netstandard1.6", "netstandard1.0",
             "netcoreapp3.1", "netcoreapp3.0", "netcoreapp2.1", "netcoreapp2.0",
             "net48", "net472", "net471", "net47", "net462", "net461", "net46", "net45"
         };
-        
+
         foreach (var fw in preferredFrameworks)
         {
             var fwDir = Path.Combine(libDir, fw);
             if (Directory.Exists(fwDir)) return fwDir;
         }
-        
+
         // Fall back to any framework folder
         return Directory.GetDirectories(libDir).FirstOrDefault();
     }
-    
+
     #endregion
-    
+
     #region Entry Point Detection
-    
+
     /// <summary>
     /// Resolves entry point namespaces from project configuration.
     /// Entry points in .NET are determined by:
     /// 1. RootNamespace from .csproj
     /// 2. PackageId from .csproj
     /// 3. Inferred from project directory name
+    /// Returns a FrozenSet for guaranteed thread-safe concurrent reads.
     /// </summary>
-    private static HashSet<string> ResolveEntryPointNamespaces(string rootPath)
+    private static FrozenSet<string> ResolveEntryPointNamespaces(string rootPath)
     {
         var entryPoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        
+
         // Find .csproj file
         var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
                   ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
-        
+
         if (csproj != null)
         {
-            var content = File.ReadAllText(csproj);
-            
-            // Parse RootNamespace
-            var rootNs = ExtractCsprojProperty(content, "RootNamespace");
-            if (!string.IsNullOrEmpty(rootNs))
+            try
             {
-                entryPoints.Add(rootNs);
+                var doc = XDocument.Load(csproj);
+
+                var rootNs = ExtractCsprojProperty(doc, "RootNamespace");
+                if (!string.IsNullOrEmpty(rootNs))
+                    entryPoints.Add(rootNs);
+
+                var packageId = ExtractCsprojProperty(doc, "PackageId");
+                if (!string.IsNullOrEmpty(packageId))
+                    entryPoints.Add(packageId);
+
+                var assemblyName = ExtractCsprojProperty(doc, "AssemblyName");
+                if (!string.IsNullOrEmpty(assemblyName))
+                    entryPoints.Add(assemblyName);
             }
-            
-            // Parse PackageId
-            var packageId = ExtractCsprojProperty(content, "PackageId");
-            if (!string.IsNullOrEmpty(packageId))
+            catch (Exception ex)
             {
-                entryPoints.Add(packageId);
+                Trace.TraceWarning("Failed to parse csproj '{0}': {1}", csproj, ex.Message);
             }
-            
-            // Parse AssemblyName
-            var assemblyName = ExtractCsprojProperty(content, "AssemblyName");
-            if (!string.IsNullOrEmpty(assemblyName))
-            {
-                entryPoints.Add(assemblyName);
-            }
-            
+
             // Fallback to project file name
             var projectName = Path.GetFileNameWithoutExtension(csproj);
             if (!string.IsNullOrEmpty(projectName))
@@ -602,31 +656,30 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 entryPoints.Add(dirName);
             }
         }
-        
-        return entryPoints;
+
+        return entryPoints.ToFrozenSet();
     }
-    
+
     /// <summary>
-    /// Extracts a property value from .csproj XML content.
+    /// Extracts a property value from a parsed .csproj XDocument.
     /// </summary>
-    private static string? ExtractCsprojProperty(string content, string propertyName)
+    private static string? ExtractCsprojProperty(XDocument doc, string propertyName)
     {
-        // Simple regex-based extraction (avoiding full XML parsing for speed)
-        var pattern = $"<{propertyName}>([^<]+)</{propertyName}>";
-        var match = System.Text.RegularExpressions.Regex.Match(content, pattern);
-        return match.Success ? match.Groups[1].Value.Trim() : null;
+        var value = doc.Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == propertyName)?.Value?.Trim();
+        return string.IsNullOrEmpty(value) ? null : value;
     }
-    
+
     /// <summary>
     /// Checks if a namespace is an entry point namespace.
     /// </summary>
-    private static bool IsEntryPointNamespace(string ns, HashSet<string> entryPointNamespaces)
+    private static bool IsEntryPointNamespace(string ns, FrozenSet<string> entryPointNamespaces)
     {
         if (entryPointNamespaces.Count == 0)
         {
             return false;
         }
-        
+
         foreach (var entryNs in entryPointNamespaces)
         {
             // Exact match or the namespace equals the entry point
@@ -634,7 +687,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             {
                 return true;
             }
-            
+
             // Namespace is a direct child of entry point (e.g., "MyPkg.Models" when entry is "MyPkg")
             // But exclude implementation/internal namespaces
             if (ns.StartsWith(entryNs + ".", StringComparison.OrdinalIgnoreCase))
@@ -649,10 +702,10 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 }
             }
         }
-        
+
         return false;
     }
-    
+
     #endregion
 
     /// <summary>
@@ -669,8 +722,9 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         public ConcurrentDictionary<string, byte> Interfaces { get; } = new(); // Using dict as concurrent hashset
         public volatile string? Doc;
         public ConcurrentDictionary<string, MemberInfo> Members { get; } = new(); // Key = signature for dedup
-        public volatile List<string>? Values;
+        private volatile List<string>? _values;
         public volatile bool IsEntryPoint;
+        public ConcurrentBag<string> RawBaseTypes { get; } = [];
 
         public void AddInterface(string iface) => Interfaces.TryAdd(iface, 0);
 
@@ -698,6 +752,18 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             }
         }
 
+        public void SetValuesIfNull(List<string> values)
+        {
+            if (_values == null)
+            {
+                lock (_lock) { _values ??= values; }
+            }
+        }
+
+        /// <summary>
+        /// Produces an immutable snapshot. Called after Parallel.ForEachAsync completes,
+        /// so all writes are sequenced before this read — no lock needed.
+        /// </summary>
         public TypeInfo ToTypeInfo() => new()
         {
             Name = Name,
@@ -706,12 +772,12 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Interfaces = !Interfaces.IsEmpty ? Interfaces.Keys.OrderBy(i => i).ToList() : null,
             Doc = Doc,
             Members = !Members.IsEmpty ? Members.Values.ToList() : null,
-            Values = Values,
+            Values = _values,
             EntryPoint = IsEntryPoint ? true : null
         };
     }
 
-    private void ExtractFromRoot(SyntaxNode root, ConcurrentDictionary<string, MergedType> typeMap, HashSet<string> entryPointNamespaces)
+    private void ExtractFromRoot(SyntaxNode root, ConcurrentDictionary<string, MergedType> typeMap, FrozenSet<string> entryPointNamespaces)
     {
         var fileScopedNs = root.DescendantNodes().OfType<FileScopedNamespaceDeclarationSyntax>().FirstOrDefault();
         if (fileScopedNs != null)
@@ -748,7 +814,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
         // Update kind (first non-empty wins) - thread-safe
         merged.SetKindIfEmpty(GetTypeKind(type));
-        
+
         // Mark as entry point if in entry point namespace
         if (isEntryPointNamespace)
         {
@@ -759,13 +825,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         if (type is TypeDeclarationSyntax tds && tds.BaseList != null)
         {
             foreach (var baseType in tds.BaseList.Types)
-            {
-                var baseName = baseType.ToString();
-                if (IsInterface(baseName))
-                    merged.AddInterface(baseName);
-                else
-                    merged.SetBaseIfNull(baseName);
-            }
+                merged.RawBaseTypes.Add(baseType.ToString());
         }
 
         // Take first doc - thread-safe
@@ -774,7 +834,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Merge members
         if (type is EnumDeclarationSyntax e)
         {
-            merged.Values = e.Members.Select(m => m.Identifier.Text).ToList();
+            merged.SetValuesIfNull(e.Members.Select(m => m.Identifier.Text).ToList());
         }
         else if (type is TypeDeclarationSyntax typeSyntax)
         {
@@ -785,6 +845,73 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                     merged.Members.TryAdd(info.Signature, info);
             }
         }
+    }
+
+    /// <summary>
+    /// Classifies raw base type names collected during parsing into interfaces vs base classes.
+    /// Uses locally-parsed type information (from typeMap) for definitive classification.
+    /// For the declaring type's own kind:
+    ///   - If the type is an interface, all base types are interfaces (C# language rule).
+    ///   - If the type is a class/struct, check each base type against known local types.
+    ///   - For external types not in our source tree, use the C# naming convention
+    ///     (interface names start with 'I' + uppercase, enforced by CA1715).
+    /// </summary>
+    private static void ClassifyBaseTypes(ConcurrentDictionary<string, MergedType> typeMap)
+    {
+        // Build lookup: simple type name → kind from all locally-parsed types.
+        // This gives us definitive classification for any type defined in the source tree.
+        var knownKinds = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var mt in typeMap.Values)
+        {
+            var simpleName = StripGenericParams(mt.Name);
+            knownKinds.TryAdd(simpleName, mt.Kind);
+        }
+
+        foreach (var mt in typeMap.Values)
+        {
+            foreach (var rawBase in mt.RawBaseTypes)
+            {
+                var baseName = StripGenericParams(rawBase);
+                // Strip any namespace qualifier for lookup (e.g., "Foo.IBar" → "IBar")
+                var simpleName = baseName.LastIndexOf('.') is >= 0 and var dotIdx
+                    ? baseName[(dotIdx + 1)..]
+                    : baseName;
+
+                if (mt.Kind == "interface")
+                {
+                    // C# language rule: interfaces can only extend other interfaces.
+                    mt.AddInterface(rawBase);
+                }
+                else if (knownKinds.TryGetValue(simpleName, out var kind))
+                {
+                    // Known locally-defined type: classify by its actual declared kind.
+                    if (kind == "interface")
+                        mt.AddInterface(rawBase);
+                    else
+                        mt.SetBaseIfNull(rawBase);
+                }
+                else
+                {
+                    // External type not in our source tree.
+                    // Use the C# naming convention (CA1715): interfaces start with 'I' + uppercase.
+                    // This is enforced by Roslyn analyzers and universally followed in .NET.
+                    if (simpleName.Length >= 2 && simpleName[0] == 'I' && char.IsUpper(simpleName[1]))
+                        mt.AddInterface(rawBase);
+                    else
+                        mt.SetBaseIfNull(rawBase);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Strips generic type parameters from a type name.
+    /// E.g., "IList&lt;T&gt;" → "IList", "Dictionary&lt;K,V&gt;" → "Dictionary"
+    /// </summary>
+    private static string StripGenericParams(string name)
+    {
+        var idx = name.IndexOf('<');
+        return idx >= 0 ? name[..idx] : name;
     }
 
     private static string GetTypeKind(BaseTypeDeclarationSyntax type) => type switch
@@ -863,12 +990,31 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             ? "<" + string.Join(",", m.TypeParameterList.Parameters.Select(p => p.Identifier.Text)) + ">"
             : "";
 
+    /// <summary>
+    /// Determines whether a method is async by checking the async modifier
+    /// or by inspecting the return type syntax for Task/ValueTask/IAsyncEnumerable.
+    /// Uses Roslyn syntax tree walking instead of string matching.
+    /// </summary>
     private static bool IsAsyncMethod(MethodDeclarationSyntax m)
     {
-        var ret = m.ReturnType.ToString();
-        return m.Modifiers.Any(SyntaxKind.AsyncKeyword) ||
-               ret.StartsWith("Task") || ret.StartsWith("ValueTask") || ret.StartsWith("IAsyncEnumerable");
+        if (m.Modifiers.Any(SyntaxKind.AsyncKeyword)) return true;
+        var name = GetOutermostTypeName(m.ReturnType);
+        return name is "Task" or "ValueTask" or "IAsyncEnumerable";
     }
+
+    /// <summary>
+    /// Extracts the outermost type identifier from a TypeSyntax node,
+    /// stripping namespace qualifiers and ignoring generic type arguments.
+    /// E.g., System.Threading.Tasks.Task&lt;int&gt; → "Task"
+    /// </summary>
+    private static string? GetOutermostTypeName(TypeSyntax type) => type switch
+    {
+        IdentifierNameSyntax id => id.Identifier.Text,
+        GenericNameSyntax g => g.Identifier.Text,
+        QualifiedNameSyntax q => GetOutermostTypeName(q.Right),
+        AliasQualifiedNameSyntax a => GetOutermostTypeName(a.Name),
+        _ => null
+    };
 
     private static string Accessors(PropertyDeclarationSyntax p)
     {
@@ -904,12 +1050,42 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         return string.IsNullOrEmpty(mods) ? $"{type} {name}{def}" : $"{mods} {type} {name}{def}";
     }
 
-    private static string Simplify(TypeSyntax? type) =>
-        type?.ToString()
-            .Replace("System.Threading.Tasks.", "")
-            .Replace("System.Collections.Generic.", "")
-            .Replace("System.Threading.", "")
-            .Replace("System.", "") ?? "";
+    /// <summary>
+    /// Simplifies a type syntax by stripping well-known System namespace qualifiers.
+    /// Uses Roslyn syntax tree walking to only strip leading namespace qualifiers
+    /// from QualifiedNameSyntax nodes, never touching type names that happen to
+    /// contain "System" as a substring.
+    /// </summary>
+    private static string Simplify(TypeSyntax? type)
+    {
+        if (type is null) return "";
+        return SimplifyType(type);
+    }
+
+    /// <summary>
+    /// Recursively walks a TypeSyntax tree, stripping System.* namespace qualifiers
+    /// from QualifiedNameSyntax nodes while preserving all other structure.
+    /// </summary>
+    private static string SimplifyType(TypeSyntax type) => type switch
+    {
+        QualifiedNameSyntax q when IsSystemNamespace(q.Left.ToString())
+            => SimplifyType(q.Right),
+        GenericNameSyntax g
+            => g.Identifier.Text + "<" + string.Join(", ", g.TypeArgumentList.Arguments.Select(SimplifyType)) + ">",
+        ArrayTypeSyntax a
+            => SimplifyType(a.ElementType) + string.Join("", a.RankSpecifiers),
+        NullableTypeSyntax n
+            => SimplifyType(n.ElementType) + "?",
+        _ => type.ToString()
+    };
+
+    /// <summary>
+    /// Returns true if the given string represents a System namespace that should be stripped.
+    /// Only called with the Left side of a QualifiedNameSyntax, so it always represents
+    /// a complete namespace qualifier — never a substring of a type name.
+    /// </summary>
+    private static bool IsSystemNamespace(string ns) =>
+        ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal);
 
     private static string? GetXmlDoc(SyntaxNode node)
     {
@@ -934,8 +1110,12 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     }
 
     private bool IsPublic(BaseTypeDeclarationSyntax t) => t.Modifiers.Any(SyntaxKind.PublicKeyword);
-    private bool IsPublicMember(MemberDeclarationSyntax m) => m.Modifiers.Any(SyntaxKind.PublicKeyword);
-    private static bool IsInterface(string name) => name.Length >= 2 && name[0] == 'I' && char.IsUpper(name[1]);
+    /// <summary>
+    /// Interface members are implicitly public in C# (no explicit modifier needed).
+    /// For classes/structs, the public keyword is required.
+    /// </summary>
+    private static bool IsPublicMember(MemberDeclarationSyntax m) =>
+        m.Modifiers.Any(SyntaxKind.PublicKeyword) || m.Parent is InterfaceDeclarationSyntax;
 
     private static string DetectPackageName(string rootPath)
     {

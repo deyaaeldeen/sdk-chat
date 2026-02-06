@@ -19,13 +19,13 @@ public static class ExtractorTimeout
     /// </summary>
     public const string EnvVarName = "SDK_CHAT_EXTRACTOR_TIMEOUT";
 
-    private static TimeSpan? _cached;
+    private static Lazy<TimeSpan> _lazy = new(ResolveTimeout);
 
     /// <summary>
     /// Gets the configured extractor timeout.
-    /// Reads SDK_CHAT_EXTRACTOR_TIMEOUT once and caches the result.
+    /// Thread-safe; reads SDK_CHAT_EXTRACTOR_TIMEOUT once and caches the result.
     /// </summary>
-    public static TimeSpan Value => _cached ??= ResolveTimeout();
+    public static TimeSpan Value => _lazy.Value;
 
     private static TimeSpan ResolveTimeout()
     {
@@ -40,5 +40,5 @@ public static class ExtractorTimeout
     /// <summary>
     /// Resets the cached timeout. For testing only.
     /// </summary>
-    internal static void Reset() => _cached = null;
+    internal static void Reset() => _lazy = new(ResolveTimeout);
 }

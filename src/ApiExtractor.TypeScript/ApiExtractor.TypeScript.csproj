@@ -44,15 +44,25 @@
       <Output TaskParameter="ExitCode" PropertyName="NpmExitCode"/>
     </Exec>
 
-    <!-- Run npm install if npm is available and node_modules doesn't exist in output -->
+    <!-- Run npm install if npm is available and node_modules doesn't exist -->
     <Message Importance="high" 
              Text="Installing npm dependencies for TypeScript extractor..." 
-             Condition="'$(NpmExitCode)' == '0' and !Exists('$(OutputPath)node_modules')" />
+             Condition="'$(NpmExitCode)' == '0' and !Exists('$(MSBuildProjectDirectory)/node_modules')" />
     
     <!-- Install in source directory first (needed for package-lock.json resolution) -->
     <Exec Command="npm install --silent"
           WorkingDirectory="$(MSBuildProjectDirectory)"
           Condition="'$(NpmExitCode)' == '0' and !Exists('$(MSBuildProjectDirectory)/node_modules')" 
+          StandardOutputImportance="low" />
+
+    <!-- Build TypeScript source to dist folder -->
+    <Message Importance="high" 
+             Text="Building TypeScript extractor..." 
+             Condition="'$(NpmExitCode)' == '0'" />
+    
+    <Exec Command="npm run build"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          Condition="'$(NpmExitCode)' == '0'"
           StandardOutputImportance="low" />
 
     <!-- Copy node_modules to output directory using robocopy/cp -->

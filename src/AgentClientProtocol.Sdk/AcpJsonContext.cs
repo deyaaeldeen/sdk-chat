@@ -1,6 +1,7 @@
 // Agent Client Protocol - .NET SDK
 // JSON source generator for compile-time serialization
 
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using AgentClientProtocol.Sdk.JsonRpc;
 using AgentClientProtocol.Sdk.Schema;
@@ -165,6 +166,10 @@ public partial class AcpJsonContext : JsonSerializerContext
     /// but fall back to reflection for unknown/dynamic types (e.g., anonymous types).
     /// Use this for AOT-friendly serialization while maintaining flexibility.
     /// </summary>
+    [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",
+        Justification = "FlexibleOptions intentionally uses reflection fallback for dynamic/anonymous types")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "FlexibleOptions intentionally uses reflection fallback for dynamic/anonymous types")]
     public static System.Text.Json.JsonSerializerOptions FlexibleOptions
     {
         get
@@ -177,7 +182,6 @@ public partial class AcpJsonContext : JsonSerializerContext
 
                 // Intentionally allow reflection fallback for dynamic types (anonymous types, user-defined types)
                 // This is the only place where we accept the AOT/trim tradeoff for flexibility
-#pragma warning disable IL2026, IL3050 // Reflection fallback intentional for dynamic types
                 var options = new System.Text.Json.JsonSerializerOptions
                 {
                     PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
@@ -186,7 +190,6 @@ public partial class AcpJsonContext : JsonSerializerContext
                     // Chain: source-generated first, then fall back to default reflection resolver
                     TypeInfoResolver = System.Text.Json.Serialization.Metadata.JsonTypeInfoResolver.Combine(Default, new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver())
                 };
-#pragma warning restore IL2026, IL3050
                 _flexibleOptions = options;
             }
 

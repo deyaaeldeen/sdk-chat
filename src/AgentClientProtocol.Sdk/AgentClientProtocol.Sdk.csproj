@@ -9,7 +9,14 @@
     <!-- Treat warnings as errors for production quality -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsAsErrors />
-    <NoWarn>$(NoWarn);CS1591</NoWarn> <!-- Missing XML doc - enable after stabilization -->
+    <!-- Suppressed CA rules: -->
+    <!-- CS1591: Missing XML doc - enable after stabilization -->
+    <!-- CA1032: Exception constructors - RequestError uses factory methods by design -->
+    <!-- CA1056: URI string properties - protocol schema uses string URIs per spec -->
+    <!-- CA1710/CA1711: Collection/Exception naming - protocol names take precedence -->
+    <!-- CA1819: Array properties - immutable record properties are safe -->
+    <!-- CA1724: Type names conflict - intentional use of Schema namespace -->
+    <NoWarn>$(NoWarn);CS1591;CA1032;CA1056;CA1710;CA1711;CA1819;CA1724</NoWarn>
     
     <!-- Enable latest analyzers -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

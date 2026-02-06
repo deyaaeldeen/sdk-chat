@@ -82,6 +82,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
     public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
         var startTime = System.Diagnostics.Stopwatch.GetTimestamp();
 

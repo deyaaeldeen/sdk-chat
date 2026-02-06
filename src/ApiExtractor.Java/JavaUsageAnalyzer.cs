@@ -20,6 +20,11 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <inheritdoc />
     public string Language => "java";
 
+    /// <summary>
+    /// Checks if JBang is available to run the usage analyzer.
+    /// </summary>
+    public bool IsAvailable() => GetAvailability().IsAvailable;
+
     /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {

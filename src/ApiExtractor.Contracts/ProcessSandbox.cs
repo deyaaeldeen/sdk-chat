@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
@@ -20,6 +21,33 @@ public static class ProcessSandbox
 {
     /// <summary>Maximum output size per stream (10MB).</summary>
     public const int MaxOutputBytes = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// Validates that a root path is safe to pass to an external process.
+    /// Resolves symlinks, verifies the directory exists, and rejects paths
+    /// with suspicious patterns (null bytes, excessive traversal).
+    /// </summary>
+    /// <param name="rootPath">The path to validate.</param>
+    /// <returns>The fully resolved canonical path.</returns>
+    /// <exception cref="ArgumentException">Thrown if the path is null, empty, or contains dangerous characters.</exception>
+    /// <exception cref="DirectoryNotFoundException">Thrown if the resolved path does not exist.</exception>
+    public static string ValidateRootPath([NotNull] string? rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath))
+            throw new ArgumentException("Root path cannot be null or empty.", nameof(rootPath));
+
+        // Block null bytes - classic path injection vector
+        if (rootPath.Contains('\0'))
+            throw new ArgumentException("Root path contains null bytes.", nameof(rootPath));
+
+        // Resolve to absolute, canonical path (resolves symlinks, .., etc.)
+        var resolved = Path.GetFullPath(rootPath);
+
+        if (!Directory.Exists(resolved))
+            throw new DirectoryNotFoundException($"Root path does not exist: {resolved}");
+
+        return resolved;
+    }
 
     /// <summary>
     /// Execute a process with sandboxed settings.
@@ -116,6 +144,12 @@ public static class ProcessSandbox
     }
 
     /// <summary>
+    /// Characters blocked in executable file names to prevent shell injection.
+    /// Uses SearchValues for hardware-accelerated vectorized searching.
+    /// </summary>
+    private static readonly SearchValues<char> InvalidFileNameChars = SearchValues.Create(";|&$`\n\r");
+
+    /// <summary>
     /// Validate file name to prevent obvious injection attacks.
     /// </summary>
     private static void ValidateFileName([NotNull] string? fileName)
@@ -126,8 +160,7 @@ public static class ProcessSandbox
         }
 
         // Block obvious shell metacharacters in the executable name
-        var invalidChars = new[] { ';', '|', '&', '$', '`', '\n', '\r' };
-        if (fileName.IndexOfAny(invalidChars) >= 0)
+        if (fileName.AsSpan().IndexOfAny(InvalidFileNameChars) >= 0)
         {
             throw new ArgumentException($"File name contains invalid characters: {fileName}", nameof(fileName));
         }

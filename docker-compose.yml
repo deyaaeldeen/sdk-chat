@@ -6,7 +6,7 @@
 # Usage:
 #   docker compose run --rm sdk-chat package sample generate /sdk
 #   docker compose run --rm sdk-chat doctor
-#   docker compose up mcp-sse  # Start MCP server on port 8080
+#   docker compose up mcp-http  # Start MCP server on port 8080
 #
 # Authentication (set one of these before running):
 #   export GH_TOKEN="ghp_..."        # GitHub token (preferred)
@@ -40,8 +40,8 @@ services:
     stdin_open: true
     tty: true
 
-  # MCP server with SSE transport on port 8080
-  mcp-sse:
+  # MCP server with Streamable HTTP transport on port 8080
+  mcp-http:
     image: ${SDK_CHAT_IMAGE:-sdk-chat:latest}
     ports:
       - "${MCP_PORT:-8080}:${MCP_PORT:-8080}"
@@ -54,7 +54,7 @@ services:
       - GITHUB_TOKEN
       - SDK_CLI_MODEL
       - SDK_CLI_USE_OPENAI
-    command: ["mcp", "--transport", "sse", "--port", "${MCP_PORT:-8080}"]
+    command: ["mcp", "--transport", "http", "--port", "${MCP_PORT:-8080}"]
 
   # Interactive ACP agent
   acp:

@@ -25,7 +25,7 @@ public class McpServerTests
     }
 
     [Theory]
-    [InlineData("http")]
+    [InlineData("sse")]
     [InlineData("websocket")]
     [InlineData("grpc")]
     [InlineData("")]
@@ -40,10 +40,10 @@ public class McpServerTests
     }
 
     [Theory]
-    [InlineData("sse")]
-    [InlineData("SSE")]
-    [InlineData("Sse")]
-    public async Task RunAsync_WithSseTransport_DoesNotExitImmediately(string transport)
+    [InlineData("http")]
+    [InlineData("HTTP")]
+    [InlineData("Http")]
+    public async Task RunAsync_WithHttpTransport_DoesNotExitImmediately(string transport)
     {
         // Arrange
         using var cts = new CancellationTokenSource();
@@ -52,7 +52,7 @@ public class McpServerTests
         // Use an ephemeral port to avoid conflicts
         var port = GetAvailablePort();
 
-        // Act - Start the SSE server in a background task with cancellation token
+        // Act - Start the HTTP server in a background task with cancellation token
         var serverTask = Task.Run(async () =>
         {
             try
@@ -71,7 +71,7 @@ public class McpServerTests
 
         // Assert - Server should not complete immediately (delay completes first)
         Assert.Equal(delayTask, completedTask);
-        Assert.False(serverTask.IsCompleted, $"SSE server with transport '{transport}' should not complete immediately");
+        Assert.False(serverTask.IsCompleted, $"HTTP server with transport '{transport}' should not complete immediately");
 
         // Ensure cleanup - cancel and wait for server to shut down
         await cts.CancelAsync();
@@ -127,19 +127,19 @@ public class McpServerTests
     }
 
     [Fact]
-    public async Task RunAsync_WithSseTransport_StartsHttpServerOnSpecifiedPort()
+    public async Task RunAsync_WithHttpTransport_StartsHttpServerOnSpecifiedPort()
     {
         // Arrange
         var port = GetAvailablePort();
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-        // Act - Start the SSE server with cancellation token
+        // Act - Start the HTTP server with cancellation token
         var serverTask = Task.Run(async () =>
         {
             try
             {
-                await McpServer.RunAsync("sse", port, "error", useOpenAi: false, cancellationToken: cts.Token);
+                await McpServer.RunAsync("http", port, "error", useOpenAi: false, cancellationToken: cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -148,10 +148,12 @@ public class McpServerTests
         });
 
         // Wait for server to initialize with retry logic
+        // Streamable HTTP transport uses POST on /mcp — verify server is listening by connecting
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         HttpResponseMessage? response = null;
         var attempts = 0;
         var maxAttempts = 10;
+        var serverReady = false;
 
         while (attempts < maxAttempts && !cts.Token.IsCancellationRequested)
         {
@@ -159,30 +161,34 @@ public class McpServerTests
             try
             {
                 await Task.Delay(200 * attempts, cts.Token); // Exponential backoff
-                response = await httpClient.GetAsync($"http://localhost:{port}/sse", HttpCompletionOption.ResponseHeadersRead, cts.Token);
-                if (response.IsSuccessStatusCode)
-                {
-                    break; // Server is ready
-                }
+                // Use POST since Streamable HTTP transport expects POST requests
+                response = await httpClient.PostAsync($"http://localhost:{port}/mcp",
+                    new StringContent("{}", System.Text.Encoding.UTF8, "application/json"), cts.Token);
+                // Any HTTP response (even 4xx) means the server is running and listening
+                serverReady = true;
+                break;
             }
             catch (HttpRequestException)
             {
-                // Server not ready yet, retry
+                // Server not ready yet (connection refused), retry
                 if (attempts == maxAttempts)
                 {
                     throw;
                 }
             }
-            catch (TaskCanceledException)
+            catch (TaskCanceledException) when (!cts.Token.IsCancellationRequested)
             {
-                // Timeout or cancellation
-                throw;
+                // HTTP timeout, server might be slow - retry
+                if (attempts == maxAttempts)
+                {
+                    throw;
+                }
             }
         }
 
-        // Assert - Verify the server is accessible via HTTP and responds with success
+        // Assert - Verify the server accepted a connection (any HTTP response proves it's running)
+        Assert.True(serverReady, "HTTP server should be accepting connections");
         Assert.NotNull(response);
-        Assert.True(response.IsSuccessStatusCode, $"SSE endpoint should return success status code, but got {response.StatusCode}");
 
         // Ensure cleanup - cancel and wait for server to shut down
         await cts.CancelAsync();
@@ -197,9 +203,9 @@ public class McpServerTests
     }
 
     [Fact]
-    public async Task RunAsync_WithDifferentPorts_EachSseServerUsesCorrectPort()
+    public async Task RunAsync_WithDifferentPorts_EachHttpServerUsesCorrectPort()
     {
-        // Test that multiple SSE servers can be configured with different ports
+        // Test that multiple HTTP servers can be configured with different ports
         var port1 = GetAvailablePort();
         var port2 = GetAvailablePort();
 
@@ -213,7 +219,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync("sse", port1, "error", useOpenAi: false, cancellationToken: cts1.Token);
+                await McpServer.RunAsync("http", port1, "error", useOpenAi: false, cancellationToken: cts1.Token);
             }
             catch (OperationCanceledException)
             {
@@ -226,7 +232,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync("sse", port2, "error", useOpenAi: false, cancellationToken: cts2.Token);
+                await McpServer.RunAsync("http", port2, "error", useOpenAi: false, cancellationToken: cts2.Token);
             }
             catch (OperationCanceledException)
             {
@@ -237,7 +243,7 @@ public class McpServerTests
         // Wait for both servers to initialize with retry logic
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
 
-        // Helper function to wait for server
+        // Helper function to wait for server - uses POST since Streamable HTTP transport expects POST
         async Task<HttpResponseMessage> WaitForServerAsync(int port, CancellationToken cancellationToken)
         {
             var attempts = 0;
@@ -249,15 +255,22 @@ public class McpServerTests
                 try
                 {
                     await Task.Delay(200 * attempts, cancellationToken);
-                    var response = await httpClient.GetAsync($"http://localhost:{port}/sse", HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        return response;
-                    }
+                    var response = await httpClient.PostAsync($"http://localhost:{port}/mcp",
+                        new StringContent("{}", System.Text.Encoding.UTF8, "application/json"), cancellationToken);
+                    // Any HTTP response (even 4xx) means the server is running
+                    return response;
                 }
                 catch (HttpRequestException)
                 {
-                    // Server not ready yet, retry
+                    // Server not ready yet (connection refused), retry
+                    if (attempts == maxAttempts)
+                    {
+                        throw;
+                    }
+                }
+                catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // HTTP timeout - retry
                     if (attempts == maxAttempts)
                     {
                         throw;
@@ -272,9 +285,7 @@ public class McpServerTests
         var response2 = await WaitForServerAsync(port2, cts2.Token);
 
         Assert.NotNull(response1);
-        Assert.True(response1.IsSuccessStatusCode, $"Server 1 should return success status code, but got {response1.StatusCode}");
         Assert.NotNull(response2);
-        Assert.True(response2.IsSuccessStatusCode, $"Server 2 should return success status code, but got {response2.StatusCode}");
 
         // Ensure cleanup - cancel both and wait for servers to shut down
         await cts1.CancelAsync();
@@ -293,10 +304,10 @@ public class McpServerTests
     }
 
     [Theory]
-    [InlineData("sse")]
+    [InlineData("http")]
     public async Task RunAsync_TransportNames_AreCaseInsensitive(string transport)
     {
-        // Test that transport names are case-insensitive for SSE transport
+        // Test that transport names are case-insensitive for HTTP transport
         // (stdio transport is tested separately due to stdin dependency)
 
         using var cts = new CancellationTokenSource();

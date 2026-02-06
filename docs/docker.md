@@ -32,8 +32,8 @@ Alternative approach for complex workflows:
 export GH_TOKEN="ghp_..."
 SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package samples generate /sdk
 
-# Start MCP server with SSE on port 8080
-docker compose up mcp-sse
+# Start MCP server with Streamable HTTP on port 8080
+docker compose up mcp-http
 
 # Run interactive ACP agent
 SDK_PATH=/path/to/sdk docker compose run --rm acp
@@ -87,15 +87,15 @@ docker run --rm -i \
   sdk-chat:latest mcp
 ```
 
-### MCP Server (SSE)
+### MCP Server (Streamable HTTP)
 
 ```bash
 docker run --rm -p 8080:8080 \
   -e GH_TOKEN="ghp_..." \
-  sdk-chat:latest mcp --transport sse --port 8080
+  sdk-chat:latest mcp --transport http --port 8080
 ```
 
-Connect to `http://localhost:8080/sse` from your MCP client.
+Connect to `http://localhost:8080/mcp` from your MCP client.
 
 ## Rebuilding the Image
 

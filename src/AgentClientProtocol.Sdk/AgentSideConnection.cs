@@ -1,6 +1,7 @@
 // Agent Client Protocol - .NET SDK
 // Agent's view of the ACP connection
 
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using AgentClientProtocol.Sdk.JsonRpc;
 using AgentClientProtocol.Sdk.Schema;
@@ -18,6 +19,10 @@ namespace AgentClientProtocol.Sdk;
 ///
 /// Uses compile-time generated dispatch tables for O(1) method lookup.
 /// </summary>
+[UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",
+    Justification = "ACP protocol requires dynamic JSON-RPC dispatch for arbitrary params types")]
+[UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+    Justification = "ACP protocol requires dynamic JSON-RPC dispatch for arbitrary params types")]
 public class AgentSideConnection : IAsyncDisposable
 {
     private readonly Connection _connection;

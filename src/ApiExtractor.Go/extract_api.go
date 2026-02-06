@@ -328,9 +328,8 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 				break
 			}
 		}
-		// Client types are always roots - they're SDK entry points even if referenced by options/builders
-		isClientType := strings.HasSuffix(s.Name, "Client")
-		if isClientType || (!isReferenced && (len(s.Methods) > 0 || referencesOperations)) {
+		// Root types: entry points (from package exports) with methods, or unreferenced types with operations
+		if (s.EntryPoint && len(s.Methods) > 0) || (!isReferenced && (len(s.Methods) > 0 || referencesOperations)) {
 			rootStructs = append(rootStructs, s)
 		}
 	}
@@ -428,6 +427,17 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 		return
 	}
 
+	// Build set of known client type names for local type inference
+	clientNames := make(map[string]bool)
+	for name := range clientMethods {
+		clientNames[name] = true
+	}
+
+	// Build method and function return type maps from API data for precise factory/getter resolution
+	methodReturnTypeMap := buildMethodReturnTypeMap(usageStructs, usageInterfaces, clientNames)
+	functionReturnTypeMap := buildFunctionReturnTypeMap(&apiIndex, clientNames)
+	fieldTypeMap := buildFieldTypeMap(usageStructs, clientNames)
+
 	// Find Go files in samples path
 	absPath, _ := filepath.Abs(samplesPath)
 	var goFiles []string
@@ -459,7 +469,10 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 
 		relPath, _ := filepath.Rel(absPath, file)
 
-		// Walk AST looking for method calls
+		// Build variable → client type map for this file
+		varTypes := buildVarTypeMap(f, clientNames, methodReturnTypeMap, functionReturnTypeMap, fieldTypeMap)
+
+		// Walk AST looking for method calls - resolve receiver type via var tracking first
 		ast.Inspect(f, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -473,35 +486,74 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 			}
 
 			methodName := sel.Sel.Name
-			receiverStr := formatExpr(sel.X)
 
-			for clientName, methods := range clientMethods {
-				clientBase := strings.TrimSuffix(clientName, "Client")
-				if strings.Contains(strings.ToLower(receiverStr), strings.ToLower(clientBase)) ||
-					strings.Contains(strings.ToLower(receiverStr), "client") {
-					if _, exists := methods[methodName]; exists {
-						key := clientName + "." + methodName
-						if !seenOps[key] {
-							seenOps[key] = true
-							pos := fset.Position(call.Pos())
-							covered = append(covered, CoveredOp{
-								Client: clientName,
-								Method: methodName,
-								File:   relPath,
-								Line:   pos.Line,
-							})
+			// Strategy 1: Resolve receiver type from local variable tracking
+			var resolvedClient string
+			if ident, ok := sel.X.(*ast.Ident); ok {
+				if varType, exists := varTypes[ident.Name]; exists {
+					if methods, ok := clientMethods[varType]; ok {
+						if _, hasMethod := methods[methodName]; hasMethod {
+							resolvedClient = varType
 						}
 					}
+				}
+			}
+
+			// Strategy 1b: Chained call — receiver.GetSubClient().Method()
+			if resolvedClient == "" {
+				if innerCall, ok := sel.X.(*ast.CallExpr); ok {
+					if innerSel, ok := innerCall.Fun.(*ast.SelectorExpr); ok {
+						innerMethodName := innerSel.Sel.Name
+
+						// Static factory: ClientType.Create().Method()
+						if ident, ok := innerSel.X.(*ast.Ident); ok && clientNames[ident.Name] {
+							staticKey := ident.Name + "." + innerMethodName
+							if retType, exists := methodReturnTypeMap[staticKey]; exists {
+								if methods, ok := clientMethods[retType]; ok {
+									if _, hasMethod := methods[methodName]; hasMethod {
+										resolvedClient = retType
+									}
+								}
+							}
+						}
+
+						// Instance method: service.GetSubClient().Method()
+						if resolvedClient == "" {
+							if ident, ok := innerSel.X.(*ast.Ident); ok {
+								if receiverType, exists := varTypes[ident.Name]; exists {
+									methodKey := receiverType + "." + innerMethodName
+									if retType, exists := methodReturnTypeMap[methodKey]; exists {
+										if methods, ok := clientMethods[retType]; ok {
+											if _, hasMethod := methods[methodName]; hasMethod {
+												resolvedClient = retType
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if resolvedClient != "" {
+				key := resolvedClient + "." + methodName
+				if !seenOps[key] {
+					seenOps[key] = true
+					pos := fset.Position(call.Pos())
+					covered = append(covered, CoveredOp{
+						Client: resolvedClient,
+						Method: methodName,
+						File:   relPath,
+						Line:   pos.Line,
+					})
 				}
 			}
 
 			return true
 		})
 
-		// Detect patterns by inspecting AST
-		srcStr := string(src)
-		srcLower := strings.ToLower(srcStr)
-
+		// Detect patterns using purely structural AST analysis — no keyword matching
 		ast.Inspect(f, func(n ast.Node) bool {
 			switch n.(type) {
 			case *ast.DeferStmt:
@@ -510,35 +562,52 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 				patterns["goroutine"] = true
 			case *ast.SelectStmt:
 				patterns["channel-select"] = true
-			case *ast.RangeStmt:
-				// Check for pagination patterns
-				if strings.Contains(srcLower, "page") || strings.Contains(srcLower, "pager") {
-					patterns["pagination"] = true
-				}
 			}
 			return true
 		})
+	}
 
-		if strings.Contains(srcStr, "context.") {
-			patterns["context"] = true
-		}
-		if strings.Contains(srcLower, "credential") || strings.Contains(srcLower, "authenticate") {
-			patterns["authentication"] = true
-		}
-		if strings.Contains(srcLower, "retry") || strings.Contains(srcLower, "backoff") {
-			patterns["retry"] = true
-		}
-		if strings.Contains(srcStr, "err != nil") {
-			patterns["error-handling"] = true
+	// Build bidirectional interface ↔ struct mapping for coverage cross-referencing
+	ifaceToImplNames := make(map[string][]string)
+	implToIfaceNames := make(map[string][]string)
+	for ifaceName, impls := range interfaceImplementers {
+		for _, impl := range impls {
+			ifaceToImplNames[ifaceName] = append(ifaceToImplNames[ifaceName], impl.Name)
+			implToIfaceNames[impl.Name] = append(implToIfaceNames[impl.Name], ifaceName)
 		}
 	}
 
-	// Build uncovered list
+	// Build uncovered list with interface/implementation cross-referencing
 	uncovered := []UncoveredOp{}
 	for clientName, methods := range clientMethods {
 		for method, sig := range methods {
 			key := clientName + "." + method
-			if !seenOps[key] {
+			if seenOps[key] {
+				continue
+			}
+
+			// Check if covered through an interface/implementation relationship
+			coveredViaRelated := false
+
+			// If this is an implementation, check if any of its interfaces has the method covered
+			for _, ifaceName := range implToIfaceNames[clientName] {
+				if seenOps[ifaceName+"."+method] {
+					coveredViaRelated = true
+					break
+				}
+			}
+
+			// If this is an interface, check if any implementation has the method covered
+			if !coveredViaRelated {
+				for _, implName := range ifaceToImplNames[clientName] {
+					if seenOps[implName+"."+method] {
+						coveredViaRelated = true
+						break
+					}
+				}
+			}
+
+			if !coveredViaRelated {
 				uncovered = append(uncovered, UncoveredOp{
 					Client: clientName,
 					Method: method,
@@ -602,6 +671,229 @@ func getReferencedTypesForInterface(i IfaceApi, allTypeNames map[string]bool) ma
 	return refs
 }
 
+// =============================================================================
+// Variable Tracking — API-data-driven type resolution
+// =============================================================================
+
+// unwrapGoReturnType strips pointer, slice, and multi-return from Go return types.
+// E.g., "*BlobClient" → "BlobClient", "(*BlobClient, error)" → "BlobClient"
+func unwrapGoReturnType(ret string) string {
+	// Handle multi-return: "(Type, error)" → "Type"
+	ret = strings.TrimSpace(ret)
+	if strings.HasPrefix(ret, "(") && strings.HasSuffix(ret, ")") {
+		inner := ret[1 : len(ret)-1]
+		parts := strings.Split(inner, ",")
+		if len(parts) > 0 {
+			ret = strings.TrimSpace(parts[0])
+		}
+	}
+	// Strip pointer and slice prefixes
+	ret = strings.TrimPrefix(ret, "*")
+	ret = strings.TrimPrefix(ret, "[]")
+	ret = strings.TrimPrefix(ret, "*")
+	// Strip generic type args
+	if idx := strings.Index(ret, "["); idx > 0 {
+		ret = ret[:idx]
+	}
+	return ret
+}
+
+// buildMethodReturnTypeMap builds a map of "OwnerType.MethodName" → return type
+// from API method data, only for methods that return a known client type.
+func buildMethodReturnTypeMap(structs []StructApi, ifaces []IfaceApi, clientNames map[string]bool) map[string]string {
+	m := make(map[string]string)
+	for _, s := range structs {
+		for _, method := range s.Methods {
+			if method.Ret != "" {
+				retType := unwrapGoReturnType(method.Ret)
+				if clientNames[retType] {
+					m[s.Name+"."+method.Name] = retType
+				}
+			}
+		}
+	}
+	for _, iface := range ifaces {
+		for _, method := range iface.Methods {
+			if method.Ret != "" {
+				retType := unwrapGoReturnType(method.Ret)
+				if clientNames[retType] {
+					m[iface.Name+"."+method.Name] = retType
+				}
+			}
+		}
+	}
+	return m
+}
+
+// buildFunctionReturnTypeMap builds a map of "FunctionName" → return type
+// from API function data, only for functions that return a known client type.
+func buildFunctionReturnTypeMap(api *ApiIndex, clientNames map[string]bool) map[string]string {
+	m := make(map[string]string)
+	for _, pkg := range api.Packages {
+		for _, fn := range pkg.Functions {
+			if fn.Ret != "" {
+				retType := unwrapGoReturnType(fn.Ret)
+				if clientNames[retType] {
+					m[fn.Name] = retType
+				}
+			}
+		}
+	}
+	return m
+}
+
+// buildFieldTypeMap builds a map of "OwnerType.FieldName" → client type
+// from API field data, for fields whose type is a known client type.
+func buildFieldTypeMap(structs []StructApi, clientNames map[string]bool) map[string]string {
+	m := make(map[string]string)
+	for _, s := range structs {
+		for _, f := range s.Fields {
+			fieldType := strings.TrimPrefix(f.Type, "*")
+			fieldType = strings.TrimPrefix(fieldType, "[]")
+			if idx := strings.Index(fieldType, "["); idx > 0 {
+				fieldType = fieldType[:idx]
+			}
+			if clientNames[fieldType] {
+				m[s.Name+"."+f.Name] = fieldType
+			}
+		}
+	}
+	return m
+}
+
+// buildVarTypeMap walks a Go AST file and builds a variable → client type map.
+//
+// Tracks patterns:
+//   - client := NewBlobClient(...)       → client maps to BlobClient (constructor via function return type map)
+//   - client := svc.GetBlobClient(...)   → client maps to BlobClient (method return type map)
+//   - var client BlobClient              → client maps to BlobClient (type annotation)
+//   - client := svc.BlobField            → client maps to BlobClient (field type map)
+//
+// All type resolution is driven by API index data — no name-based heuristics.
+func buildVarTypeMap(f *ast.File, clientNames map[string]bool, methodRetMap, funcRetMap, fieldTypeMap map[string]string) map[string]string {
+	varTypes := make(map[string]string)
+
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.GenDecl:
+			// Handle: var client BlobClient
+			for _, spec := range node.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				// Type annotation: var client BlobClient
+				if vs.Type != nil {
+					typeName := unwrapGoReturnType(formatExpr(vs.Type))
+					if clientNames[typeName] {
+						for _, name := range vs.Names {
+							varTypes[name.Name] = typeName
+						}
+						continue
+					}
+				}
+				// Initializer: var client = NewBlobClient(...)
+				if len(vs.Values) > 0 && len(vs.Names) > 0 {
+					for i, val := range vs.Values {
+						if i >= len(vs.Names) {
+							break
+						}
+						resolved := resolveExprType(val, clientNames, varTypes, methodRetMap, funcRetMap, fieldTypeMap)
+						if resolved != "" {
+							varTypes[vs.Names[i].Name] = resolved
+						}
+					}
+				}
+			}
+
+		case *ast.AssignStmt:
+			// Handle: client := NewBlobClient(...) or client = svc.GetBlobClient(...)
+			for i, rhs := range node.Rhs {
+				if i >= len(node.Lhs) {
+					break
+				}
+				ident, ok := node.Lhs[i].(*ast.Ident)
+				if !ok {
+					continue
+				}
+				resolved := resolveExprType(rhs, clientNames, varTypes, methodRetMap, funcRetMap, fieldTypeMap)
+				if resolved != "" {
+					varTypes[ident.Name] = resolved
+				}
+			}
+		}
+		return true
+	})
+
+	return varTypes
+}
+
+// resolveExprType resolves the client type of an expression using API data.
+func resolveExprType(expr ast.Expr, clientNames map[string]bool, varTypes, methodRetMap, funcRetMap, fieldTypeMap map[string]string) string {
+	switch e := expr.(type) {
+	case *ast.CallExpr:
+		// Function call: NewBlobClient(...)
+		if ident, ok := e.Fun.(*ast.Ident); ok {
+			if retType, exists := funcRetMap[ident.Name]; exists {
+				return retType
+			}
+		}
+		// Method call: svc.GetBlobClient(...)
+		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
+			methodName := sel.Sel.Name
+			if ident, ok := sel.X.(*ast.Ident); ok {
+				// Static factory: ClientType.Create(...)
+				if clientNames[ident.Name] {
+					staticKey := ident.Name + "." + methodName
+					if retType, exists := methodRetMap[staticKey]; exists {
+						return retType
+					}
+				}
+				// Instance method: service.GetSubClient(...)
+				if receiverType, exists := varTypes[ident.Name]; exists {
+					methodKey := receiverType + "." + methodName
+					if retType, exists := methodRetMap[methodKey]; exists {
+						return retType
+					}
+				}
+			}
+		}
+
+	case *ast.UnaryExpr:
+		// Address-of: &BlobClient{} or dereference
+		if e.Op.String() == "&" {
+			return resolveExprType(e.X, clientNames, varTypes, methodRetMap, funcRetMap, fieldTypeMap)
+		}
+
+	case *ast.CompositeLit:
+		// Struct literal: BlobClient{...}
+		if e.Type != nil {
+			typeName := unwrapGoReturnType(formatExpr(e.Type))
+			if clientNames[typeName] {
+				return typeName
+			}
+		}
+
+	case *ast.SelectorExpr:
+		// Field access: svc.BlobField
+		if ident, ok := e.X.(*ast.Ident); ok {
+			if receiverType, exists := varTypes[ident.Name]; exists {
+				fieldKey := receiverType + "." + e.Sel.Name
+				if fieldType, exists := fieldTypeMap[fieldKey]; exists {
+					return fieldType
+				}
+			}
+		}
+
+	case *ast.Ident:
+		// Direct identifier reference to a known client type
+		if clientNames[e.Name] {
+			return e.Name
+		}
+	}
+	return ""
+}
+
 func extractPackage(rootPath string) (*ApiIndex, error) {
 	absPath, err := filepath.Abs(rootPath)
 	if err != nil {
@@ -659,7 +951,7 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 		if err != nil {
 			continue
 		}
-		
+
 		// Collect import mappings from all files in the package
 		for _, astPkg := range pkgs {
 			for _, file := range astPkg.Files {
@@ -684,6 +976,23 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 				len(pkgApi.Functions) > 0 || len(pkgApi.Types) > 0 ||
 				len(pkgApi.Constants) > 0 || len(pkgApi.Variables) > 0 {
 				packages[pkgApi.Name] = pkgApi
+			}
+		}
+	}
+
+	// Mark entry points: types in the root package are the primary entry points
+	// The root package is the one whose relDir is "." or empty (directly in the
+	// module root), matching how Go users import the module.
+	for _, pkgApi := range packages {
+		if pkgApi.Name == "." || pkgApi.Name == "" || pkgApi.Name == filepath.Base(absPath) {
+			for i := range pkgApi.Structs {
+				pkgApi.Structs[i].EntryPoint = true
+			}
+			for i := range pkgApi.Interfaces {
+				pkgApi.Interfaces[i].EntryPoint = true
+			}
+			for i := range pkgApi.Functions {
+				pkgApi.Functions[i].EntryPoint = true
 			}
 		}
 	}
@@ -847,7 +1156,7 @@ func collectImports(file *ast.File) {
 	for _, imp := range file.Imports {
 		// Get the import path (strip quotes)
 		importPath := strings.Trim(imp.Path.Value, "\"")
-		
+
 		// Determine the alias used in code
 		var alias string
 		if imp.Name != nil {
@@ -861,7 +1170,7 @@ func collectImports(file *ast.File) {
 			parts := strings.Split(importPath, "/")
 			alias = parts[len(parts)-1]
 		}
-		
+
 		// Map alias to full path (later imports override earlier ones, which is correct Go behavior)
 		importMap[alias] = importPath
 	}
@@ -886,13 +1195,13 @@ func resolveTransitiveDependencies(api *ApiIndex, rootPath string) []DependencyI
 			parts := strings.SplitN(typeName, ".", 2)
 			pkgAlias := parts[0]
 			typeBaseName := parts[1]
-			
+
 			// Resolve alias to full import path using collected imports
 			fullPath := pkgAlias
 			if resolved, ok := importMap[pkgAlias]; ok {
 				fullPath = resolved
 			}
-			
+
 			if !isStdlibPackage(fullPath) {
 				depTypes[fullPath] = append(depTypes[fullPath], typeBaseName)
 			}

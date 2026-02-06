@@ -24,7 +24,7 @@ public static class McpServer
     private static readonly HashSet<string> SupportedTransports = new(StringComparer.OrdinalIgnoreCase)
     {
         "stdio",
-        "sse"
+        "http"
     };
 
     [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",
@@ -40,13 +40,13 @@ public static class McpServer
                 $"Transport '{transport}' is not supported. Supported transports: {string.Join(", ", SupportedTransports)}.");
         }
 
-        // For SSE transport, use WebApplication for HTTP/SSE support
-        if (transport.Equals("sse", StringComparison.OrdinalIgnoreCase))
+        // For Streamable HTTP transport, use WebApplication
+        if (transport.Equals("http", StringComparison.OrdinalIgnoreCase))
         {
             var builder = WebApplication.CreateBuilder();
             ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
 
-            // Configure MCP server with SSE transport
+            // Configure MCP server with Streamable HTTP transport
             // Use explicit tool registration for Native AOT compatibility
             builder.Services.AddMcpServer(options =>
             {
@@ -87,6 +87,8 @@ public static class McpServer
         }
     }
 
+    [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",
+        Justification = "ValidationContext uses reflection for DisplayNameAttribute; SdkChatOptions is a known type")]
     private static void ConfigureLoggingAndServices(ILoggingBuilder logging, IServiceCollection services, string logLevel, bool useOpenAi)
     {
         // Configure logging
@@ -97,9 +99,7 @@ public static class McpServer
         if (useOpenAi) options.UseOpenAi = true;
 
         // Validate configuration at startup
-#pragma warning disable IL2026 // ValidationContext constructor uses reflection to get DisplayName attribute
         var validationResults = options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options) { DisplayName = nameof(SdkChatOptions) });
-#pragma warning restore IL2026
         var errors = validationResults.ToList();
         if (errors.Count > 0)
         {

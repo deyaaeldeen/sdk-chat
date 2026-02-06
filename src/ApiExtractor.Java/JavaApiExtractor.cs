@@ -82,6 +82,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
 
         if (availability.Mode == ExtractorMode.NativeBinary)
@@ -149,6 +150,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsJavaAsync(string rootPath, CancellationToken ct = default)
     {
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
 
         if (availability.Mode == ExtractorMode.NativeBinary)

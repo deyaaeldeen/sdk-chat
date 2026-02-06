@@ -24,6 +24,11 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <inheritdoc />
     public string Language => "python";
 
+    /// <summary>
+    /// Checks if Python is available to run the usage analyzer.
+    /// </summary>
+    public bool IsAvailable() => GetAvailability().IsAvailable;
+
     /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {
@@ -259,11 +264,6 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         while (queue.Count > 0)
         {
             var current = queue.Dequeue();
-            var cls = allClasses.FirstOrDefault(c => current.Equals(c.Name.Split('[')[0], StringComparison.OrdinalIgnoreCase));
-            if (cls == null)
-            {
-                continue;
-            }
 
             if (references.TryGetValue(current, out var refs))
             {

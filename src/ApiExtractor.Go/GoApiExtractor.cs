@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using ApiExtractor.Contracts;
@@ -87,6 +86,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
         string binaryPath;
 
@@ -132,6 +132,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsGoAsync(string rootPath, CancellationToken ct = default)
     {
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
         string binaryPath;
 
@@ -203,6 +204,11 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             Directory.CreateDirectory(cacheDir);
 
             var binaryName = OperatingSystem.IsWindows() ? $"extractor_{hash}.exe" : $"extractor_{hash}";
+            
+            // SECURITY: Validate binary name to prevent path traversal attacks
+            // Even though hash is hex-safe, be defensive against future code changes
+            ToolPathResolver.ValidateSafeInput(binaryName, nameof(binaryName), allowPath: false);
+            
             var binaryPath = Path.Combine(cacheDir, binaryName);
 
             // Check if binary exists and is valid
@@ -212,30 +218,20 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
                 return binaryPath;
             }
 
-            // Compile the binary
-            var psi = new ProcessStartInfo
+            // Compile the binary via ProcessSandbox for enforced timeout and output limits
+            var compileResult = await ProcessSandbox.ExecuteAsync(
+                goPath,
+                ["build", "-o", binaryPath, scriptPath],
+                timeout: TimeSpan.FromMinutes(3),
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            if (!compileResult.Success)
             {
-                FileName = goPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            psi.ArgumentList.Add("build");
-            psi.ArgumentList.Add("-o");
-            psi.ArgumentList.Add(binaryPath);
-            psi.ArgumentList.Add(scriptPath);
-
-            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start go build");
-
-            var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-            var errorTask = process.StandardError.ReadToEndAsync(ct);
-            await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(ct)).ConfigureAwait(false);
-            var error = await errorTask;
-
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException($"go build failed: {error}");
+                var errorMsg = compileResult.TimedOut
+                    ? "go build timed out after 3 minutes"
+                    : $"go build failed: {compileResult.StandardError}";
+                throw new InvalidOperationException(errorMsg);
             }
 
             _cachedBinaryPath = binaryPath;

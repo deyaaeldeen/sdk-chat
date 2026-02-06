@@ -20,6 +20,11 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <inheritdoc />
     public string Language => "typescript";
 
+    /// <summary>
+    /// Checks if Node.js is available to run the usage analyzer.
+    /// </summary>
+    public bool IsAvailable() => GetAvailability().IsAvailable;
+
     /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {

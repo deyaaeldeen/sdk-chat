@@ -2,6 +2,7 @@
 // Low-level JSON-RPC connection management
 
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using AgentClientProtocol.Sdk.Stream;
 using Microsoft.Extensions.Logging;
@@ -43,6 +44,10 @@ public sealed record ConnectionOptions
 /// <summary>
 /// Manages bidirectional JSON-RPC communication.
 /// </summary>
+[UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",
+    Justification = "JSON-RPC requires dynamic serialization for generic request/response types")]
+[UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+    Justification = "JSON-RPC requires dynamic serialization for generic request/response types")]
 public class Connection : IAsyncDisposable
 {
     private readonly IAcpStream _stream;

@@ -12,6 +12,17 @@ import re
 from pathlib import Path
 from typing import Any
 
+# Try to import TOML parser (prefer stdlib tomllib in 3.11+, fallback to tomli)
+try:
+    import tomllib  # Python 3.11+
+    _HAS_TOML = True
+except ImportError:
+    try:
+        import tomli as tomllib  # pip install tomli for <3.11
+        _HAS_TOML = True
+    except ImportError:
+        _HAS_TOML = False
+
 
 # =============================================================================
 # Builtin Type Detection
@@ -42,7 +53,7 @@ PYTHON_BUILTINS = frozenset({
     "Warning", "UserWarning", "DeprecationWarning", "PendingDeprecationWarning",
     "SyntaxWarning", "RuntimeWarning", "FutureWarning", "ImportWarning",
     "UnicodeWarning", "BytesWarning", "ResourceWarning",
-    
+
     # typing module
     "Any", "Union", "Optional", "List", "Dict", "Set", "FrozenSet", "Tuple",
     "Type", "Callable", "Iterable", "Iterator", "Generator", "AsyncGenerator",
@@ -56,48 +67,63 @@ PYTHON_BUILTINS = frozenset({
     "Generic", "Protocol", "Annotated", "TypedDict", "NamedTuple",
     "NewType", "cast", "overload", "final", "dataclass_transform",
     "Concatenate", "TypeGuard", "Required", "NotRequired", "Unpack",
-    
-    # collections.abc
+
+    # collections.abc (only entries not already in typing above)
     "ABC", "ABCMeta", "abstractmethod", "abstractproperty",
+    "MutableSet",
     "MappingView", "KeysView", "ItemsView", "ValuesView",
     "ByteString", "Buffer",
-    
-    # io module  
+
+    # contextlib
+    "contextmanager", "asynccontextmanager", "closing", "suppress",
+    "redirect_stdout", "redirect_stderr", "ExitStack", "AsyncExitStack",
+    "nullcontext", "aclosing",
+
+    # functools
+    "partial", "partialmethod", "reduce", "wraps", "update_wrapper",
+    "total_ordering", "cmp_to_key", "lru_cache", "cached_property", "singledispatch",
+
+    # io module
     "IOBase", "RawIOBase", "BufferedIOBase", "TextIOBase",
     "FileIO", "BytesIO", "StringIO", "BufferedReader", "BufferedWriter",
     "BufferedRandom", "BufferedRWPair", "TextIOWrapper",
-    
+
     # pathlib
     "Path", "PurePath", "PurePosixPath", "PureWindowsPath",
     "PosixPath", "WindowsPath",
-    
+
     # datetime
     "date", "time", "datetime", "timedelta", "timezone", "tzinfo",
-    
+
     # uuid
-    "UUID",
-    
+    "UUID", "uuid1", "uuid3", "uuid4", "uuid5",
+
     # decimal
     "Decimal",
-    
+
     # fractions
     "Fraction",
-    
+
     # enum
     "Enum", "IntEnum", "Flag", "IntFlag", "auto", "unique", "StrEnum",
-    
+
     # dataclasses
-    "dataclass", "field", "fields",
-    
+    "dataclass", "field", "fields", "asdict", "astuple",
+
+    # json
+    "JSONEncoder", "JSONDecoder", "JSONDecodeError",
+
     # re
     "RegexFlag",
-    
+    "compile", "search", "match", "fullmatch",
+    "split", "findall", "finditer", "sub", "subn",
+
     # logging
     "Logger", "Handler", "Formatter", "Filter", "LogRecord",
-    
+
     # concurrent.futures
     "Future", "Executor", "ThreadPoolExecutor", "ProcessPoolExecutor",
-    
+
     # asyncio
     "Task", "Event", "Lock", "Semaphore", "BoundedSemaphore",
     "Condition", "Queue", "LifoQueue", "PriorityQueue",
@@ -167,7 +193,7 @@ def is_stdlib_package(package_name: str) -> bool:
 def collect_types_from_annotation(ann: ast.expr | None, refs: set[str]) -> None:
     """
     Recursively collect type names from an annotation AST node.
-    This is a rigorous AST-based approach that properly handles:
+    Properly handles:
     - Simple names: int, MyClass
     - Attribute access: module.Type
     - Generic subscripts: List[str], Dict[str, int]
@@ -176,63 +202,50 @@ def collect_types_from_annotation(ann: ast.expr | None, refs: set[str]) -> None:
     """
     if ann is None:
         return
-    
+
     if isinstance(ann, ast.Name):
-        # Simple type name like "int" or "MyClass"
         name = ann.id
         if not is_builtin_type(name):
             refs.add(name)
-    
+
     elif isinstance(ann, ast.Attribute):
-        # Qualified name like "module.Type"
-        # Only collect the full path if the root is an external module
         full_name = _get_attribute_name(ann)
         if full_name and not is_builtin_type(full_name):
             refs.add(full_name)
-    
+
     elif isinstance(ann, ast.Subscript):
-        # Generic type like List[str], Dict[str, int], Optional[MyClass]
-        # Collect the base type
         collect_types_from_annotation(ann.value, refs)
-        # Collect type arguments
         if isinstance(ann.slice, ast.Tuple):
-            # Multiple type args: Dict[str, int]
             for elt in ann.slice.elts:
                 collect_types_from_annotation(elt, refs)
         else:
-            # Single type arg: List[str]
             collect_types_from_annotation(ann.slice, refs)
-    
+
     elif isinstance(ann, ast.BinOp) and isinstance(ann.op, ast.BitOr):
-        # Union type using | operator: A | B
         collect_types_from_annotation(ann.left, refs)
         collect_types_from_annotation(ann.right, refs)
-    
+
     elif isinstance(ann, ast.Constant):
-        # String annotation or literal
         if isinstance(ann.value, str):
-            # Forward reference as string - parse it
             try:
                 parsed = ast.parse(ann.value, mode='eval')
                 collect_types_from_annotation(parsed.body, refs)
             except SyntaxError:
                 pass
-    
+
     elif isinstance(ann, ast.Tuple):
-        # Tuple of types (e.g., in function params)
         for elt in ann.elts:
             collect_types_from_annotation(elt, refs)
-    
+
     elif isinstance(ann, ast.List):
-        # List of types
         for elt in ann.elts:
             collect_types_from_annotation(elt, refs)
 
 
 def _get_attribute_name(node: ast.Attribute) -> str | None:
     """Get the full dotted name from an Attribute node."""
-    parts = []
-    current = node
+    parts: list[str] = []
+    current: ast.expr = node
     while isinstance(current, ast.Attribute):
         parts.append(current.attr)
         current = current.value
@@ -246,26 +259,26 @@ class TypeReferenceCollector:
     """
     Collects type references during extraction using proper AST traversal.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         self.refs: set[str] = set()
         self.defined_types: set[str] = set()
-        self.resolved_packages: dict[str, str] = {}  # type_name -> package_name
-    
+        self.resolved_packages: dict[str, str] = {}
+
     def add_defined_type(self, name: str) -> None:
         """Register a locally defined type."""
         self.defined_types.add(name.split("[")[0])
-    
+
     def collect_from_annotation(self, ann: ast.expr | None) -> None:
         """Collect type references from an annotation AST node."""
         collect_types_from_annotation(ann, self.refs)
-    
+
     def get_external_refs(self) -> set[str]:
         """Get type references that are not locally defined and not builtins."""
         return {
-            name for name in self.refs 
+            name for name in self.refs
             if name.split("[")[0] not in self.defined_types and not is_builtin_type(name)
         }
-    
+
     def resolve_package(self, type_name: str, installed_packages: set[str]) -> str | None:
         """
         Try to resolve the package a type came from.
@@ -273,19 +286,17 @@ class TypeReferenceCollector:
         """
         if type_name in self.resolved_packages:
             return self.resolved_packages[type_name]
-        
-        # Check if type_name is qualified (e.g., azure.core.HttpResponse)
+
         if "." in type_name:
             parts = type_name.split(".")
-            # Try progressively shorter prefixes
             for i in range(len(parts) - 1, 0, -1):
                 pkg = ".".join(parts[:i])
                 if pkg in installed_packages and not is_stdlib_package(pkg):
                     self.resolved_packages[type_name] = pkg
                     return pkg
-        
+
         return None
-    
+
     def clear(self) -> None:
         """Reset the collector for a new extraction."""
         self.refs.clear()
@@ -295,6 +306,130 @@ class TypeReferenceCollector:
 
 # Global collector instance
 _type_collector = TypeReferenceCollector()
+
+
+# =============================================================================
+# Entry Point Detection
+# =============================================================================
+
+def resolve_entry_point_symbols(root_path: Path, package_name: str) -> tuple[set[str], dict[str, str]]:
+    """
+    Resolve the public API entry points from package configuration.
+
+    Entry points are determined by:
+    1. __all__ in __init__.py (explicit exports)
+    2. Re-exported symbols from __init__.py (from X import Y)
+
+    Returns:
+        Tuple of (entry_symbols, external_reexports)
+        - entry_symbols: set of all exported symbol names
+        - external_reexports: dict mapping symbol name to external package name
+    """
+    entry_symbols: set[str] = set()
+    external_reexports: dict[str, str] = {}
+
+    init_file = find_main_init_file(root_path, package_name)
+    if init_file:
+        all_exports = extract_all_from_init(init_file)
+        if all_exports:
+            entry_symbols.update(all_exports)
+
+        local_reexports, ext_reexports = extract_reexports_from_init(init_file)
+        entry_symbols.update(local_reexports)
+        entry_symbols.update(ext_reexports.keys())
+        external_reexports.update(ext_reexports)
+
+    return entry_symbols, external_reexports
+
+
+def find_main_init_file(root_path: Path, package_name: str) -> Path | None:
+    """Find the main package __init__.py file."""
+    pkg_dir_name = package_name.replace('-', '_').replace('.', '/')
+
+    search_paths = [
+        root_path / pkg_dir_name / "__init__.py",
+        root_path / "src" / pkg_dir_name / "__init__.py",
+        root_path / package_name / "__init__.py",
+        root_path / "src" / package_name / "__init__.py",
+    ]
+
+    for path in search_paths:
+        if path.exists():
+            return path
+
+    # Fallback: find first __init__.py in non-test directory
+    for init in sorted(root_path.rglob("__init__.py"), key=lambda p: len(str(p))):
+        path_str = str(init).lower()
+        if not any(x in path_str for x in ['test', 'venv', '.venv', '__pycache__', 'site-packages']):
+            return init
+
+    return None
+
+
+def extract_all_from_init(init_path: Path) -> list[str]:
+    """Extract __all__ list from __init__.py."""
+    try:
+        code = init_path.read_text(encoding='utf-8')
+        tree = ast.parse(code)
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == '__all__':
+                    if isinstance(node.value, ast.List):
+                        return [
+                            elt.value for elt in node.value.elts
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                        ]
+    return []
+
+
+def extract_reexports_from_init(init_path: Path) -> tuple[set[str], dict[str, str]]:
+    """
+    Extract re-exported symbols from __init__.py.
+
+    Handles:
+    - from .module import Class
+    - from .module import Class as Alias
+    - from external_package import ExternalClass
+
+    Returns:
+        Tuple of (local_symbols, external_reexports)
+    """
+    try:
+        code = init_path.read_text(encoding='utf-8')
+        tree = ast.parse(code)
+    except (SyntaxError, UnicodeDecodeError):
+        return set(), {}
+
+    local_symbols: set[str] = set()
+    external_reexports: dict[str, str] = {}
+
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            is_relative = node.level > 0
+            is_external = not is_relative and module and not module.startswith('.')
+
+            if is_external:
+                base_pkg = module.split('.')[0]
+                if module.startswith('azure.'):
+                    parts = module.split('.')
+                    if len(parts) >= 2:
+                        base_pkg = f"azure-{parts[1]}"
+
+            for alias in node.names:
+                if alias.name == '*':
+                    continue
+                exported_name = alias.asname if alias.asname else alias.name
+                if is_external:
+                    external_reexports[exported_name] = base_pkg
+                else:
+                    local_symbols.add(exported_name)
+
+    return local_symbols, external_reexports
 
 
 # =============================================================================
@@ -315,14 +450,17 @@ def format_annotation(ann: ast.expr | None) -> str | None:
         return None
     return ast.unparse(ann)
 
-def extract_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, Any]:
+def extract_function(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    entry_point_symbols: set[str] | None = None,
+    external_reexports: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Extract function/method info and collect type references."""
     args = []
     for arg in node.args.args:
         arg_str = arg.arg
         if arg.annotation:
             arg_str += f": {ast.unparse(arg.annotation)}"
-            # Collect type reference from annotation AST
             _type_collector.collect_from_annotation(arg.annotation)
         args.append(arg_str)
 
@@ -352,7 +490,6 @@ def extract_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, 
     ret = format_annotation(node.returns)
     if ret:
         result["ret"] = ret
-        # Collect return type reference
         _type_collector.collect_from_annotation(node.returns)
 
     doc = get_docstring(node)
@@ -361,6 +498,14 @@ def extract_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, 
 
     if isinstance(node, ast.AsyncFunctionDef):
         result["async"] = True
+
+    # Mark as entry point if in the exported symbols
+    if entry_point_symbols and node.name in entry_point_symbols:
+        result["entryPoint"] = True
+
+    # Mark if re-exported from external package
+    if external_reexports and node.name in external_reexports:
+        result["reExportedFrom"] = external_reexports[node.name]
 
     # Check decorators
     for dec in node.decorator_list:
@@ -374,19 +519,22 @@ def extract_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, 
 
     return result
 
-def extract_class(node: ast.ClassDef) -> dict[str, Any]:
+def extract_class(
+    node: ast.ClassDef,
+    entry_point_symbols: set[str] | None = None,
+    external_reexports: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Extract class info and collect type references."""
     bases = []
     for b in node.bases:
         if isinstance(b, (ast.Name, ast.Attribute, ast.Subscript)):
             bases.append(ast.unparse(b))
-            # Collect base class type reference
             _type_collector.collect_from_annotation(b)
 
     result: dict[str, Any] = {
         "name": node.name,
     }
-    
+
     # Register this class as a defined type
     _type_collector.add_defined_type(node.name)
 
@@ -396,6 +544,14 @@ def extract_class(node: ast.ClassDef) -> dict[str, Any]:
     doc = get_docstring(node)
     if doc:
         result["doc"] = doc
+
+    # Mark as entry point if in the exported symbols
+    if entry_point_symbols and node.name in entry_point_symbols:
+        result["entryPoint"] = True
+
+    # Mark if re-exported from external package
+    if external_reexports and node.name in external_reexports:
+        result["reExportedFrom"] = external_reexports[node.name]
 
     methods = []
     properties = []
@@ -412,6 +568,7 @@ def extract_class(node: ast.ClassDef) -> dict[str, Any]:
             func_info = extract_function(item)
             if func_info.get("property"):
                 del func_info["property"]
+                # Use ret annotation first (most precise), fall back to sig parsing
                 prop_type = func_info.get("ret")
                 if not prop_type:
                     sig = func_info.get("sig", "")
@@ -427,7 +584,12 @@ def extract_class(node: ast.ClassDef) -> dict[str, Any]:
 
     return result
 
-def extract_module(file_path: Path, root_path: Path) -> dict[str, Any]:
+def extract_module(
+    file_path: Path,
+    root_path: Path,
+    entry_point_symbols: set[str] | None = None,
+    external_reexports: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Extract module info."""
     try:
         code = file_path.read_text(encoding='utf-8')
@@ -447,10 +609,10 @@ def extract_module(file_path: Path, root_path: Path) -> dict[str, Any]:
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.ClassDef):
             if not node.name.startswith('_'):
-                classes.append(extract_class(node))
+                classes.append(extract_class(node, entry_point_symbols, external_reexports))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if not node.name.startswith('_'):
-                functions.append(extract_function(node))
+                functions.append(extract_function(node, entry_point_symbols, external_reexports))
 
     if not classes and not functions:
         return {}
@@ -464,24 +626,49 @@ def extract_module(file_path: Path, root_path: Path) -> dict[str, Any]:
     return result
 
 def find_package_name(root_path: Path) -> str:
-    """Detect package name."""
+    """Detect package name from pyproject.toml, setup.py, or directory structure."""
     # Check pyproject.toml
     pyproject = root_path / "pyproject.toml"
     if pyproject.exists():
-        import re
-        content = pyproject.read_text()
-        match = re.search(r'name\s*=\s*["\']([^"\']+)["\']', content)
-        if match:
-            return match.group(1)
+        # Use proper TOML parser if available (handles multiline strings, escape sequences, etc.)
+        if _HAS_TOML:
+            try:
+                with open(pyproject, "rb") as f:
+                    data = tomllib.load(f)
+                # Try [project].name (PEP 621) first
+                name = data.get("project", {}).get("name")
+                if name:
+                    return name
+                # Fall back to [tool.poetry].name
+                name = data.get("tool", {}).get("poetry", {}).get("name")
+                if name:
+                    return name
+                # Fall back to [tool.flit.metadata].module
+                name = data.get("tool", {}).get("flit", {}).get("metadata", {}).get("module")
+                if name:
+                    return name
+            except Exception:
+                pass  # Fall through to regex fallback
+
+        # Regex fallback (less robust but works without TOML dependencies)
+        try:
+            content = pyproject.read_text(encoding='utf-8')
+            match = re.search(r'name\s*=\s*["\']([^"\']+)["\']', content)
+            if match:
+                return match.group(1)
+        except Exception:
+            pass
 
     # Check setup.py
     setup_py = root_path / "setup.py"
     if setup_py.exists():
-        import re
-        content = setup_py.read_text()
-        match = re.search(r'name\s*=\s*["\']([^"\']+)["\']', content)
-        if match:
-            return match.group(1)
+        try:
+            content = setup_py.read_text(encoding='utf-8')
+            match = re.search(r'name\s*=\s*["\']([^"\']+)["\']', content)
+            if match:
+                return match.group(1)
+        except Exception:
+            pass
 
     # Find first package with __init__.py
     for init in sorted(root_path.rglob("__init__.py"), key=lambda p: len(str(p))):
@@ -493,9 +680,12 @@ def find_package_name(root_path: Path) -> str:
 def extract_package(root_path: Path) -> dict[str, Any]:
     """Extract entire package API."""
     package_name = find_package_name(root_path)
-    
+
     # Clear the type collector for this extraction
     _type_collector.clear()
+
+    # Resolve entry point symbols and external re-exports from package configuration
+    entry_point_symbols, external_reexports = resolve_entry_point_symbols(root_path, package_name)
 
     modules = []
     for py_file in sorted(root_path.rglob("*.py")):
@@ -518,7 +708,7 @@ def extract_package(root_path: Path) -> dict[str, Any]:
         if py_file.name.startswith('_') and py_file.name != '__init__.py':
             continue
 
-        module = extract_module(py_file, root_path)
+        module = extract_module(py_file, root_path, entry_point_symbols, external_reexports)
         if module:
             modules.append(module)
 
@@ -526,12 +716,12 @@ def extract_package(root_path: Path) -> dict[str, Any]:
         "package": package_name,
         "modules": modules
     }
-    
+
     # Resolve transitive dependencies
     dependencies = resolve_transitive_dependencies(result, root_path)
     if dependencies:
         result["dependencies"] = dependencies
-    
+
     return result
 
 
@@ -542,58 +732,53 @@ def extract_package(root_path: Path) -> dict[str, Any]:
 def find_installed_packages(root_path: Path) -> dict[str, Path]:
     """Find installed packages in site-packages or venv."""
     packages: dict[str, Path] = {}
-    
-    # Common locations for installed packages
+
     search_paths = [
         root_path / "venv" / "lib",
         root_path / ".venv" / "lib",
     ]
-    
+
     # Also check system site-packages via sys.path
     for path in sys.path:
         if "site-packages" in path:
             search_paths.append(Path(path))
-    
+
     for search_path in search_paths:
         if not search_path.exists():
             continue
-        
-        # Look for site-packages in Python lib directories
+
         site_packages_paths = list(search_path.glob("**/site-packages"))
         for site_packages in site_packages_paths:
             if not site_packages.is_dir():
                 continue
-            
+
             for item in site_packages.iterdir():
                 if item.is_dir() and not item.name.startswith(('_', '.')):
-                    # Check if it's a valid Python package
                     if (item / "__init__.py").exists() or (item / "__init__.pyi").exists():
                         pkg_name = item.name
                         if pkg_name not in packages:
                             packages[pkg_name] = item
-    
+
     return packages
 
 
 def extract_type_from_package(type_name: str, package_path: Path) -> dict[str, Any] | None:
     """Try to extract a type definition from a package."""
-    # Look for .pyi stub files first, then .py files
     for pattern in ["**/*.pyi", "**/*.py"]:
         for file_path in package_path.glob(pattern):
             if file_path.name.startswith('_') and file_path.name != '__init__.py' and file_path.name != '__init__.pyi':
                 continue
-            
+
             try:
                 code = file_path.read_text(encoding='utf-8')
                 tree = ast.parse(code)
             except (SyntaxError, UnicodeDecodeError):
                 continue
-            
-            # Look for the type definition
+
             for node in ast.iter_child_nodes(tree):
                 if isinstance(node, ast.ClassDef) and node.name == type_name:
                     return extract_class(node)
-    
+
     return None
 
 
@@ -601,30 +786,24 @@ def resolve_transitive_dependencies(api: dict[str, Any], root_path: Path) -> lis
     """
     Resolve types referenced in the API that come from external packages.
     Uses AST-based type collection for accurate dependency tracking.
-    Returns a list of DependencyInfo objects.
     """
-    # Get externally referenced types from the AST collector
-    # (these were collected during extraction via collect_from_annotation)
     external_refs = _type_collector.get_external_refs()
-    
+
     if not external_refs:
         return []
-    
-    # Find installed packages
+
     installed_packages = find_installed_packages(root_path)
     installed_package_names = set(installed_packages.keys())
-    
-    # Group resolved types by package
+
     dependencies: dict[str, dict[str, Any]] = {}
-    
+
     for type_name in external_refs:
-        # First try to resolve via qualified name (module.Type)
         pkg_name = _type_collector.resolve_package(type_name, installed_package_names)
-        
+
         if pkg_name and pkg_name in installed_packages:
             if is_stdlib_package(pkg_name):
                 continue
-            
+
             pkg_path = installed_packages[pkg_name]
             type_info = extract_type_from_package(type_name.split(".")[-1], pkg_path)
             if type_info:
@@ -632,29 +811,32 @@ def resolve_transitive_dependencies(api: dict[str, Any], root_path: Path) -> lis
                     dependencies[pkg_name] = {"package": pkg_name, "classes": []}
                 dependencies[pkg_name]["classes"].append(type_info)
                 continue
-        
+
         # Fall back to searching all installed packages
         for pkg_name, pkg_path in installed_packages.items():
             if is_stdlib_package(pkg_name):
                 continue
-            
+
             type_info = extract_type_from_package(type_name.split(".")[-1], pkg_path)
             if type_info:
                 if pkg_name not in dependencies:
                     dependencies[pkg_name] = {"package": pkg_name, "classes": []}
                 dependencies[pkg_name]["classes"].append(type_info)
                 break
-    
-    # Convert to list and clean up empty arrays
+
     result = []
     for dep_info in dependencies.values():
         if not dep_info.get("classes"):
             del dep_info["classes"]
         if dep_info.get("classes") or dep_info.get("functions"):
             result.append(dep_info)
-    
+
     return sorted(result, key=lambda d: d["package"])
 
+
+# =============================================================================
+# Stub Formatting
+# =============================================================================
 
 def format_python_stubs(api: dict[str, Any]) -> str:
     """Format as Python stub syntax."""
@@ -712,12 +894,12 @@ def format_python_stubs(api: dict[str, Any]) -> str:
         lines.append("# Dependency Types (from external packages)")
         lines.append("# " + "=" * 77)
         lines.append("")
-        
+
         for dep in dependencies:
             pkg_name = dep.get("package", "unknown")
             lines.append(f"# From: {pkg_name}")
             lines.append("")
-            
+
             for cls in dep.get("classes", []):
                 base = f'({cls["base"]})' if cls.get("base") else ""
                 lines.append(f'class {cls["name"]}{base}:')
@@ -749,12 +931,17 @@ def format_python_stubs(api: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# =============================================================================
+# Usage Analysis
+# =============================================================================
+
 def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
     """
     Analyze sample files to find which API operations are used.
-    Uses AST to accurately find method calls.
+    Uses AST-based variable tracking and API return type maps for precise
+    receiver resolution — no name-based heuristics.
     """
-    # Build set of client methods from API (include subclients)
+    # Build set of client methods from API using graph-based reachability
     all_classes: list[dict[str, Any]] = []
     all_type_names: set[str] = set()
     for module in api.get("modules", []):
@@ -762,6 +949,7 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
             all_classes.append(cls)
             all_type_names.add(cls.get("name", "").split("[")[0])
 
+    # Build type reference graph
     references: dict[str, set[str]] = {}
     for cls in all_classes:
         name = cls.get("name", "").split("[")[0]
@@ -777,13 +965,12 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
         if cls.get("methods"):
             operation_types.add(cls.get("name", "").split("[")[0])
 
-    # Client classes are always roots - they're SDK entry points even if referenced by options/builders
-    def is_client_class(name: str) -> bool:
-        return name.endswith("Client") or name.endswith("AsyncClient")
-
+    # Root classes are determined structurally:
+    # 1. Classes marked as entry points (exported from __init__.py) with methods
+    # 2. Classes not referenced by any other API type that have methods or reference operation types
     root_classes = [
         cls for cls in all_classes
-        if is_client_class(cls.get("name", "").split("[")[0]) or (
+        if (cls.get("entryPoint") and cls.get("methods")) or (
             cls.get("name", "").split("[")[0] not in referenced_by and (
                 cls.get("methods") or
                 any(ref in operation_types for ref in references.get(cls.get("name", "").split("[")[0], set()))
@@ -798,6 +985,7 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
                any(ref in operation_types for ref in references.get(cls.get("name", "").split("[")[0], set()))
         ]
 
+    # BFS reachability from root classes
     derived_by_base: dict[str, list[dict[str, Any]]] = {}
     for cls in all_classes:
         base_name = cls.get("base")
@@ -850,6 +1038,14 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
     if not client_methods:
         return {"fileCount": 0, "covered": [], "uncovered": [], "patterns": []}
 
+    # Build set of known client type names for type inference
+    client_names = set(client_methods.keys())
+
+    # Build return type maps from API data for precise resolution
+    method_return_type_map = _build_method_return_type_map(api, client_methods)
+    function_return_type_map = _build_function_return_type_map(api, client_methods)
+    property_type_map = _build_property_type_map(api, client_methods)
+
     covered: list[dict[str, Any]] = []
     seen_ops: set[str] = set()
     patterns: set[str] = set()
@@ -857,8 +1053,11 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
 
     # Find all Python files in samples
     for py_file in samples_path.rglob("*.py"):
-        path_str = str(py_file)
-        if any(skip in path_str for skip in ['__pycache__', 'venv', '.venv', 'test_', '_test.py']):
+        path_parts = py_file.parts
+        if any(part in ('__pycache__', 'venv', '.venv') for part in path_parts):
+            continue
+        filename = py_file.name
+        if filename.startswith('test_') or filename.endswith('_test.py'):
             continue
 
         file_count += 1
@@ -870,32 +1069,88 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
 
         rel_path = str(py_file.relative_to(samples_path))
 
-        # Use AST to find method calls
+        # Build variable → client type map for this file
+        var_types = _build_var_type_map(tree, client_names, method_return_type_map,
+                                        function_return_type_map, property_type_map)
+
+        # Use AST to find method calls with precise receiver resolution
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 method_name, line = extract_call_info(node)
-                if method_name:
-                    for client_name, methods in client_methods.items():
-                        if method_name in methods or method_name.rstrip('_async') in methods:
-                            key = f"{client_name}.{method_name}"
-                            if key not in seen_ops:
-                                seen_ops.add(key)
-                                covered.append({
-                                    "client": client_name,
-                                    "method": method_name,
-                                    "file": rel_path,
-                                    "line": getattr(node, 'lineno', 0)
-                                })
+                if not method_name:
+                    continue
+
+                # Strategy 1: Resolve receiver type from variable tracking
+                resolved_client = _resolve_receiver_type(
+                    node, var_types, client_names,
+                    method_return_type_map, function_return_type_map
+                )
+                if resolved_client and resolved_client in client_methods:
+                    methods = client_methods[resolved_client]
+                    if method_name in methods:
+                        key = f"{resolved_client}.{method_name}"
+                        if key not in seen_ops:
+                            seen_ops.add(key)
+                            covered.append({
+                                "client": resolved_client,
+                                "method": method_name,
+                                "file": rel_path,
+                                "line": getattr(node, 'lineno', 0)
+                            })
+                        continue
+
+                # Strategy 2: Fall back to global method name matching
+                # (catches cases where variable tracking fails)
+                for client_name, methods in client_methods.items():
+                    if method_name in methods:
+                        key = f"{client_name}.{method_name}"
+                        if key not in seen_ops:
+                            seen_ops.add(key)
+                            covered.append({
+                                "client": client_name,
+                                "method": method_name,
+                                "file": rel_path,
+                                "line": getattr(node, 'lineno', 0)
+                            })
 
         # Detect patterns using AST
-        detect_patterns_ast(tree, code, patterns)
+        detect_patterns_ast(tree, patterns)
+
+    # Build base-class ↔ subclass mapping for cross-referencing coverage
+    base_to_subclasses: dict[str, list[str]] = {}
+    subclass_to_bases: dict[str, list[str]] = {}
+    for module in api.get("modules", []):
+        for cls in module.get("classes", []):
+            name = cls.get("name", "")
+            base_str = cls.get("base", "")
+            if base_str:
+                for base in (b.strip() for b in base_str.split(",")):
+                    if base and base in client_methods:
+                        base_to_subclasses.setdefault(base, []).append(name)
+                        subclass_to_bases.setdefault(name, []).append(base)
 
     # Build uncovered list
     uncovered: list[dict[str, str]] = []
     for client_name, methods in client_methods.items():
         for method in methods:
             key = f"{client_name}.{method}"
-            if key not in seen_ops:
+            if key in seen_ops:
+                continue
+
+            # Check if covered through a base/subclass relationship
+            covered_via_related = False
+            if client_name in subclass_to_bases:
+                covered_via_related = any(
+                    f"{base}.{method}" in seen_ops
+                    for base in subclass_to_bases[client_name]
+                )
+            if not covered_via_related and client_name in base_to_subclasses:
+                covered_via_related = any(
+                    f"{sub}.{method}" in seen_ops
+                    for sub in base_to_subclasses[client_name]
+                )
+
+            if not covered_via_related:
                 uncovered.append({
                     "client": client_name,
                     "method": method,
@@ -910,7 +1165,12 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# =============================================================================
+# Usage Analysis Helpers
+# =============================================================================
+
 def get_referenced_types(cls: dict[str, Any], all_type_names: set[str]) -> set[str]:
+    """Get all type names referenced by a class (base, methods, properties)."""
     refs: set[str] = set()
 
     base = cls.get("base")
@@ -921,8 +1181,9 @@ def get_referenced_types(cls: dict[str, Any], all_type_names: set[str]) -> set[s
 
     for method in cls.get("methods", []) or []:
         sig = method.get("sig", "")
+        ret = method.get("ret", "")
         for type_name in all_type_names:
-            if type_name in sig:
+            if type_name in sig or type_name in ret:
                 refs.add(type_name)
 
     for prop in cls.get("properties", []) or []:
@@ -941,25 +1202,272 @@ def extract_call_info(node: ast.Call) -> tuple[str | None, int]:
     return None, 0
 
 
-def detect_patterns_ast(tree: ast.AST, code: str, patterns: set[str]) -> None:
-    """Detect usage patterns using AST analysis."""
-    code_lower = code.lower()
+def _unwrap_async_return_type(ret_type: str) -> str:
+    """Unwrap async wrapper types: Awaitable[X] → X, Coroutine[..., X] → X."""
+    for wrapper in ("Awaitable", "Coroutine", "AsyncIterator", "AsyncIterable"):
+        if ret_type.startswith(wrapper + "[") and ret_type.endswith("]"):
+            inner = ret_type[len(wrapper) + 1:-1]
+            if wrapper == "Coroutine":
+                parts = inner.rsplit(",", 1)
+                if len(parts) == 2:
+                    return parts[1].strip()
+            return inner
+    return ret_type
 
-    # Check for async/await
-    if any(isinstance(node, ast.Await) for node in ast.walk(tree)):
-        patterns.add("async")
 
-    # Check for error handling
-    if any(isinstance(node, ast.Try) for node in ast.walk(tree)):
-        patterns.add("error-handling")
+def _build_method_return_type_map(api: dict[str, Any], client_methods: dict[str, set[str]]) -> dict[str, str]:
+    """Build (ClassName.method_name) → ReturnType map from API method return types."""
+    result: dict[str, str] = {}
+    for module in api.get("modules", []):
+        for cls in module.get("classes", []):
+            cls_name = cls.get("name", "")
+            for method in cls.get("methods", []):
+                ret = method.get("ret")
+                if ret:
+                    unwrapped = _unwrap_async_return_type(ret).split("[")[0].strip()
+                    if unwrapped in client_methods:
+                        result[f"{cls_name}.{method['name']}"] = unwrapped
+    return result
 
-    # Keyword-based patterns
-    if any(keyword in code_lower for keyword in ["credential", "authenticate", "token"]):
-        patterns.add("authentication")
-    if any(keyword in code_lower for keyword in ["stream", "async", "await"]):
-        patterns.add("streaming")
-    if any(keyword in code_lower for keyword in ["retry", "backoff", "timeout"]):
-        patterns.add("retry")
+
+def _build_function_return_type_map(api: dict[str, Any], client_methods: dict[str, set[str]]) -> dict[str, str]:
+    """Build function_name → ReturnType map from API function return types."""
+    result: dict[str, str] = {}
+    for module in api.get("modules", []):
+        for func in module.get("functions", []):
+            ret = func.get("ret")
+            if ret:
+                unwrapped = _unwrap_async_return_type(ret).split("[")[0].strip()
+                if unwrapped in client_methods:
+                    result[func["name"]] = unwrapped
+    return result
+
+
+def _build_property_type_map(api: dict[str, Any], client_methods: dict[str, set[str]]) -> dict[str, str]:
+    """Build (ClassName.prop_name) → ReturnType map from API property types."""
+    result: dict[str, str] = {}
+    for module in api.get("modules", []):
+        for cls in module.get("classes", []):
+            cls_name = cls.get("name", "")
+            for prop in cls.get("properties", []):
+                prop_type = prop.get("type")
+                if prop_type:
+                    base_type = prop_type.split("[")[0].strip()
+                    if base_type in client_methods:
+                        result[f"{cls_name}.{prop['name']}"] = base_type
+    return result
+
+
+def _build_var_type_map(
+    tree: ast.AST,
+    client_names: set[str],
+    method_return_type_map: dict[str, str],
+    function_return_type_map: dict[str, str],
+    property_type_map: dict[str, str]
+) -> dict[str, str]:
+    """
+    Walk a Python AST and track variable-to-client-type mappings.
+    All type resolution is driven by API index data — no name-based heuristics.
+
+    Patterns tracked:
+      - client = ChatClient(...)             → ChatClient
+      - client: ChatClient = ...             → ChatClient
+      - client = SomeClient.from_config(...) → SomeClient
+      - self.client = ChatClient(...)        → self.client maps to ChatClient
+      - client = service.get_chat_client()   → via method return type map
+      - client = create_chat_client()        → via function return type map
+      - sub = client.sub_client              → via property type map
+    """
+    var_types: dict[str, str] = {}
+
+    for node in ast.walk(tree):
+        # Handle: client = ChatClient(...) or client = service.method()
+        if isinstance(node, ast.Assign):
+            rhs_type = _infer_type_from_expr(node.value, client_names, var_types,
+                                              method_return_type_map, function_return_type_map,
+                                              property_type_map)
+            if rhs_type:
+                for target in node.targets:
+                    _assign_var_type(target, rhs_type, var_types)
+
+        # Handle: client: ChatClient = ... (annotated assignment)
+        elif isinstance(node, ast.AnnAssign) and node.target:
+            ann_type = _extract_client_type_from_annotation(node.annotation, client_names)
+            if ann_type:
+                _assign_var_type(node.target, ann_type, var_types)
+            elif node.value:
+                rhs_type = _infer_type_from_expr(node.value, client_names, var_types,
+                                                  method_return_type_map, function_return_type_map,
+                                                  property_type_map)
+                if rhs_type:
+                    _assign_var_type(node.target, rhs_type, var_types)
+
+    return var_types
+
+
+def _assign_var_type(target: ast.AST, type_name: str, var_types: dict[str, str]) -> None:
+    """Assign a type to a variable target (Name or Attribute)."""
+    if isinstance(target, ast.Name):
+        var_types[target.id] = type_name
+    elif isinstance(target, ast.Attribute):
+        key = f"{_expr_to_str(target.value)}.{target.attr}"
+        var_types[key] = type_name
+
+
+def _extract_client_type_from_annotation(ann: ast.AST, client_names: set[str]) -> str | None:
+    """Extract a client type name from a type annotation."""
+    if isinstance(ann, ast.Name) and ann.id in client_names:
+        return ann.id
+    if isinstance(ann, ast.Attribute):
+        if ann.attr in client_names:
+            return ann.attr
+    return None
+
+
+def _infer_type_from_expr(
+    expr: ast.AST,
+    client_names: set[str],
+    var_types: dict[str, str],
+    method_return_type_map: dict[str, str],
+    function_return_type_map: dict[str, str],
+    property_type_map: dict[str, str]
+) -> str | None:
+    """
+    Infer client type from RHS of an assignment using API data only.
+
+    Handles:
+      - ChatClient(...)            → ChatClient (constructor)
+      - module.ChatClient(...)     → ChatClient (qualified constructor)
+      - ChatClient.from_config()   → ChatClient (class method factory)
+      - create_chat_client(...)    → via function return type map
+      - service.get_chat_client()  → via method return type map
+      - client.sub_prop            → via property type map
+    """
+    # Property access: client.sub_prop
+    if isinstance(expr, ast.Attribute) and isinstance(expr.value, (ast.Name, ast.Attribute)):
+        if isinstance(expr.value, ast.Name):
+            receiver_type = var_types.get(expr.value.id)
+        else:
+            receiver_type = var_types.get(_expr_to_str(expr.value))
+        if receiver_type:
+            prop_key = f"{receiver_type}.{expr.attr}"
+            prop_type = property_type_map.get(prop_key)
+            if prop_type:
+                return prop_type
+        return None
+
+    if not isinstance(expr, ast.Call):
+        return None
+
+    func = expr.func
+
+    # Direct constructor: ChatClient(...)
+    if isinstance(func, ast.Name):
+        if func.id in client_names:
+            return func.id
+        # Function call: create_chat_client() → via function return type map
+        return function_return_type_map.get(func.id)
+
+    # Qualified access: module.ChatClient(...) or service.method(...)
+    if isinstance(func, ast.Attribute):
+        # Constructor: module.ChatClient(...)
+        if func.attr in client_names:
+            return func.attr
+        # Class method factory: ChatClient.from_config(...)
+        if isinstance(func.value, ast.Name) and func.value.id in client_names:
+            return func.value.id
+        # Instance method: service.get_chat_client() → via method return type map
+        if isinstance(func.value, ast.Name):
+            receiver_type = var_types.get(func.value.id)
+            if receiver_type:
+                method_key = f"{receiver_type}.{func.attr}"
+                ret_type = method_return_type_map.get(method_key)
+                if ret_type:
+                    return ret_type
+
+    return None
+
+
+def _expr_to_str(expr: ast.AST) -> str:
+    """Convert a simple expression to a string for use as map key."""
+    if isinstance(expr, ast.Name):
+        return expr.id
+    if isinstance(expr, ast.Attribute):
+        return f"{_expr_to_str(expr.value)}.{expr.attr}"
+    return "?"
+
+
+def _resolve_receiver_type(
+    node: ast.Call,
+    var_types: dict[str, str],
+    client_names: set[str],
+    method_return_type_map: dict[str, str],
+    function_return_type_map: dict[str, str]
+) -> str | None:
+    """
+    Resolve the client type for a method call receiver using the var-type map
+    and API return type data.
+
+    For client.send(), looks up 'client' in var_types.
+    For self.client.send(), looks up 'self.client' in var_types.
+    For get_client().send(), looks up function return type from API data.
+    """
+    if not isinstance(node.func, ast.Attribute):
+        return None
+
+    receiver = node.func.value
+
+    # Simple variable: client.send()
+    if isinstance(receiver, ast.Name):
+        return var_types.get(receiver.id)
+
+    # Attribute access: self.client.send()
+    if isinstance(receiver, ast.Attribute):
+        key = f"{_expr_to_str(receiver.value)}.{receiver.attr}"
+        resolved = var_types.get(key)
+        if resolved:
+            return resolved
+        return var_types.get(receiver.attr)
+
+    # Chained call: get_client().send() — resolve from API return type data
+    if isinstance(receiver, ast.Call):
+        func = receiver.func
+        # Standalone function: create_client().send()
+        if isinstance(func, ast.Name):
+            return function_return_type_map.get(func.id)
+        # Method call: service.get_client().send()
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            receiver_type = var_types.get(func.value.id)
+            if receiver_type:
+                method_key = f"{receiver_type}.{func.attr}"
+                return method_return_type_map.get(method_key)
+
+    return None
+
+
+def detect_patterns_ast(tree: ast.AST, patterns: set[str]) -> None:
+    """Detect usage patterns using purely structural AST analysis.
+
+    Only reports patterns that are provable from AST node types —
+    no keyword substring matching.
+    """
+    has_async = False
+    has_error_handling = False
+    has_streaming = False
+
+    for node in ast.walk(tree):
+        if not has_async and isinstance(node, (ast.Await, ast.AsyncWith, ast.AsyncFor)):
+            patterns.add("async")
+            has_async = True
+        if not has_error_handling and isinstance(node, ast.Try):
+            patterns.add("error-handling")
+            has_error_handling = True
+        if not has_streaming and isinstance(node, ast.AsyncFor):
+            patterns.add("streaming")
+            has_streaming = True
+        if has_async and has_error_handling and has_streaming:
+            break
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

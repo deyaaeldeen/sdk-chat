@@ -20,6 +20,11 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <inheritdoc />
     public string Language => "go";
 
+    /// <summary>
+    /// Checks if Go is available to run the usage analyzer.
+    /// </summary>
+    public bool IsAvailable() => GetAvailability().IsAvailable;
+
     /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {

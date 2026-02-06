@@ -169,12 +169,17 @@ public static partial class ToolPathResolver
             var psi = new ProcessStartInfo
             {
                 FileName = path,
-                Arguments = args,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // SECURITY: Use ArgumentList for proper escaping - prevents injection
+            foreach (var arg in args.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                psi.ArgumentList.Add(arg);
+            }
 
             using var process = Process.Start(psi);
             if (process == null) return false;
@@ -182,8 +187,9 @@ public static partial class ToolPathResolver
             process.WaitForExit(3000);
             return process.ExitCode == 0;
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning("ValidateExecutable failed for '{0}': {1}", path, ex.Message);
             return false;
         }
     }
@@ -205,11 +211,13 @@ public static partial class ToolPathResolver
             var psi = new ProcessStartInfo
             {
                 FileName = whichCmd,
-                Arguments = command,
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // SECURITY: Use ArgumentList for proper escaping - prevents injection
+            psi.ArgumentList.Add(command);
 
             using var process = Process.Start(psi);
             if (process == null) return null;
@@ -219,8 +227,9 @@ public static partial class ToolPathResolver
 
             return process.ExitCode == 0 ? output.Trim().Split('\n')[0].Trim() : null;
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning("GetAbsolutePath failed for '{0}': {1}", command, ex.Message);
             return null;
         }
     }

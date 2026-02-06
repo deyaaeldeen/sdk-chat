@@ -8,8 +8,8 @@ public class McpCommand : Command
 {
     public McpCommand() : base("mcp", "Start MCP server for AI agent integration")
     {
-        var transport = new Option<string>("--transport") { Description = "Transport type (stdio, sse)", DefaultValueFactory = _ => "stdio" };
-        var port = new Option<int>("--port") { Description = "Port for SSE transport", DefaultValueFactory = _ => 8080 };
+        var transport = new Option<string>("--transport") { Description = "Transport type (stdio, http)", DefaultValueFactory = _ => "stdio" };
+        var port = new Option<int>("--port") { Description = "Port for Streamable HTTP transport", DefaultValueFactory = _ => 8080 };
         var logLevel = new Option<string>("--log-level") { Description = "Log level", DefaultValueFactory = _ => "info" };
         var useOpenAi = new Option<bool>("--use-openai") { Description = "Use OpenAI-compatible API (requires OPENAI_API_KEY)" };
         var loadDotEnv = new Option<bool>("--load-dotenv") { Description = "Load .env file" };

@@ -173,12 +173,17 @@ public static class ExtractorAvailability
             var psi = new ProcessStartInfo
             {
                 FileName = path,
-                Arguments = args,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // SECURITY: Use ArgumentList for proper escaping - prevents injection
+            foreach (var arg in args.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                psi.ArgumentList.Add(arg);
+            }
 
             using var process = Process.Start(psi);
             if (process == null)
@@ -189,13 +194,20 @@ public static class ExtractorAvailability
             var completed = process.WaitForExit(ValidationTimeoutMs);
             if (!completed)
             {
-                try { process.Kill(); } catch { }
+                try { process.Kill(); }
+                catch (Exception ex)
+                {
+                    Trace.TraceWarning("Failed to kill timed-out validation process '{0}': {1}", path, ex.Message);
+                }
                 return (false, "Validation timed out");
             }
 
             // Exit code 0 or 1 are acceptable for --help (some tools return 1 for help)
             // Exit code 0 is required for --version
-            var acceptableExitCodes = args.Contains("--help") ? new[] { 0, 1 } : new[] { 0 };
+            // Use exact token match to avoid false positives from substrings like "--helper"
+            var splitArgs = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var isHelpArgs = Array.Exists(splitArgs, a => a == "--help");
+            var acceptableExitCodes = isHelpArgs ? new[] { 0, 1 } : new[] { 0 };
             if (acceptableExitCodes.Contains(process.ExitCode))
             {
                 return (true, null);

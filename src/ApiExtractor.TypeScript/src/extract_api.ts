@@ -214,7 +214,7 @@ const WELL_KNOWN_BUILTINS = new Set([
  * Primitive type names that are always builtins (not resolvable to declarations).
  */
 const PRIMITIVE_TYPES = new Set([
-    "string", "number", "boolean", "symbol", "bigint", 
+    "string", "number", "boolean", "symbol", "bigint",
     "undefined", "null", "void", "never", "any", "unknown", "object",
 ]);
 
@@ -243,34 +243,34 @@ function setTypeResolutionProject(project: Project): void {
 function isBuiltinType(typeName: string): boolean {
     // Strip generic parameters
     const baseName = typeName.split("<")[0].trim();
-    
+
     // Check primitives first (not resolvable)
     if (PRIMITIVE_TYPES.has(baseName)) {
         return true;
     }
-    
+
     // Check well-known builtins (fast path)
     if (WELL_KNOWN_BUILTINS.has(baseName)) {
         return true;
     }
-    
+
     // Check cache
     if (builtinTypeCache.has(baseName)) {
         return builtinTypeCache.get(baseName)!;
     }
-    
+
     // If no project available, assume not builtin (let it be resolved)
     if (!typeResolutionProject) {
         builtinTypeCache.set(baseName, false);
         return false;
     }
-    
+
     // Try to resolve the type using the project's source files
     // This catches types defined in node_modules/@types/* or typescript/lib/*
     try {
         for (const sourceFile of typeResolutionProject.getSourceFiles()) {
             const filePath = sourceFile.getFilePath();
-            
+
             // Check interfaces, classes, type aliases, and enums
             const iface = sourceFile.getInterface(baseName);
             if (iface) {
@@ -278,21 +278,21 @@ function isBuiltinType(typeName: string): boolean {
                 builtinTypeCache.set(baseName, isBuiltin);
                 return isBuiltin;
             }
-            
+
             const cls = sourceFile.getClass(baseName);
             if (cls) {
                 const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
                 builtinTypeCache.set(baseName, isBuiltin);
                 return isBuiltin;
             }
-            
+
             const typeAlias = sourceFile.getTypeAlias(baseName);
             if (typeAlias) {
                 const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
                 builtinTypeCache.set(baseName, isBuiltin);
                 return isBuiltin;
             }
-            
+
             const enumDecl = sourceFile.getEnum(baseName);
             if (enumDecl) {
                 const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
@@ -303,7 +303,7 @@ function isBuiltinType(typeName: string): boolean {
     } catch {
         // If resolution fails, assume not builtin
     }
-    
+
     builtinTypeCache.set(baseName, false);
     return false;
 }
@@ -329,7 +329,7 @@ interface ResolvedTypeRef {
 /**
  * Collects external type references from a Type object using proper AST traversal.
  * This recursively resolves generic type arguments, union/intersection members, etc.
- * 
+ *
  * @param type The Type object to analyze
  * @param project The ts-morph Project for resolution
  * @param refs Set to collect resolved type references
@@ -342,104 +342,111 @@ function collectTypeRefsFromType(
     visited = new Set<string>()
 ): void {
     if (!type) return;
-    
-    // Get a unique ID for this type to prevent infinite recursion
-    const typeId = type.getText();
-    if (visited.has(typeId)) return;
-    visited.add(typeId);
-    
-    // Get the underlying TypeScript type
-    const tsType = type.compilerType;
-    
-    // Skip primitive types
-    if (tsType.flags & (
-        ts.TypeFlags.String | ts.TypeFlags.Number | ts.TypeFlags.Boolean |
-        ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Null |
-        ts.TypeFlags.Never | ts.TypeFlags.Any | ts.TypeFlags.Unknown |
-        ts.TypeFlags.BigInt | ts.TypeFlags.ESSymbol
-    )) {
-        return;
-    }
-    
-    // Handle union types
-    if (type.isUnion()) {
-        for (const unionType of type.getUnionTypes()) {
-            collectTypeRefsFromType(unionType, project, refs, visited);
+
+    // Wrap in try-catch to handle malformed declarations that can throw in ts-morph
+    try {
+        // Get a unique ID for this type to prevent infinite recursion
+        // Note: getText() can throw on error types - handled by outer try-catch
+        const typeId = type.getText();
+        if (visited.has(typeId)) return;
+        visited.add(typeId);
+
+        // Get the underlying TypeScript type
+        const tsType = type.compilerType;
+
+        // Skip primitive types
+        if (tsType.flags & (
+            ts.TypeFlags.String | ts.TypeFlags.Number | ts.TypeFlags.Boolean |
+            ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Null |
+            ts.TypeFlags.Never | ts.TypeFlags.Any | ts.TypeFlags.Unknown |
+            ts.TypeFlags.BigInt | ts.TypeFlags.ESSymbol
+        )) {
+            return;
         }
-        return;
-    }
-    
-    // Handle intersection types
-    if (type.isIntersection()) {
-        for (const intersectionType of type.getIntersectionTypes()) {
-            collectTypeRefsFromType(intersectionType, project, refs, visited);
+
+        // Handle union types
+        if (type.isUnion()) {
+            for (const unionType of type.getUnionTypes()) {
+                collectTypeRefsFromType(unionType, project, refs, visited);
+            }
+            return;
         }
-        return;
-    }
-    
-    // Handle array types
-    if (type.isArray()) {
-        const elementType = type.getArrayElementType();
-        if (elementType) {
-            collectTypeRefsFromType(elementType, project, refs, visited);
+
+        // Handle intersection types
+        if (type.isIntersection()) {
+            for (const intersectionType of type.getIntersectionTypes()) {
+                collectTypeRefsFromType(intersectionType, project, refs, visited);
+            }
+            return;
         }
-        return;
-    }
-    
-    // Handle tuple types
-    if (type.isTuple()) {
-        for (const tupleElement of type.getTupleElements()) {
-            collectTypeRefsFromType(tupleElement, project, refs, visited);
+
+        // Handle array types
+        if (type.isArray()) {
+            const elementType = type.getArrayElementType();
+            if (elementType) {
+                collectTypeRefsFromType(elementType, project, refs, visited);
+            }
+            return;
         }
-        return;
-    }
-    
-    // Get the symbol for the type
-    const symbol = type.getSymbol() || type.getAliasSymbol();
-    if (!symbol) return;
-    
-    // Get the type name
-    const typeName = symbol.getName();
-    
-    // Skip anonymous types, primitives, and builtins
-    if (!typeName || typeName === "__type" || typeName === "__object" || 
-        PRIMITIVE_TYPES.has(typeName) || isBuiltinType(typeName)) {
-        return;
-    }
-    
-    // Get the declaration to find source file
-    const declarations = symbol.getDeclarations();
-    if (!declarations || declarations.length === 0) return;
-    
-    const declaration = declarations[0];
-    const sourceFile = declaration.getSourceFile();
-    const filePath = sourceFile.getFilePath();
-    
-    // Check if this is from a builtin location
-    const isBuiltinPath = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
-    if (isBuiltinPath) return;
-    
-    // Determine the package name from the source file path
-    const packageName = resolvePackageNameFromPath(filePath);
-    
-    // Add the resolved reference
-    refs.add({
-        name: typeName,
-        fullName: symbol.getFullyQualifiedName?.() ?? typeName,
-        declarationPath: filePath,
-        packageName,
-    });
-    
-    // Recursively process generic type arguments
-    const typeArgs = type.getTypeArguments();
-    for (const typeArg of typeArgs) {
-        collectTypeRefsFromType(typeArg, project, refs, visited);
-    }
-    
-    // Process base types for classes/interfaces
-    const baseTypes = type.getBaseTypes();
-    for (const baseType of baseTypes) {
-        collectTypeRefsFromType(baseType, project, refs, visited);
+
+        // Handle tuple types
+        if (type.isTuple()) {
+            for (const tupleElement of type.getTupleElements()) {
+                collectTypeRefsFromType(tupleElement, project, refs, visited);
+            }
+            return;
+        }
+
+        // Get the symbol for the type
+        const symbol = type.getSymbol() || type.getAliasSymbol();
+        if (!symbol) return;
+
+        // Get the type name
+        const typeName = symbol.getName();
+
+        // Skip anonymous types, primitives, and builtins
+        if (!typeName || typeName === "__type" || typeName === "__object" ||
+            PRIMITIVE_TYPES.has(typeName) || isBuiltinType(typeName)) {
+            return;
+        }
+
+        // Get the declaration to find source file
+        const declarations = symbol.getDeclarations();
+        if (!declarations || declarations.length === 0) return;
+
+        const declaration = declarations[0];
+        const sourceFile = declaration.getSourceFile();
+        const filePath = sourceFile.getFilePath();
+
+        // Check if this is from a builtin location
+        const isBuiltinPath = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
+        if (isBuiltinPath) return;
+
+        // Determine the package name from the source file path
+        const packageName = resolvePackageNameFromPath(filePath);
+
+        // Add the resolved reference
+        refs.add({
+            name: typeName,
+            fullName: symbol.getFullyQualifiedName?.() ?? typeName,
+            declarationPath: filePath,
+            packageName,
+        });
+
+        // Recursively process generic type arguments
+        const typeArgs = type.getTypeArguments();
+        for (const typeArg of typeArgs) {
+            collectTypeRefsFromType(typeArg, project, refs, visited);
+        }
+
+        // Process base types for classes/interfaces
+        const baseTypes = type.getBaseTypes();
+        for (const baseType of baseTypes) {
+            collectTypeRefsFromType(baseType, project, refs, visited);
+        }
+    } catch {
+        // Silently skip types that fail resolution (malformed declarations, circular refs, etc.)
+        // This is non-fatal - we just won't track this dependency
     }
 }
 
@@ -451,10 +458,10 @@ function resolvePackageNameFromPath(filePath: string): string | undefined {
     // Check if it's in node_modules
     const nodeModulesIndex = filePath.lastIndexOf("node_modules");
     if (nodeModulesIndex === -1) return undefined;
-    
+
     // Extract the package path after node_modules
     const afterNodeModules = filePath.substring(nodeModulesIndex + "node_modules".length + 1);
-    
+
     // Handle scoped packages (@org/package)
     if (afterNodeModules.startsWith("@")) {
         const parts = afterNodeModules.split(/[/\\]/);
@@ -468,7 +475,7 @@ function resolvePackageNameFromPath(filePath: string): string | undefined {
             return parts[0];
         }
     }
-    
+
     return undefined;
 }
 
@@ -480,28 +487,33 @@ class TypeReferenceCollector {
     private refs = new Set<ResolvedTypeRef>();
     private project: Project | null = null;
     private definedTypes = new Set<string>();
-    
+
     setProject(project: Project): void {
         this.project = project;
     }
-    
+
     addDefinedType(name: string): void {
         this.definedTypes.add(name.split("<")[0]);
     }
-    
+
     collectFromType(type: Type): void {
         if (!this.project) return;
-        collectTypeRefsFromType(type, this.project, this.refs);
+        // Try-catch wrapper for safety - ts-morph can throw on malformed types
+        try {
+            collectTypeRefsFromType(type, this.project, this.refs);
+        } catch {
+            // Non-fatal - skip types that fail resolution
+        }
     }
-    
+
     getExternalRefs(): ResolvedTypeRef[] {
         // Filter out locally defined types and types without package info
-        return Array.from(this.refs).filter(ref => 
-            !this.definedTypes.has(ref.name) && 
+        return Array.from(this.refs).filter(ref =>
+            !this.definedTypes.has(ref.name) &&
             ref.packageName !== undefined
         );
     }
-    
+
     clear(): void {
         this.refs.clear();
         this.definedTypes.clear();
@@ -563,7 +575,7 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
     const params = method.getParameters().map(formatParameter).join(", ");
     const returnType = method.getReturnType();
     const ret = returnType?.getText();
-    
+
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
@@ -587,10 +599,10 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
 
 function extractProperty(prop: PropertyDeclaration): PropertyInfo {
     const type = prop.getType();
-    
+
     // Collect type reference for dependency tracking
     typeCollector.collectFromType(type);
-    
+
     const result: PropertyInfo = {
         name: prop.getName(),
         type: simplifyType(type.getText()),
@@ -675,7 +687,7 @@ function extractInterfaceMethod(method: Node): MethodInfo | undefined {
     const params = method.getParameters().map(formatParameter).join(", ");
     const returnType = method.getReturnType();
     const ret = returnType?.getText();
-    
+
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
@@ -703,7 +715,7 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
     const params = typeNode.getParameters().map(formatParameter).join(", ");
     const returnType = typeNode.getReturnType();
     const ret = returnType?.getText();
-    
+
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
@@ -793,10 +805,10 @@ function extractEnum(en: EnumDeclaration): EnumInfo {
 
 function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
     const type = alias.getType();
-    
+
     // Collect type reference for dependency tracking
     typeCollector.collectFromType(type);
-    
+
     return {
         name: alias.getName(),
         type: simplifyType(type.getText()),
@@ -811,7 +823,7 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     const params = fn.getParameters().map(formatParameter).join(", ");
     const returnType = fn.getReturnType();
     const ret = returnType?.getText();
-    
+
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
@@ -918,7 +930,7 @@ function resolveEntryPointFiles(rootPath: string): ExportEntry[] {
             const resolved = resolveToSourceFile(rootPath, entry.filePath);
             if (resolved) entryEntries.push({ exportPath: entry.exportPath, filePath: resolved });
         }
-        
+
         // Also include all other exports (for subpath tracking)
         const allExportPaths = extractExportPaths(pkg.exports, false);
         for (const entry of allExportPaths) {
@@ -999,7 +1011,7 @@ function extractExportPaths(exports: string | Record<string, unknown>, rootOnly:
     } else if (typeof exports === "object" && exports !== null) {
         // Object exports map - prioritize "." entry
         const entries = Object.entries(exports);
-        
+
         // Sort to put "." first, then process
         entries.sort(([keyA], [keyB]) => {
             if (keyA === ".") return -1;
@@ -1028,8 +1040,8 @@ function extractExportPaths(exports: string | Record<string, unknown>, rootOnly:
         }
     }
 
-    return results.filter((r) => 
-        r.filePath.endsWith(".ts") || r.filePath.endsWith(".d.ts") || 
+    return results.filter((r) =>
+        r.filePath.endsWith(".ts") || r.filePath.endsWith(".d.ts") ||
         r.filePath.endsWith(".js") || r.filePath.endsWith(".mjs")
     );
 }
@@ -1124,7 +1136,7 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
         for (const exportDecl of sourceFile.getExportDeclarations()) {
             const moduleSpecifier = exportDecl.getModuleSpecifierValue();
             const isExternalPackage = moduleSpecifier && !moduleSpecifier.startsWith(".") && !moduleSpecifier.startsWith("/");
-            
+
             const namedExports = exportDecl.getNamedExports();
             for (const namedExport of namedExports) {
                 const name = namedExport.getAliasNode()?.getText() ?? namedExport.getName();
@@ -1135,7 +1147,7 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
                     });
                 }
             }
-            
+
             // Handle `export * from "external-package"` - we can't enumerate these easily
             // without resolving the external package, so we'll mark them when we see them used
             if (exportDecl.isNamespaceExport() && isExternalPackage) {
@@ -1388,13 +1400,13 @@ function resolveTypeFromPackage(packageName: string, typeName: string, nodeModul
 
     try {
         const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
-        
+
         // Find types entry point
         let typesPath: string | undefined;
         if (pkg.types) typesPath = pkg.types;
         else if (pkg.typings) typesPath = pkg.typings;
         else if (pkg.exports?.["."]?.types) typesPath = pkg.exports["."].types;
-        
+
         if (!typesPath) return null;
 
         const fullTypesPath = path.join(packagePath, typesPath);
@@ -1470,10 +1482,10 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
     for (const typeName of definedTypes) {
         typeCollector.addDefinedType(typeName);
     }
-    
+
     // Get the AST-collected external type references
     const externalRefs = typeCollector.getExternalRefs();
-    
+
     if (externalRefs.length === 0) {
         return [];
     }
@@ -1482,7 +1494,7 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
     const typesByPackage = new Map<string, ResolvedTypeRef[]>();
     for (const ref of externalRefs) {
         if (!ref.packageName) continue;
-        
+
         if (!typesByPackage.has(ref.packageName)) {
             typesByPackage.set(ref.packageName, []);
         }
@@ -1496,7 +1508,7 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
     for (const [packageName, refs] of typesByPackage) {
         // Deduplicate type names
         const uniqueTypeNames = [...new Set(refs.map(r => r.name))];
-        
+
         // Try to extract full type definitions from the package
         const nodeModulesPath = path.join(rootPath, "node_modules");
         for (const typeName of uniqueTypeNames) {
@@ -1508,9 +1520,9 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                 }
             }
         }
-        
+
         const depInfo: DependencyInfo = { package: packageName };
-        
+
         const classes: ClassInfo[] = [];
         const interfaces: InterfaceInfo[] = [];
         const enums: EnumInfo[] = [];
@@ -1825,6 +1837,268 @@ interface UncoveredOp {
     sig: string;
 }
 
+/**
+ * Build a variable → client type map for a source file.
+ *
+ * Tracks patterns:
+ *   - const client = new BlobClient(...)           → client maps to BlobClient
+ *   - const client: BlobClient = ...               → client maps to BlobClient
+ *   - let client: BlobClient                       → client maps to BlobClient
+ *   - const client = createBlobClient(...)          → client maps to BlobClient (via function return type map)
+ *   - const client = service.getBlobClient(...)     → client maps to BlobClient (via method return type map)
+ *   - const blob = storage.blobs                   → client maps to BlobClient (via property type map)
+ *
+ * All type resolution is driven by API index data — no name-based heuristics.
+ */
+function buildVarTypeMap(
+    sourceFile: SourceFile,
+    clientNames: Set<string>,
+    propertyTypeMap: Map<string, string>,
+    methodReturnTypeMap: Map<string, string>,
+    functionReturnTypeMap: Map<string, string>
+): Map<string, string> {
+    const varTypes = new Map<string, string>();
+
+    sourceFile.forEachDescendant((node) => {
+        // Variable declarations: const client = new BlobClient() / const client: BlobClient = ...
+        if (Node.isVariableDeclaration(node)) {
+            const nameNode = node.getNameNode();
+            if (!Node.isIdentifier(nameNode)) return;
+            const varName = nameNode.getText();
+
+            // Check type annotation first: const client: BlobClient
+            const typeNode = node.getTypeNode();
+            if (typeNode) {
+                const typeName = typeNode.getText().split("<")[0].trim();
+                if (clientNames.has(typeName)) {
+                    varTypes.set(varName, typeName);
+                    return;
+                }
+            }
+
+            // Check initializer
+            const initializer = node.getInitializer();
+            if (initializer) {
+                // new BlobClient(...)
+                if (Node.isNewExpression(initializer)) {
+                    const exprNode = initializer.getExpression();
+                    if (Node.isIdentifier(exprNode)) {
+                        const name = exprNode.getText();
+                        if (clientNames.has(name)) {
+                            varTypes.set(varName, name);
+                            return;
+                        }
+                    }
+                    if (Node.isPropertyAccessExpression(exprNode)) {
+                        const name = exprNode.getName();
+                        if (clientNames.has(name)) {
+                            varTypes.set(varName, name);
+                            return;
+                        }
+                    }
+                }
+
+                // Call expression: createBlobClient() or service.getBlobClient()
+                if (Node.isCallExpression(initializer)) {
+                    const callExpr = initializer.getExpression();
+
+                    // Standalone function: createBlobClient(...)
+                    if (Node.isIdentifier(callExpr)) {
+                        const retType = functionReturnTypeMap.get(callExpr.getText());
+                        if (retType) {
+                            varTypes.set(varName, retType);
+                            return;
+                        }
+                    }
+
+                    // Method call: service.getBlobClient(...) or BlobClient.create(...)
+                    if (Node.isPropertyAccessExpression(callExpr)) {
+                        const objExpr = callExpr.getExpression();
+                        const calledMethodName = callExpr.getName();
+
+                        // Static factory: BlobClient.create(...)
+                        if (Node.isIdentifier(objExpr) && clientNames.has(objExpr.getText())) {
+                            const staticKey = `${objExpr.getText()}.${calledMethodName}`;
+                            const staticRet = methodReturnTypeMap.get(staticKey);
+                            varTypes.set(varName, staticRet ?? objExpr.getText());
+                            return;
+                        }
+
+                        // Instance method: service.getBlobClient(...)
+                        if (Node.isIdentifier(objExpr)) {
+                            const receiverType = varTypes.get(objExpr.getText());
+                            if (receiverType) {
+                                const methodKey = `${receiverType.split("<")[0]}.${calledMethodName}`;
+                                const retType = methodReturnTypeMap.get(methodKey);
+                                if (retType) {
+                                    varTypes.set(varName, retType);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Type assertion: expr as BlobClient
+                if (Node.isAsExpression(initializer)) {
+                    const asTypeNode = initializer.getTypeNode();
+                    if (asTypeNode) {
+                        const typeName = asTypeNode.getText().split("<")[0].trim();
+                        if (clientNames.has(typeName)) {
+                            varTypes.set(varName, typeName);
+                            return;
+                        }
+                    }
+                }
+
+                // Property access: const blob = storage.blobs → infer from property type map
+                if (Node.isPropertyAccessExpression(initializer)) {
+                    const objExpr = initializer.getExpression();
+                    if (Node.isIdentifier(objExpr)) {
+                        const sourceVar = objExpr.getText();
+                        const sourceType = varTypes.get(sourceVar);
+                        if (sourceType) {
+                            const propName = initializer.getName();
+                            const propKey = `${sourceType.split("<")[0]}.${propName}`;
+                            const propType = propertyTypeMap.get(propKey);
+                            if (propType) {
+                                varTypes.set(varName, propType);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Property/field assignments: this.client = new BlobClient(...)
+        if (Node.isPropertyDeclaration(node)) {
+            const nameNode = node.getNameNode();
+            if (Node.isIdentifier(nameNode)) {
+                const propName = nameNode.getText();
+                const typeNode = node.getTypeNode();
+                if (typeNode) {
+                    const typeName = typeNode.getText().split("<")[0].trim();
+                    if (clientNames.has(typeName)) {
+                        varTypes.set(propName, typeName);
+                        return;
+                    }
+                }
+                const declInit = node.getInitializer();
+                if (declInit && Node.isNewExpression(declInit)) {
+                    const exprNode = declInit.getExpression();
+                    if (Node.isIdentifier(exprNode)) {
+                        const name = exprNode.getText();
+                        if (clientNames.has(name)) {
+                            varTypes.set(propName, name);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    return varTypes;
+}
+
+/**
+ * Unwrap async wrapper types from a TypeScript return type string.
+ * E.g., "Promise<BlobClient>" → "BlobClient".
+ */
+function unwrapAsyncReturnType(returnType: string): string {
+    const wrappers = ["Promise", "PromiseLike", "AsyncIterable", "AsyncIterableIterator"];
+    for (const wrapper of wrappers) {
+        if (returnType.startsWith(wrapper + "<") && returnType.endsWith(">")) {
+            return returnType.slice(wrapper.length + 1, -1);
+        }
+    }
+    return returnType;
+}
+
+/**
+ * Build a map of (OwnerType.methodName) → return type from API method data.
+ * Uses actual method return types from the API index for precise resolution.
+ */
+function buildMethodReturnTypeMap(
+    usageClasses: ClassInfo[],
+    usageInterfaces: InterfaceInfo[],
+    clientMethods: Map<string, Set<string>>
+): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const cls of usageClasses) {
+        for (const method of cls.methods || []) {
+            if (method.ret) {
+                const returnType = unwrapAsyncReturnType(method.ret).split("<")[0].trim();
+                if (clientMethods.has(returnType)) {
+                    map.set(`${cls.name.split("<")[0]}.${method.name}`, returnType);
+                }
+            }
+        }
+    }
+    for (const iface of usageInterfaces) {
+        for (const method of iface.methods || []) {
+            if (method.ret) {
+                const returnType = unwrapAsyncReturnType(method.ret).split("<")[0].trim();
+                if (clientMethods.has(returnType)) {
+                    map.set(`${iface.name.split("<")[0]}.${method.name}`, returnType);
+                }
+            }
+        }
+    }
+    return map;
+}
+
+/**
+ * Build a map of functionName → return type from API function data.
+ * For module-level functions that return client types.
+ */
+function buildFunctionReturnTypeMap(
+    api: ApiIndex,
+    clientMethods: Map<string, Set<string>>
+): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const mod of api.modules) {
+        for (const func of mod.functions || []) {
+            if (func.ret) {
+                const returnType = unwrapAsyncReturnType(func.ret).split("<")[0].trim();
+                if (clientMethods.has(returnType)) {
+                    map.set(func.name, returnType);
+                }
+            }
+        }
+    }
+    return map;
+}
+
+/**
+ * Build a map of (OwnerType.propertyName) → client type name from API property data.
+ * Uses actual property return types from the API index for precise resolution.
+ */
+function buildPropertyTypeMap(
+    usageClasses: ClassInfo[],
+    usageInterfaces: InterfaceInfo[],
+    clientMethods: Map<string, Set<string>>
+): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const cls of usageClasses) {
+        for (const prop of cls.properties || []) {
+            const returnType = prop.type.split("<")[0].trim();
+            if (clientMethods.has(returnType)) {
+                map.set(`${cls.name.split("<")[0]}.${prop.name}`, returnType);
+            }
+        }
+    }
+    for (const iface of usageInterfaces) {
+        for (const prop of iface.properties || []) {
+            const returnType = prop.type.split("<")[0].trim();
+            if (clientMethods.has(returnType)) {
+                map.set(`${iface.name.split("<")[0]}.${prop.name}`, returnType);
+            }
+        }
+    }
+    return map;
+}
+
 function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
     const allClasses: ClassInfo[] = [];
     const allInterfaces: InterfaceInfo[] = [];
@@ -1888,15 +2162,13 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
         }
     }
 
-    // Client classes are always roots - they're SDK entry points even if referenced by options/builders
-    const isClientClass = (name: string) => name.endsWith("Client") || name.endsWith("AsyncClient");
-
+    // Root classes: entry points (from package exports) with methods, or unreferenced types with operations
     let rootClasses = allClasses.filter((cls) => {
         const name = cls.name.split("<")[0];
         const hasOperations = (cls.methods?.length ?? 0) > 0;
         const refs = references.get(name);
         const referencesOperations = refs ? Array.from(refs).some((r) => operationTypes.has(r)) : false;
-        return isClientClass(name) || (!referencedBy.has(name) && (hasOperations || referencesOperations));
+        return (cls.entryPoint && hasOperations) || (!referencedBy.has(name) && (hasOperations || referencesOperations));
     });
 
     if (rootClasses.length === 0) {
@@ -1987,6 +2259,16 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
     const patterns: Set<string> = new Set();
     let fileCount = 0;
 
+    // Build set of known client type names for local type inference
+    const clientNames = new Set(clientMethods.keys());
+
+    // Build property type map from API data for precise subclient resolution
+    const propertyTypeMap = buildPropertyTypeMap(usageClasses, usageInterfaces, clientMethods);
+
+    // Build method and function return type maps from API data for precise factory/getter resolution
+    const methodReturnTypeMap = buildMethodReturnTypeMap(usageClasses, usageInterfaces, clientMethods);
+    const functionReturnTypeMap = buildFunctionReturnTypeMap(api, clientMethods);
+
     // Create a project for parsing samples
     const project = new Project({
         compilerOptions: { allowJs: true, noEmit: true },
@@ -2004,6 +2286,9 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
             const sourceFile = project.addSourceFileAtPath(filePath);
             const relPath = path.relative(samplesPath, filePath);
 
+            // Build variable → client type map for this file
+            const varTypes = buildVarTypeMap(sourceFile, clientNames, propertyTypeMap, methodReturnTypeMap, functionReturnTypeMap);
+
             // Use ts-morph to find all call expressions
             sourceFile.forEachDescendant((node) => {
                 if (Node.isCallExpression(node)) {
@@ -2012,19 +2297,77 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
                         const methodName = expr.getName();
                         const line = node.getStartLineNumber();
 
-                        // Check if this method belongs to a known client
-                        for (const [clientName, methods] of clientMethods) {
-                            if (methods.has(methodName)) {
-                                const key = `${clientName}.${methodName}`;
-                                if (!seenOps.has(key)) {
-                                    seenOps.add(key);
-                                    covered.push({
-                                        client: clientName,
-                                        method: methodName,
-                                        file: relPath,
-                                        line,
-                                    });
+                        // Strategy 1: Resolve receiver type from local variable tracking
+                        let resolvedClient: string | undefined;
+                        const receiver = expr.getExpression();
+                        if (Node.isIdentifier(receiver)) {
+                            const varType = varTypes.get(receiver.getText());
+                            if (varType && clientMethods.has(varType)) {
+                                const methods = clientMethods.get(varType)!;
+                                if (methods.has(methodName)) {
+                                    resolvedClient = varType;
                                 }
+                            }
+                        } else if (Node.isPropertyAccessExpression(receiver)) {
+                            // this.client.method() or obj.client.method()
+                            const propName = receiver.getName();
+                            const varType = varTypes.get(propName);
+                            if (varType && clientMethods.has(varType)) {
+                                const methods = clientMethods.get(varType)!;
+                                if (methods.has(methodName)) {
+                                    resolvedClient = varType;
+                                }
+                            }
+                        } else if (Node.isCallExpression(receiver)) {
+                            // getClient().method() - resolve return type from API data
+                            const innerExpr = receiver.getExpression();
+
+                            if (Node.isIdentifier(innerExpr)) {
+                                // Standalone function: createClient().method()
+                                const retType = functionReturnTypeMap.get(innerExpr.getText());
+                                if (retType && clientMethods.has(retType)) {
+                                    const methods = clientMethods.get(retType)!;
+                                    if (methods.has(methodName)) {
+                                        resolvedClient = retType;
+                                    }
+                                }
+                            } else if (Node.isPropertyAccessExpression(innerExpr)) {
+                                // Instance method: service.getClient().method()
+                                const chainedObj = innerExpr.getExpression();
+                                const chainedMethodName = innerExpr.getName();
+
+                                // Static factory: ClientType.create().method()
+                                if (Node.isIdentifier(chainedObj) && clientNames.has(chainedObj.getText())) {
+                                    const staticKey = `${chainedObj.getText()}.${chainedMethodName}`;
+                                    const retType = methodReturnTypeMap.get(staticKey) ?? chainedObj.getText();
+                                    if (clientMethods.has(retType)) {
+                                        const methods = clientMethods.get(retType)!;
+                                        if (methods.has(methodName)) {
+                                            resolvedClient = retType;
+                                        }
+                                    }
+                                } else if (Node.isIdentifier(chainedObj)) {
+                                    // service.getClient().method()
+                                    const receiverType = varTypes.get(chainedObj.getText());
+                                    if (receiverType) {
+                                        const methodKey = `${receiverType.split("<")[0]}.${chainedMethodName}`;
+                                        const retType = methodReturnTypeMap.get(methodKey);
+                                        if (retType && clientMethods.has(retType)) {
+                                            const methods = clientMethods.get(retType)!;
+                                            if (methods.has(methodName)) {
+                                                resolvedClient = retType;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (resolvedClient) {
+                            const key = `${resolvedClient}.${methodName}`;
+                            if (!seenOps.has(key)) {
+                                seenOps.add(key);
+                                covered.push({ client: resolvedClient, method: methodName, file: relPath, line });
                             }
                         }
                     }
@@ -2040,12 +2383,53 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
         }
     }
 
-    // Build uncovered list
+    // Build bidirectional interface ↔ implementation mapping for coverage cross-referencing
+    const ifaceToImplNames = new Map<string, string[]>();
+    const implToIfaceNames = new Map<string, string[]>();
+    for (const cls of allClasses) {
+        for (const iface of cls.implements || []) {
+            const ifaceName = iface.split("<")[0];
+            const impls = ifaceToImplNames.get(ifaceName) ?? [];
+            impls.push(cls.name);
+            ifaceToImplNames.set(ifaceName, impls);
+
+            const ifaces = implToIfaceNames.get(cls.name) ?? [];
+            ifaces.push(ifaceName);
+            implToIfaceNames.set(cls.name, ifaces);
+        }
+    }
+
+    // Build uncovered list with interface/implementation cross-referencing
     const uncovered: UncoveredOp[] = [];
     for (const [clientName, methods] of clientMethods) {
         for (const method of methods) {
             const key = `${clientName}.${method}`;
-            if (!seenOps.has(key)) {
+            if (seenOps.has(key)) {
+                continue;
+            }
+
+            // Check if covered through an interface/implementation relationship
+            let coveredViaRelated = false;
+
+            // If this is an implementation, check if any of its interfaces has the method covered
+            const implementedIfaces = implToIfaceNames.get(clientName);
+            if (implementedIfaces) {
+                coveredViaRelated = implementedIfaces.some(
+                    (iface) => seenOps.has(`${iface}.${method}`),
+                );
+            }
+
+            // If this is an interface, check if any implementation has the method covered
+            if (!coveredViaRelated) {
+                const implementations = ifaceToImplNames.get(clientName);
+                if (implementations) {
+                    coveredViaRelated = implementations.some(
+                        (impl) => seenOps.has(`${impl}.${method}`),
+                    );
+                }
+            }
+
+            if (!coveredViaRelated) {
                 uncovered.push({
                     client: clientName,
                     method,
@@ -2132,9 +2516,7 @@ function getReferencedTypesForInterface(iface: InterfaceInfo, allTypeNames: Set<
 }
 
 function detectPatterns(sourceFile: SourceFile, patterns: Set<string>): void {
-    const text = sourceFile.getFullText().toLowerCase();
-
-    // Check for async/await using ts-morph
+    // Detect patterns using purely structural AST analysis — no keyword matching
     sourceFile.forEachDescendant((node) => {
         if (Node.isAwaitExpression(node)) {
             patterns.add("async");
@@ -2146,20 +2528,6 @@ function detectPatterns(sourceFile: SourceFile, patterns: Set<string>): void {
             patterns.add("streaming");
         }
     });
-
-    // Keyword-based patterns
-    if (text.includes("credential") || text.includes("apikey") || text.includes("bearer")) {
-        patterns.add("authentication");
-    }
-    if (text.includes("page") || text.includes("cursor") || text.includes("nextlink")) {
-        patterns.add("pagination");
-    }
-    if (text.includes("retry") || text.includes("p-retry")) {
-        patterns.add("retry");
-    }
-    if (text.includes("options") || text.includes("config")) {
-        patterns.add("configuration");
-    }
 }
 
 function findFiles(dir: string, extensions: string[]): string[] {

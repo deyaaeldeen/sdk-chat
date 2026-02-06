@@ -139,7 +139,8 @@ public record MethodInfo(
     string? Doc,
     bool? IsAsync,
     bool? IsClassMethod,
-    bool? IsStaticMethod);
+    bool? IsStaticMethod,
+    [property: JsonPropertyName("ret")] string? Ret = null);
 
 public record PropertyInfo(string Name, string? Type, string? Doc);
 
@@ -157,6 +158,9 @@ public sealed record FunctionInfo
 
     [JsonPropertyName("sig")]
     public string Signature { get; init; } = "";
+
+    [JsonPropertyName("ret")]
+    public string? Ret { get; init; }
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }

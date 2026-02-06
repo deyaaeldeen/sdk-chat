@@ -1,6 +1,7 @@
 // Agent Client Protocol - .NET SDK
 // Newline-delimited JSON transport (stdio)
 
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using AgentClientProtocol.Sdk.JsonRpc;
@@ -11,6 +12,8 @@ namespace AgentClientProtocol.Sdk.Stream;
 /// <summary>
 /// Newline-delimited JSON stream for stdio-based ACP communication.
 /// </summary>
+[SuppressMessage("Naming", "CA1711:Identifiers should not have incorrect suffix",
+    Justification = "NdJsonStream represents an NDJSON message stream, not a System.IO.Stream")]
 public class NdJsonStream : IAcpStream, IAsyncDisposable
 {
     private readonly TextReader _input;

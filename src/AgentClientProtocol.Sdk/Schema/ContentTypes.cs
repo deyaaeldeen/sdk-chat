@@ -1,6 +1,7 @@
 // Agent Client Protocol - .NET SDK
 // Content types for messages
 
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -117,6 +118,8 @@ public record EmbeddedResource : ContentBlock
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(TextResourceContents), "text")]
 [JsonDerivedType(typeof(BlobResourceContents), "blob")]
+[SuppressMessage("Design", "CA1056:URI-like properties should not be strings",
+    Justification = "Protocol DTO must match JSON schema; Uri is serialized as string")]
 public abstract record EmbeddedResourceResource
 {
     [JsonPropertyName("_meta")]
@@ -146,6 +149,8 @@ public record BlobResourceContents : EmbeddedResourceResource
 /// <summary>
 /// Annotations for content.
 /// </summary>
+[SuppressMessage("Performance", "CA1819:Properties should not return arrays",
+    Justification = "Protocol DTO must match JSON schema; Audience is serialized as JSON array")]
 public record Annotations
 {
     [JsonPropertyName("_meta")]

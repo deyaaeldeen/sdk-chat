@@ -180,13 +180,15 @@ public class RpcDispatchGenerator : IIncrementalGenerator
                     sb.AppendLine();
                 }
 
-                // Generate deserialize helper with AOT suppression
-                sb.AppendLine("#pragma warning disable IL2026, IL3050 // Suppress AOT/trim warnings for JSON deserialization");
+                // Generate deserialize helper with AOT suppression attributes
+                sb.AppendLine("        [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(\"AOT\", \"IL2026:RequiresUnreferencedCode\",");
+                sb.AppendLine("            Justification = \"RPC dispatch uses known ACP schema types registered in AcpJsonContext\")]");
+                sb.AppendLine("        [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(\"AOT\", \"IL3050:RequiresDynamicCode\",");
+                sb.AppendLine("            Justification = \"RPC dispatch uses known ACP schema types registered in AcpJsonContext\")]");
                 sb.AppendLine("        private static T Deserialize<T>(JsonElement? element) =>");
                 sb.AppendLine("            element.HasValue");
-                sb.AppendLine("                ? element.Value.Deserialize<T>()!");
+                sb.AppendLine("                ? element.Value.Deserialize<T>(AcpJsonContext.FlexibleOptions)!");
                 sb.AppendLine("                : throw new InvalidOperationException(\"Missing parameters\");");
-                sb.AppendLine("#pragma warning restore IL2026, IL3050");
 
                 sb.AppendLine("    }");
             }
