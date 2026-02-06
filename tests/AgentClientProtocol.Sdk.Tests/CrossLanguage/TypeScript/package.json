@@ -1,0 +1,21 @@
+{
+  "name": "acp-crosslanguage-tests",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "TypeScript ACP test fixtures for cross-language interoperability",
+  "private": true,
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.14.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "agent": "tsx test-agent.ts",
+    "client": "tsx test-client.ts"
+  }
+}
