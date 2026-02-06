@@ -544,4 +544,469 @@ public class SdkInfoTests : IDisposable
         // Assert - should find sdk-java-example as samples folder
         Assert.Contains("sdk-java-example", info.SamplesFolder!);
     }
+
+    // ── Import-based Samples Detection ──────────────────────────────────────
+
+    [Fact]
+    public void ExtractLibraryName_Python_ExtractsFromPyprojectToml()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"),
+            "[project]\nname = \"azure-storage-blob\"\nversion = \"1.0.0\"\n");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.Python);
+
+        // Assert
+        Assert.Equal("azure-storage-blob", name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_Python_IgnoresNonProjectSections()
+    {
+        // Arrange — name field in [tool.poetry] should NOT match
+        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"),
+            "[tool.poetry]\nname = \"wrong-name\"\n\n[project]\nname = \"correct-name\"\n");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.Python);
+
+        // Assert
+        Assert.Equal("correct-name", name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_Python_ReturnsNull_WhenNoProjectSection()
+    {
+        // Arrange — no [project] section
+        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"),
+            "[tool.black]\nline-length = 88\n");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.Python);
+
+        // Assert
+        Assert.Null(name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_JavaScript_ExtractsFromPackageJson()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRoot, "package.json"),
+            "{\"name\": \"@azure/openai\", \"version\": \"1.0.0\"}");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.JavaScript);
+
+        // Assert
+        Assert.Equal("@azure/openai", name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_TypeScript_ExtractsFromPackageJson()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRoot, "package.json"),
+            "{\"name\": \"@azure/core-rest-pipeline\"}");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.TypeScript);
+
+        // Assert
+        Assert.Equal("@azure/core-rest-pipeline", name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_Java_ExtractsGroupIdFromPom()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRoot, "pom.xml"),
+            "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">" +
+            "<groupId>com.azure</groupId><artifactId>azure-ai-openai</artifactId>" +
+            "</project>");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.Java);
+
+        // Assert
+        Assert.Equal("com.azure", name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_Java_ExtractsGroupFromGradle()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRoot, "build.gradle"),
+            "plugins { id 'java' }\ngroup = 'com.openai'\nversion = '1.0'\n");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.Java);
+
+        // Assert
+        Assert.Equal("com.openai", name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_Go_ExtractsModulePath()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRoot, "go.mod"),
+            "module github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai\n\ngo 1.21\n");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.Go);
+
+        // Assert
+        Assert.Equal("github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai", name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_DotNet_ExtractsRootNamespace()
+    {
+        // Arrange
+        var srcDir = Path.Combine(_testRoot, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "MyLib.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\">" +
+            "<PropertyGroup><RootNamespace>Azure.Storage.Blobs</RootNamespace></PropertyGroup>" +
+            "</Project>");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.DotNet);
+
+        // Assert
+        Assert.Equal("Azure.Storage.Blobs", name);
+    }
+
+    [Fact]
+    public void ExtractLibraryName_DotNet_FallsBackToProjectFileName()
+    {
+        // Arrange — no RootNamespace, derives from file name
+        File.WriteAllText(Path.Combine(_testRoot, "OpenAI.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup></PropertyGroup></Project>");
+
+        // Act
+        var name = SdkInfo.ExtractLibraryName(_testRoot, SdkLanguage.DotNet);
+
+        // Assert
+        Assert.Equal("OpenAI", name);
+    }
+
+    [Fact]
+    public void BuildImportPattern_Python_MatchesUnderscoreAndDottedImports()
+    {
+        // Arrange
+        var pattern = SdkInfo.BuildImportPattern("azure-storage-blob", SdkLanguage.Python);
+        Assert.NotNull(pattern);
+
+        // Act & Assert
+        Assert.Matches(pattern, "from azure_storage_blob import BlobClient");
+        Assert.Matches(pattern, "from azure.storage.blob import BlobServiceClient");
+        Assert.Matches(pattern, "import azure_storage_blob");
+        Assert.Matches(pattern, "import azure.storage.blob");
+        Assert.DoesNotMatch(pattern, "from unrelated import something");
+        Assert.DoesNotMatch(pattern, "# azure_storage_blob is cool");
+    }
+
+    [Fact]
+    public void BuildImportPattern_JavaScript_MatchesFromAndRequire()
+    {
+        // Arrange
+        var pattern = SdkInfo.BuildImportPattern("@azure/openai", SdkLanguage.JavaScript);
+        Assert.NotNull(pattern);
+
+        // Act & Assert
+        Assert.Matches(pattern, "import { OpenAI } from '@azure/openai'");
+        Assert.Matches(pattern, "import { OpenAI } from \"@azure/openai\"");
+        Assert.Matches(pattern, "const openai = require('@azure/openai')");
+        Assert.Matches(pattern, "import { foo } from '@azure/openai/sub'");
+        Assert.DoesNotMatch(pattern, "import { foo } from 'other-package'");
+    }
+
+    [Fact]
+    public void BuildImportPattern_Java_MatchesImportStatement()
+    {
+        // Arrange
+        var pattern = SdkInfo.BuildImportPattern("com.azure", SdkLanguage.Java);
+        Assert.NotNull(pattern);
+
+        // Act & Assert
+        Assert.Matches(pattern, "import com.azure.ai.openai.OpenAIClient;");
+        Assert.Matches(pattern, "import com.azure.core.util.Context;");
+        Assert.DoesNotMatch(pattern, "import org.junit.Test;");
+    }
+
+    [Fact]
+    public void BuildImportPattern_Go_MatchesImportPath()
+    {
+        // Arrange
+        var pattern = SdkInfo.BuildImportPattern(
+            "github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai", SdkLanguage.Go);
+        Assert.NotNull(pattern);
+
+        // Act & Assert
+        Assert.Matches(pattern, "\t\"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai\"");
+        Assert.Matches(pattern, "\"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai/internal\"");
+        Assert.DoesNotMatch(pattern, "\"github.com/stretchr/testify\"");
+    }
+
+    [Fact]
+    public void BuildImportPattern_DotNet_MatchesUsingStatement()
+    {
+        // Arrange
+        var pattern = SdkInfo.BuildImportPattern("Azure.Storage.Blobs", SdkLanguage.DotNet);
+        Assert.NotNull(pattern);
+
+        // Act & Assert
+        Assert.Matches(pattern, "using Azure.Storage.Blobs;");
+        Assert.Matches(pattern, "using Azure.Storage.Blobs.Models;");
+        Assert.Matches(pattern, "using static Azure.Storage.Blobs.BlobExtensions;");
+        Assert.DoesNotMatch(pattern, "using System.Text;");
+    }
+
+    [Fact]
+    public void CountImportingFiles_FindsFilesWithImports()
+    {
+        // Arrange
+        var sampleDir = Path.Combine(_testRoot, "quickstart");
+        Directory.CreateDirectory(sampleDir);
+
+        // Two files that import the library
+        File.WriteAllText(Path.Combine(sampleDir, "basic.py"),
+            "from azure_storage import BlobClient\n\nclient = BlobClient()\n");
+        File.WriteAllText(Path.Combine(sampleDir, "advanced.py"),
+            "import azure_storage\n\nblob = azure_storage.BlobClient()\n");
+        // One file that doesn't import it
+        File.WriteAllText(Path.Combine(sampleDir, "helper.py"),
+            "import os\nimport sys\n\ndef helper(): pass\n");
+
+        var pattern = SdkInfo.BuildImportPattern("azure-storage", SdkLanguage.Python)!;
+
+        // Act
+        var count = SdkInfo.CountImportingFiles(sampleDir, pattern, ".py");
+
+        // Assert
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public void Scan_Python_DiscoversSamplesByImport_InUnconventionalFolder()
+    {
+        // Arrange — Python project with a "quickstart" folder containing files
+        // that import the library. This tests import-based discovery beyond conventions.
+        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"),
+            "[project]\nname = \"my-sdk\"\nversion = \"1.0.0\"\n");
+        File.WriteAllText(Path.Combine(_testRoot, "main.py"), "print('hello')");
+
+        // Unconventionally-named folder with files importing the library
+        var quickstartDir = Path.Combine(_testRoot, "quickstart");
+        Directory.CreateDirectory(quickstartDir);
+        File.WriteAllText(Path.Combine(quickstartDir, "getting_started.py"),
+            "from my_sdk import Client\n\nclient = Client()\nclient.run()\n");
+        File.WriteAllText(Path.Combine(quickstartDir, "advanced_usage.py"),
+            "import my_sdk\n\nresult = my_sdk.process()\nprint(result)\n");
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert — quickstart should be discovered via import detection
+        Assert.Contains(quickstartDir, info.AllSamplesCandidates);
+    }
+
+    [Fact]
+    public void Scan_TypeScript_DiscoversSamplesByImport()
+    {
+        // Arrange — TypeScript project with "tutorials" folder
+        File.WriteAllText(Path.Combine(_testRoot, "tsconfig.json"), "{}");
+        File.WriteAllText(Path.Combine(_testRoot, "package.json"),
+            "{\"name\": \"@my-org/my-sdk\"}");
+        var srcDir = Path.Combine(_testRoot, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "index.ts"), "export class Client {}");
+
+        var tutorialsDir = Path.Combine(_testRoot, "tutorials");
+        Directory.CreateDirectory(tutorialsDir);
+        File.WriteAllText(Path.Combine(tutorialsDir, "tutorial1.ts"),
+            "import { Client } from '@my-org/my-sdk'\n\nconst c = new Client();\n");
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert
+        Assert.Contains(tutorialsDir, info.AllSamplesCandidates);
+    }
+
+    [Fact]
+    public void Scan_Go_DiscoversSamplesByImport()
+    {
+        // Arrange — Go project with "cmd" as source, "getting-started" with imports
+        File.WriteAllText(Path.Combine(_testRoot, "go.mod"),
+            "module github.com/example/my-sdk\n\ngo 1.21\n");
+
+        // Source folder
+        File.WriteAllText(Path.Combine(_testRoot, "client.go"), "package mysdk\n");
+        File.WriteAllText(Path.Combine(_testRoot, "models.go"), "package mysdk\n");
+
+        // Unconventional samples folder
+        var gettingStartedDir = Path.Combine(_testRoot, "getting-started");
+        Directory.CreateDirectory(gettingStartedDir);
+        File.WriteAllText(Path.Combine(gettingStartedDir, "main.go"),
+            "package main\n\nimport \"github.com/example/my-sdk\"\n\nfunc main() {\n\tmysdk.NewClient()\n}\n");
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert
+        Assert.Contains(gettingStartedDir, info.AllSamplesCandidates);
+    }
+
+    [Fact]
+    public void Scan_Java_DiscoversSamplesByImport()
+    {
+        // Arrange — Java project with "usage" folder
+        File.WriteAllText(Path.Combine(_testRoot, "pom.xml"),
+            "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">" +
+            "<groupId>com.example</groupId><artifactId>my-sdk</artifactId></project>");
+        var srcDir = Path.Combine(_testRoot, "src", "main", "java");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "Client.java"), "public class Client {}");
+
+        // Unconventional samples folder
+        var usageDir = Path.Combine(_testRoot, "usage");
+        Directory.CreateDirectory(usageDir);
+        File.WriteAllText(Path.Combine(usageDir, "BasicUsage.java"),
+            "import com.example.sdk.Client;\n\npublic class BasicUsage {\n  public static void main(String[] args) {}\n}\n");
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert
+        Assert.Contains(usageDir, info.AllSamplesCandidates);
+    }
+
+    [Fact]
+    public void Scan_DotNet_DiscoversSamplesByImport()
+    {
+        // Arrange — .NET project with "snippets" folder
+        var srcDir = Path.Combine(_testRoot, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "MyLib.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\">" +
+            "<PropertyGroup><RootNamespace>MyOrg.MyLib</RootNamespace></PropertyGroup></Project>");
+        File.WriteAllText(Path.Combine(srcDir, "Client.cs"), "namespace MyOrg.MyLib;\npublic class Client {}");
+
+        // Unconventional samples folder
+        var snippetsDir = Path.Combine(_testRoot, "snippets");
+        Directory.CreateDirectory(snippetsDir);
+        File.WriteAllText(Path.Combine(snippetsDir, "Example1.cs"),
+            "using MyOrg.MyLib;\n\nvar client = new Client();\n");
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert
+        Assert.Contains(snippetsDir, info.AllSamplesCandidates);
+    }
+
+    [Fact]
+    public void Scan_ImportBasedDetection_PrefersHigherImportCount()
+    {
+        // Arrange — Python project with two non-conventional folders;
+        // folder with more imports should rank higher
+        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"),
+            "[project]\nname = \"test-lib\"\n");
+        File.WriteAllText(Path.Combine(_testRoot, "main.py"), "print('src')");
+
+        // Folder A: 1 file importing the library
+        var folderA = Path.Combine(_testRoot, "tutorials");
+        Directory.CreateDirectory(folderA);
+        File.WriteAllText(Path.Combine(folderA, "tut1.py"),
+            "from test_lib import Foo\n");
+        File.WriteAllText(Path.Combine(folderA, "helper.py"),
+            "import os\n");
+
+        // Folder B: 3 files importing the library
+        var folderB = Path.Combine(_testRoot, "cookbook");
+        Directory.CreateDirectory(folderB);
+        for (int i = 1; i <= 3; i++)
+        {
+            File.WriteAllText(Path.Combine(folderB, $"recipe{i}.py"),
+                $"from test_lib import Thing{i}\n");
+        }
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert — cookbook (3 imports) should rank above tutorials (1 import)
+        var cookbookIdx = info.AllSamplesCandidates.ToList()
+            .FindIndex(c => c.Contains("cookbook"));
+        var tutorialsIdx = info.AllSamplesCandidates.ToList()
+            .FindIndex(c => c.Contains("tutorials"));
+
+        Assert.True(cookbookIdx >= 0, "cookbook should be a candidate");
+        Assert.True(tutorialsIdx >= 0, "tutorials should be a candidate");
+        Assert.True(cookbookIdx < tutorialsIdx,
+            $"cookbook (idx={cookbookIdx}) should rank higher than tutorials (idx={tutorialsIdx})");
+    }
+
+    [Fact]
+    public void Scan_ImportBasedDetection_SkipsSourceAndBuildFolders()
+    {
+        // Arrange — Python project where source folder also imports own library
+        // (e.g., internal imports). It should NOT be listed as a samples candidate.
+        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"),
+            "[project]\nname = \"my-pkg\"\n");
+
+        var srcDir = Path.Combine(_testRoot, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "core.py"),
+            "from my_pkg import utils\n");
+
+        var buildDir = Path.Combine(_testRoot, "build");
+        Directory.CreateDirectory(buildDir);
+        File.WriteAllText(Path.Combine(buildDir, "gen.py"),
+            "from my_pkg import gen\n");
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert — src and build should NOT appear as samples candidates
+        Assert.DoesNotContain(srcDir, info.AllSamplesCandidates);
+        Assert.DoesNotContain(buildDir, info.AllSamplesCandidates);
+    }
+
+    [Fact]
+    public void Scan_Python_ExposesLibraryName()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"),
+            "[project]\nname = \"azure-identity\"\n");
+        File.WriteAllText(Path.Combine(_testRoot, "main.py"), "print('hello')");
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert
+        Assert.Equal("azure-identity", info.LibraryName);
+    }
+
+    [Fact]
+    public void Scan_ConventionFolder_StillWorksWithoutLibraryName()
+    {
+        // Arrange — project without a parseable library name should still
+        // detect samples via convention (folder named "examples")
+        File.WriteAllText(Path.Combine(_testRoot, "setup.py"), "");
+        File.WriteAllText(Path.Combine(_testRoot, "main.py"), "print('hello')");
+
+        var examplesDir = Path.Combine(_testRoot, "examples");
+        Directory.CreateDirectory(examplesDir);
+        File.WriteAllText(Path.Combine(examplesDir, "sample.py"), "print('sample')");
+
+        // Act
+        var info = SdkInfo.Scan(_testRoot);
+
+        // Assert — convention-based detection still works
+        Assert.Equal(examplesDir, info.SamplesFolder);
+    }
 }

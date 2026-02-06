@@ -84,6 +84,8 @@ public class ApiEntityCommand : Command
             var json = new Option<bool>("--json") { Description = "Output as JSON for CI/automation" };
             var uncoveredOnly = new Option<bool>("--uncovered-only") { Description = "Only show operations that need samples" };
             var monorepo = new Option<bool>("--monorepo") { Description = "Analyze all SDK packages in a monorepo (batch coverage)" };
+            var parallel = new Option<bool>("--parallel") { Description = "Analyze packages in parallel (monorepo only)" };
+            var threads = new Option<int?>("--threads") { Description = "Max concurrent threads when --parallel is set (monorepo only, default: CPU count)" };
             var report = new Option<string?>("--report") { Description = "Write a Markdown report to file (monorepo only)" };
             var quiet = new Option<bool>("--quiet") { Description = "Suppress progress output" };
             var skipEmpty = new Option<bool>("--skip-empty") { Description = "Omit packages with 0 operations from report (monorepo only)" };
@@ -94,6 +96,8 @@ public class ApiEntityCommand : Command
             Add(json);
             Add(uncoveredOnly);
             Add(monorepo);
+            Add(parallel);
+            Add(threads);
             Add(report);
             Add(quiet);
             Add(skipEmpty);
@@ -110,11 +114,16 @@ public class ApiEntityCommand : Command
                         ? null
                         : new Progress<string>(message => Console.Error.WriteLine(message));
 
+                    var maxParallelism = ctx.GetValue(parallel)
+                        ? ctx.GetValue(threads) ?? Environment.ProcessorCount
+                        : 1;
+
                     var batch = await service.AnalyzeCoverageMonorepoAsync(
                         ctx.GetValue(pathArg)!,
                         ctx.GetValue(samples),
                         ctx.GetValue(language),
                         progress,
+                        maxParallelism,
                         ct);
 
                     if (!batch.Success)

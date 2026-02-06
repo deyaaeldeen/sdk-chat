@@ -216,7 +216,7 @@ class Sample
     {
         // Act
         var result = await Service.AnalyzeCoverageMonorepoAsync(
-            Path.Combine(TestRoot, "nonexistent"), null, null, null, CancellationToken.None);
+            Path.Combine(TestRoot, "nonexistent"), null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -230,7 +230,7 @@ class Sample
         File.WriteAllText(Path.Combine(TestRoot, "readme.txt"), "empty");
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -253,7 +253,7 @@ class Sample
         File.WriteAllText(Path.Combine(pkg2, "src", "index.ts"), "export class SecretClient {}");
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}, ErrorMessage={result.ErrorMessage}");
@@ -275,7 +275,7 @@ class Sample
         File.WriteAllText(Path.Combine(pkg1Src, "BlobClient.cs"), "public class BlobClient {}");
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.True(result.Success);
@@ -294,7 +294,7 @@ class Sample
         File.WriteAllText(Path.Combine(pkg1, "azure", "storage", "blob", "_blob_client.py"), "class BlobClient: pass");
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.True(result.Success);
@@ -312,7 +312,7 @@ class Sample
         File.WriteAllText(Path.Combine(pkg1, "client.go"), "package azblob\n\ntype Client struct {}");
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.True(result.Success);
@@ -331,7 +331,7 @@ class Sample
         File.WriteAllText(Path.Combine(pkg1Src, "BlobClient.java"), "package com.azure.storage.blob;\npublic class BlobClient {}");
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.True(result.Success);
@@ -347,11 +347,11 @@ class Sample
         File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
         File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), "export class Client {}");
 
-        var progressMessages = new List<string>();
+        var progressMessages = new System.Collections.Concurrent.ConcurrentBag<string>();
         var progress = new Progress<string>(msg => progressMessages.Add(msg));
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, progress, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, progress, ct: CancellationToken.None);
 
         // Assert
         Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}");
@@ -374,7 +374,7 @@ class Sample
         File.WriteAllText(Path.Combine(nodeModules, "package.json"), "{\"name\": \"some-dep\"}"); // Should be ignored
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}");
@@ -410,7 +410,7 @@ client.upload();
         File.WriteAllText(Path.Combine(pkg2, "src", "index.ts"), "export class SecretClient {}");
 
         // Act
-        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, CancellationToken.None);
+        var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
 
         // Assert
         Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}");

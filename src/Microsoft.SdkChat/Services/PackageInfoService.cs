@@ -62,9 +62,10 @@ public interface IPackageInfoService
     /// <param name="samplesPath">Optional samples folder override for all packages.</param>
     /// <param name="language">Optional language override.</param>
     /// <param name="progress">Optional progress reporter.</param>
+    /// <param name="maxParallelism">Maximum number of packages to analyze in parallel (default: 1 = sequential).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Batch coverage analysis result.</returns>
-    Task<CoverageBatchResult> AnalyzeCoverageMonorepoAsync(string rootPath, string? samplesPath = null, string? language = null, IProgress<string>? progress = null, CancellationToken ct = default);
+    Task<CoverageBatchResult> AnalyzeCoverageMonorepoAsync(string rootPath, string? samplesPath = null, string? language = null, IProgress<string>? progress = null, int maxParallelism = 1, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -330,7 +331,8 @@ public sealed class PackageInfoService : IPackageInfoService
         string? samplesPath,
         string? language,
         IProgress<string>? progress,
-        CancellationToken ct)
+        int maxParallelism = 1,
+        CancellationToken ct = default)
     {
         if (!Directory.Exists(rootPath))
         {
@@ -355,7 +357,80 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
 
-        var results = new List<CoverageBatchItem>(packages.Length);
+        // Clamp parallelism: 1 = sequential, up to package count
+        var effectiveParallelism = Math.Clamp(maxParallelism, 1, packages.Length);
+
+        progress?.Report($"Found {packages.Length} packages under {rootPath}" +
+            (effectiveParallelism > 1 ? $" (parallelism: {effectiveParallelism})" : ""));
+
+        // Pre-allocate result slots so we can fill them from parallel tasks
+        // while preserving the original package ordering in the output.
+        var resultSlots = new CoverageBatchItem[packages.Length];
+        var completed = 0;
+
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, packages.Length),
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = effectiveParallelism,
+                CancellationToken = ct,
+            },
+            async (index, innerCt) =>
+            {
+                var packagePath = packages[index];
+                var relativePath = Path.GetRelativePath(rootPath, packagePath).Replace("\\", "/");
+                var samplesFolder = samplesPath;
+
+                progress?.Report($"[{Interlocked.Increment(ref completed)}/{packages.Length}] {relativePath}: analyzing");
+
+                if (string.IsNullOrWhiteSpace(samplesFolder))
+                {
+                    var samples = await DetectSamplesFolderAsync(packagePath, innerCt);
+                    if (!samples.HasExistingSamples || string.IsNullOrWhiteSpace(samples.SamplesFolder))
+                    {
+                        progress?.Report($"  {relativePath}: skipped (no samples)");
+                        resultSlots[index] = new CoverageBatchItem
+                        {
+                            PackagePath = packagePath,
+                            RelativePath = relativePath,
+                            SamplesFolder = samples.SamplesFolder,
+                            SkippedNoSamples = true,
+                            Success = true,
+                        };
+                        return;
+                    }
+
+                    samplesFolder = samples.SamplesFolder;
+                }
+
+                var analysis = await AnalyzeCoverageAsync(packagePath, samplesFolder, language, innerCt);
+                if (!analysis.Success)
+                {
+                    progress?.Report($"  {relativePath}: failed ({analysis.ErrorCode})");
+                    resultSlots[index] = new CoverageBatchItem
+                    {
+                        PackagePath = packagePath,
+                        RelativePath = relativePath,
+                        SamplesFolder = samplesFolder,
+                        Success = false,
+                        ErrorCode = analysis.ErrorCode,
+                        ErrorMessage = analysis.ErrorMessage,
+                    };
+                    return;
+                }
+
+                progress?.Report($"  {relativePath}: {analysis.CoveredCount}/{analysis.TotalOperations} covered");
+                resultSlots[index] = new CoverageBatchItem
+                {
+                    PackagePath = packagePath,
+                    RelativePath = relativePath,
+                    SamplesFolder = samplesFolder,
+                    Success = true,
+                    Result = analysis,
+                };
+            });
+
+        // Aggregate stats from completed results
         var totalOperations = 0;
         var covered = 0;
         var uncovered = 0;
@@ -363,73 +438,23 @@ public sealed class PackageInfoService : IPackageInfoService
         var skipped = 0;
         var failed = 0;
 
-        progress?.Report($"Found {packages.Length} packages under {rootPath}");
-
-        for (var index = 0; index < packages.Length; index++)
+        foreach (var item in resultSlots)
         {
-            ct.ThrowIfCancellationRequested();
-
-            var packagePath = packages[index];
-            var step = index + 1;
-
-            var relativePath = Path.GetRelativePath(rootPath, packagePath).Replace("\\", "/");
-            var samplesFolder = samplesPath;
-
-            progress?.Report($"[{step}/{packages.Length}] {relativePath}: analyzing");
-
-            if (string.IsNullOrWhiteSpace(samplesFolder))
+            if (item.SkippedNoSamples)
             {
-                var samples = await DetectSamplesFolderAsync(packagePath, ct);
-                if (!samples.HasExistingSamples || string.IsNullOrWhiteSpace(samples.SamplesFolder))
-                {
-                    skipped++;
-                    progress?.Report($"[{step}/{packages.Length}] {relativePath}: skipped (no samples)");
-                    results.Add(new CoverageBatchItem
-                    {
-                        PackagePath = packagePath,
-                        RelativePath = relativePath,
-                        SamplesFolder = samples.SamplesFolder,
-                        SkippedNoSamples = true,
-                        Success = true,
-                    });
-                    continue;
-                }
-
-                samplesFolder = samples.SamplesFolder;
+                skipped++;
             }
-
-            var analysis = await AnalyzeCoverageAsync(packagePath, samplesFolder, language, ct);
-            if (!analysis.Success)
+            else if (!item.Success)
             {
                 failed++;
-                progress?.Report($"[{step}/{packages.Length}] {relativePath}: failed ({analysis.ErrorCode})");
-                results.Add(new CoverageBatchItem
-                {
-                    PackagePath = packagePath,
-                    RelativePath = relativePath,
-                    SamplesFolder = samplesFolder,
-                    Success = false,
-                    ErrorCode = analysis.ErrorCode,
-                    ErrorMessage = analysis.ErrorMessage,
-                });
-                continue;
             }
-
-            analyzed++;
-            totalOperations += analysis.TotalOperations;
-            covered += analysis.CoveredCount;
-            uncovered += analysis.UncoveredCount;
-
-            progress?.Report($"[{step}/{packages.Length}] {relativePath}: {analysis.CoveredCount}/{analysis.TotalOperations} covered");
-
-            results.Add(new CoverageBatchItem
+            else
             {
-                PackagePath = packagePath,
-                RelativePath = relativePath,
-                SamplesFolder = samplesFolder,
-                Success = true,
-                Result = analysis,
-            });
+                analyzed++;
+                totalOperations += item.Result!.TotalOperations;
+                covered += item.Result!.CoveredCount;
+                uncovered += item.Result!.UncoveredCount;
+            }
         }
 
         var coveragePercent = totalOperations > 0
@@ -448,7 +473,7 @@ public sealed class PackageInfoService : IPackageInfoService
             CoveredCount = covered,
             UncoveredCount = uncovered,
             CoveragePercent = coveragePercent,
-            Packages = results.ToArray(),
+            Packages = resultSlots,
         };
     }
 
@@ -458,23 +483,33 @@ public sealed class PackageInfoService : IPackageInfoService
     /// 1. Searches multiple potential root directories (sdk/, packages/, libs/, src/, or root itself)
     /// 2. Identifies packages by language-specific project markers
     /// 3. Finds the package root by walking up from the project file
-    /// 4. Filters out test projects, examples, and build artifacts
+    /// 4. Filters out test projects, examples, and build artifacts using segment-based matching
+    ///    (checks if any path segment equals a test/sample keyword, avoiding false positives
+    ///    from names like "Attestation" or "TextAnalytics")
+    /// 5. Uses SafeFileEnumerator.ExcludedFolders as the canonical excluded-folder set
     /// </summary>
     private static IEnumerable<string> FindMonorepoPackages(string rootPath)
     {
         // Track discovered packages to avoid duplicates
         var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Directories to skip entirely
-        var skipDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "node_modules", "vendor", ".git", "bin", "obj", "dist", "build",
-            "__pycache__", ".tox", ".pytest_cache", "target", ".gradle",
-            "packages", // NuGet packages folder
-        };
+        // Use the canonical excluded-folder set from SafeFileEnumerator (issue #16)
+        var skipDirs = SafeFileEnumerator.ExcludedFolders;
 
-        // Patterns that indicate a test/sample project (case-insensitive contains)
-        var testPatterns = new[] { "test", "sample", "example", "demo", "benchmark", "perf" };
+        // Path segments that indicate a test/sample project.
+        // Uses exact segment matching (not substring) to avoid false positives
+        // like "Attestation" (contains "test") or "TextAnalytics" (contains "test").
+        var testSegments = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "test", "tests", "testing",
+            "sample", "samples",
+            "example", "examples",
+            "demo", "demos",
+            "benchmark", "benchmarks",
+            "perf", "performance",
+            "mock", "mocks",
+            "fixture", "fixtures"
+        };
 
         // Language-specific project file patterns
         var projectPatterns = new[]
@@ -528,10 +563,11 @@ public sealed class PackageInfoService : IPackageInfoService
         {
             foreach (var pattern in projectPatterns)
             {
+                // Use SafeFileEnumerator for depth-limited, excluded-folder-aware enumeration
                 IEnumerable<string> projectFiles;
                 try
                 {
-                    projectFiles = Directory.EnumerateFiles(searchRoot, pattern, SearchOption.AllDirectories);
+                    projectFiles = SafeFileEnumerator.EnumerateFiles(searchRoot, pattern, maxFiles: 5000, maxDepth: 6);
                 }
                 catch (Exception)
                 {
@@ -541,19 +577,19 @@ public sealed class PackageInfoService : IPackageInfoService
 
                 foreach (var projectFile in projectFiles)
                 {
-                    // Skip files in excluded directories
+                    // Check path segments for test/sample patterns using exact segment matching
                     var relativePath = Path.GetRelativePath(searchRoot, projectFile);
                     var pathSegments = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
+                    // Skip if any segment is an excluded directory (redundant with SafeFileEnumerator
+                    // but guards against edge cases like the root itself being named "test")
                     if (pathSegments.Any(seg => skipDirs.Contains(seg)))
                         continue;
 
-                    // Skip test/sample projects
-                    var fileName = Path.GetFileNameWithoutExtension(projectFile);
-                    var dirName = Path.GetFileName(Path.GetDirectoryName(projectFile) ?? "");
-                    if (testPatterns.Any(p =>
-                        fileName.Contains(p, StringComparison.OrdinalIgnoreCase) ||
-                        dirName.Contains(p, StringComparison.OrdinalIgnoreCase)))
+                    // Skip test/sample projects by checking if any path segment exactly matches
+                    // a test keyword. This avoids false positives from substring matches like
+                    // "Attestation" containing "test" or "Performance" containing "perf".
+                    if (IsTestOrSampleProject(pathSegments, testSegments))
                     {
                         continue;
                     }
@@ -579,6 +615,36 @@ public sealed class PackageInfoService : IPackageInfoService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Determines if a project is a test/sample project by checking if any path segment
+    /// (directory name or file name without extension) exactly matches a known test keyword.
+    /// This avoids false positives from substring matching (e.g., "Attestation" does not match "test").
+    /// </summary>
+    private static bool IsTestOrSampleProject(string[] pathSegments, HashSet<string> testSegments)
+    {
+        foreach (var segment in pathSegments)
+        {
+            // Strip file extension for the last segment (the file name)
+            var name = Path.GetExtension(segment).Length > 0
+                ? Path.GetFileNameWithoutExtension(segment)
+                : segment;
+
+            // Check if the segment exactly matches a test keyword
+            if (testSegments.Contains(name))
+                return true;
+
+            // Also check if the segment ends with a test suffix (e.g., "MyProject.Tests", "sdk-test")
+            // Split on common separators and check each part
+            var parts = name.Split('.', '-', '_');
+            foreach (var part in parts)
+            {
+                if (testSegments.Contains(part))
+                    return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -608,17 +674,29 @@ public sealed class PackageInfoService : IPackageInfoService
             }
         }
 
-        // For package.json, check if this is a workspace root (has workspaces field)
+        // For package.json, check if this is a workspace root using JSON parsing
         if (pattern == "package.json")
         {
             try
             {
-                var content = File.ReadAllText(projectFile);
-                // Skip workspace root package.json files
-                if (content.Contains("\"workspaces\"") || content.Contains("\"private\": true"))
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(projectFile));
+                var rootObj = doc.RootElement;
+
+                // Skip workspace root package.json files that don't export anything
+                var hasWorkspaces = rootObj.TryGetProperty("workspaces", out _);
+                var isPrivate = rootObj.TryGetProperty("private", out var privateProp) &&
+                                privateProp.ValueKind == System.Text.Json.JsonValueKind.True;
+
+                if (hasWorkspaces || isPrivate)
                 {
-                    // Could be a workspace root - check if it has meaningful exports
-                    if (!content.Contains("\"main\"") && !content.Contains("\"exports\"") && !content.Contains("\"types\""))
+                    // Could be a workspace root — check if it has meaningful library exports
+                    var hasMain = rootObj.TryGetProperty("main", out _);
+                    var hasExports = rootObj.TryGetProperty("exports", out _);
+                    var hasTypes = rootObj.TryGetProperty("types", out _) ||
+                                   rootObj.TryGetProperty("typings", out _);
+                    var hasModule = rootObj.TryGetProperty("module", out _);
+
+                    if (!hasMain && !hasExports && !hasTypes && !hasModule)
                     {
                         return null;
                     }
@@ -626,7 +704,7 @@ public sealed class PackageInfoService : IPackageInfoService
             }
             catch
             {
-                // Ignore read errors
+                // Ignore parse/read errors — treat as non-workspace
             }
         }
 
