@@ -18,7 +18,7 @@ public class PythonExtractorFixture : IAsyncLifetime
     public string? SkipReason { get; private set; }
     public string FixturePath => TestFixturesPath;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var extractor = new PythonApiExtractor();
         if (!extractor.IsAvailable())
@@ -37,7 +37,7 @@ public class PythonExtractorFixture : IAsyncLifetime
         }
     }
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => default;
 }
 
 /// <summary>
@@ -55,25 +55,25 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
 
     private ApiIndex GetApi()
     {
-        Skip.If(_fixture.SkipReason != null, _fixture.SkipReason);
+        if (_fixture.SkipReason != null) Assert.Skip(_fixture.SkipReason);
         return _fixture.Api!;
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ReturnsApiIndex_WithPackageName()
     {
         var api = GetApi();
         Assert.False(string.IsNullOrEmpty(api.Package));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsModules()
     {
         var api = GetApi();
         Assert.NotEmpty(api.Modules);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsClasses()
     {
         var api = GetApi();
@@ -82,7 +82,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.NotNull(sampleClient);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsMethods()
     {
         var api = GetApi();
@@ -93,7 +93,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Contains(sampleClient.Methods, m => m.Name == "get_resource");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsAsyncMethods()
     {
         var api = GetApi();
@@ -104,7 +104,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Contains(sampleClient.Methods, m => m.IsAsync == true);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsClassMethods()
     {
         var api = GetApi();
@@ -115,7 +115,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Contains(sampleClient.Methods, m => m.IsClassMethod == true);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsStaticMethods()
     {
         var api = GetApi();
@@ -126,7 +126,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Contains(sampleClient.Methods, m => m.IsStaticMethod == true);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsModuleFunctions()
     {
         var api = GetApi();
@@ -135,7 +135,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Contains(functions, f => f.Name == "create_default_client");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_CapturesDocstrings()
     {
         var api = GetApi();
@@ -145,7 +145,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.False(string.IsNullOrEmpty(sampleClient.Doc));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_CapturesMethodSignatures()
     {
         var api = GetApi();
@@ -158,7 +158,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.False(string.IsNullOrEmpty(method.Signature));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ExcludesPrivateMethods()
     {
         var api = GetApi();
@@ -172,7 +172,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Empty(privateMethods);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_IncludesDunderMethods()
     {
         var api = GetApi();
@@ -183,7 +183,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Contains(allMethods, m => m.Name == "__init__");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Format_ProducesReadableOutput()
     {
         var api = GetApi();
@@ -192,7 +192,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Contains("def get_resource", formatted);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ProducesSmallerOutputThanSource()
     {
         var api = GetApi();

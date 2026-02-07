@@ -63,10 +63,10 @@ public class LanguageContextIntegrationTests
 
     #region Python Integration
 
-    [SkippableFact]
+    [Fact]
     public async Task PythonContext_UsesApiExtractor_WhenPythonAvailable()
     {
-        Skip.IfNot(IsPythonInstalled(), "Python not installed");
+        if (!IsPythonInstalled()) Assert.Skip("Python not installed");
 
         var context = new PythonSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Python");
@@ -107,10 +107,10 @@ public class LanguageContextIntegrationTests
 
     #region Java Integration
 
-    [SkippableFact]
+    [Fact]
     public async Task JavaContext_UsesApiExtractor_WhenJBangAvailable()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
+        if (!IsJBangInstalled()) Assert.Skip("JBang not installed");
 
         var context = new JavaSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Java");
@@ -128,10 +128,10 @@ public class LanguageContextIntegrationTests
         Assert.Contains("SampleClient", content);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task JavaContext_ReturnsContent()
     {
-        Skip.IfNot(IsJBangInstalled(), "JBang not installed");
+        if (!IsJBangInstalled()) Assert.Skip("JBang not installed");
 
         var context = new JavaSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Java");
@@ -152,7 +152,7 @@ public class LanguageContextIntegrationTests
         catch (InvalidOperationException ex) when (ex.Message.Contains("Failed to extract"))
         {
             // Skip if extraction fails due to resource contention in parallel test runs
-            Skip.If(true, $"Extraction failed (likely parallel test contention): {ex.Message}");
+            if (true) Assert.Skip($"Extraction failed (likely parallel test contention): {ex.Message}");
         }
     }
 
@@ -160,10 +160,10 @@ public class LanguageContextIntegrationTests
 
     #region TypeScript Integration
 
-    [SkippableFact]
+    [Fact]
     public async Task TypeScriptContext_UsesApiExtractor_WhenNodeAvailable()
     {
-        Skip.IfNot(IsNodeInstalled(), "Node.js not installed");
+        if (!IsNodeInstalled()) Assert.Skip("Node.js not installed");
 
         var context = new TypeScriptSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "TypeScript");
@@ -203,10 +203,10 @@ public class LanguageContextIntegrationTests
 
     #region Go Integration
 
-    [SkippableFact]
+    [Fact]
     public async Task GoContext_UsesApiExtractor_WhenGoAvailable()
     {
-        Skip.IfNot(IsGoInstalled(), "Go not installed");
+        if (!IsGoInstalled()) Assert.Skip("Go not installed");
 
         var context = new GoSampleLanguageContext(_fileHelper);
         var sourcePath = Path.Combine(TestFixturesPath, "Go");

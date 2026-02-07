@@ -35,7 +35,7 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
     public static NdJsonStream FromStdio(ILogger? logger = null)
     {
         var input = new StreamReader(Console.OpenStandardInput(), Encoding.UTF8);
-        var output = new StreamWriter(Console.OpenStandardOutput(), Encoding.UTF8) { AutoFlush = true };
+        var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { AutoFlush = true };
         return new NdJsonStream(input, output, logger);
     }
 
@@ -45,7 +45,7 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
     public static NdJsonStream FromStreams(System.IO.Stream input, System.IO.Stream output, ILogger? logger = null)
     {
         var reader = new StreamReader(input, Encoding.UTF8);
-        var writer = new StreamWriter(output, Encoding.UTF8) { AutoFlush = true };
+        var writer = new StreamWriter(output, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { AutoFlush = true };
         return new NdJsonStream(reader, writer, logger);
     }
 

@@ -12,7 +12,7 @@ public class SdkInfoTests : IDisposable
     {
         // Clear cache before each test to ensure isolation
         SdkInfo.ClearCache();
-        
+
         _testRoot = Path.Combine(Path.GetTempPath(), $"SdkInfoTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testRoot);
     }
@@ -21,14 +21,14 @@ public class SdkInfoTests : IDisposable
     {
         // Clear cache after each test
         SdkInfo.ClearCache();
-        
+
         try
         {
             if (Directory.Exists(_testRoot))
                 Directory.Delete(_testRoot, recursive: true);
         }
         catch { }
-        
+
         GC.SuppressFinalize(this);
     }
 
@@ -697,72 +697,72 @@ public class SdkInfoTests : IDisposable
     public void BuildImportPattern_Python_MatchesUnderscoreAndDottedImports()
     {
         // Arrange
-        var pattern = SdkInfo.BuildImportPattern("azure-storage-blob", SdkLanguage.Python);
-        Assert.NotNull(pattern);
+        var matcher = SdkInfo.BuildImportMatcher("azure-storage-blob", SdkLanguage.Python);
+        Assert.NotNull(matcher);
 
         // Act & Assert
-        Assert.Matches(pattern, "from azure_storage_blob import BlobClient");
-        Assert.Matches(pattern, "from azure.storage.blob import BlobServiceClient");
-        Assert.Matches(pattern, "import azure_storage_blob");
-        Assert.Matches(pattern, "import azure.storage.blob");
-        Assert.DoesNotMatch(pattern, "from unrelated import something");
-        Assert.DoesNotMatch(pattern, "# azure_storage_blob is cool");
+        Assert.True(matcher.IsMatch("from azure_storage_blob import BlobClient"));
+        Assert.True(matcher.IsMatch("from azure.storage.blob import BlobServiceClient"));
+        Assert.True(matcher.IsMatch("import azure_storage_blob"));
+        Assert.True(matcher.IsMatch("import azure.storage.blob"));
+        Assert.False(matcher.IsMatch("from unrelated import something"));
+        Assert.False(matcher.IsMatch("# azure_storage_blob is cool"));
     }
 
     [Fact]
     public void BuildImportPattern_JavaScript_MatchesFromAndRequire()
     {
         // Arrange
-        var pattern = SdkInfo.BuildImportPattern("@azure/openai", SdkLanguage.JavaScript);
-        Assert.NotNull(pattern);
+        var matcher = SdkInfo.BuildImportMatcher("@azure/openai", SdkLanguage.JavaScript);
+        Assert.NotNull(matcher);
 
         // Act & Assert
-        Assert.Matches(pattern, "import { OpenAI } from '@azure/openai'");
-        Assert.Matches(pattern, "import { OpenAI } from \"@azure/openai\"");
-        Assert.Matches(pattern, "const openai = require('@azure/openai')");
-        Assert.Matches(pattern, "import { foo } from '@azure/openai/sub'");
-        Assert.DoesNotMatch(pattern, "import { foo } from 'other-package'");
+        Assert.True(matcher.IsMatch("import { OpenAI } from '@azure/openai'"));
+        Assert.True(matcher.IsMatch("import { OpenAI } from \"@azure/openai\""));
+        Assert.True(matcher.IsMatch("const openai = require('@azure/openai')"));
+        Assert.True(matcher.IsMatch("import { foo } from '@azure/openai/sub'"));
+        Assert.False(matcher.IsMatch("import { foo } from 'other-package'"));
     }
 
     [Fact]
     public void BuildImportPattern_Java_MatchesImportStatement()
     {
         // Arrange
-        var pattern = SdkInfo.BuildImportPattern("com.azure", SdkLanguage.Java);
-        Assert.NotNull(pattern);
+        var matcher = SdkInfo.BuildImportMatcher("com.azure", SdkLanguage.Java);
+        Assert.NotNull(matcher);
 
         // Act & Assert
-        Assert.Matches(pattern, "import com.azure.ai.openai.OpenAIClient;");
-        Assert.Matches(pattern, "import com.azure.core.util.Context;");
-        Assert.DoesNotMatch(pattern, "import org.junit.Test;");
+        Assert.True(matcher.IsMatch("import com.azure.ai.openai.OpenAIClient;"));
+        Assert.True(matcher.IsMatch("import com.azure.core.util.Context;"));
+        Assert.False(matcher.IsMatch("import org.junit.Test;"));
     }
 
     [Fact]
     public void BuildImportPattern_Go_MatchesImportPath()
     {
         // Arrange
-        var pattern = SdkInfo.BuildImportPattern(
+        var matcher = SdkInfo.BuildImportMatcher(
             "github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai", SdkLanguage.Go);
-        Assert.NotNull(pattern);
+        Assert.NotNull(matcher);
 
         // Act & Assert
-        Assert.Matches(pattern, "\t\"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai\"");
-        Assert.Matches(pattern, "\"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai/internal\"");
-        Assert.DoesNotMatch(pattern, "\"github.com/stretchr/testify\"");
+        Assert.True(matcher.IsMatch("\t\"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai\""));
+        Assert.True(matcher.IsMatch("\"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai/internal\""));
+        Assert.False(matcher.IsMatch("\"github.com/stretchr/testify\""));
     }
 
     [Fact]
     public void BuildImportPattern_DotNet_MatchesUsingStatement()
     {
         // Arrange
-        var pattern = SdkInfo.BuildImportPattern("Azure.Storage.Blobs", SdkLanguage.DotNet);
-        Assert.NotNull(pattern);
+        var matcher = SdkInfo.BuildImportMatcher("Azure.Storage.Blobs", SdkLanguage.DotNet);
+        Assert.NotNull(matcher);
 
         // Act & Assert
-        Assert.Matches(pattern, "using Azure.Storage.Blobs;");
-        Assert.Matches(pattern, "using Azure.Storage.Blobs.Models;");
-        Assert.Matches(pattern, "using static Azure.Storage.Blobs.BlobExtensions;");
-        Assert.DoesNotMatch(pattern, "using System.Text;");
+        Assert.True(matcher.IsMatch("using Azure.Storage.Blobs;"));
+        Assert.True(matcher.IsMatch("using Azure.Storage.Blobs.Models;"));
+        Assert.True(matcher.IsMatch("using static Azure.Storage.Blobs.BlobExtensions;"));
+        Assert.False(matcher.IsMatch("using System.Text;"));
     }
 
     [Fact]
@@ -781,10 +781,10 @@ public class SdkInfoTests : IDisposable
         File.WriteAllText(Path.Combine(sampleDir, "helper.py"),
             "import os\nimport sys\n\ndef helper(): pass\n");
 
-        var pattern = SdkInfo.BuildImportPattern("azure-storage", SdkLanguage.Python)!;
+        var matcher = SdkInfo.BuildImportMatcher("azure-storage", SdkLanguage.Python)!;
 
         // Act
-        var count = SdkInfo.CountImportingFiles(sampleDir, pattern, ".py");
+        var count = SdkInfo.CountImportingFiles(sampleDir, matcher, ".py");
 
         // Assert
         Assert.Equal(2, count);

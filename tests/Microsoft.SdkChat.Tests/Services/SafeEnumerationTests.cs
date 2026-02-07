@@ -30,23 +30,23 @@ public class SafeEnumerationTests : IDisposable
     [Fact]
     public void ExcludedFolders_ContainsNodeModules()
     {
-        Assert.Contains("node_modules", SdkInfo.ExcludedFolders);
+        Assert.True(SdkInfo.ExcludedFolders.Contains("node_modules"));
     }
 
     [Fact]
     public void ExcludedFolders_ContainsGit()
     {
-        Assert.Contains(".git", SdkInfo.ExcludedFolders);
+        Assert.True(SdkInfo.ExcludedFolders.Contains(".git"));
     }
 
     [Fact]
     public void ExcludedFolders_ContainsBuildArtifacts()
     {
-        Assert.Contains("bin", SdkInfo.ExcludedFolders);
-        Assert.Contains("obj", SdkInfo.ExcludedFolders);
-        Assert.Contains("dist", SdkInfo.ExcludedFolders);
-        Assert.Contains("build", SdkInfo.ExcludedFolders);
-        Assert.Contains("target", SdkInfo.ExcludedFolders);
+        Assert.True(SdkInfo.ExcludedFolders.Contains("bin"));
+        Assert.True(SdkInfo.ExcludedFolders.Contains("obj"));
+        Assert.True(SdkInfo.ExcludedFolders.Contains("dist"));
+        Assert.True(SdkInfo.ExcludedFolders.Contains("build"));
+        Assert.True(SdkInfo.ExcludedFolders.Contains("target"));
     }
 
     [Fact]

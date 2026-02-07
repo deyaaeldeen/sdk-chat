@@ -324,7 +324,7 @@ public class ToolPathResolverTests
         // Just verify no exception is thrown
     }
 
-    [SkippableFact]
+    [Fact]
     public void ResolveWithDetails_DetectsSecurityWarning_ForNonStandardPath()
     {
         // This test verifies security warning logic
@@ -332,8 +332,8 @@ public class ToolPathResolverTests
 
         var result = ToolPathResolver.ResolveWithDetails("dotnet", ["dotnet"]);
 
-        Skip.IfNot(result.IsAvailable, "dotnet not available");
-        Skip.If(result.AbsolutePath == null, "Could not resolve absolute path");
+        if (!result.IsAvailable) Assert.Skip("dotnet not available");
+        if (result.AbsolutePath == null) Assert.Skip("Could not resolve absolute path");
 
         // If dotnet is in a standard location, WarningOrError should be null
         // If in non-standard location, should contain warning

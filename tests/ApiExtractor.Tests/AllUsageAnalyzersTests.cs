@@ -197,10 +197,10 @@ public class AllUsageAnalyzersTests : IDisposable
 
     #region Python Usage Analyzer Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task Python_DirectMethodMatch_ExactNameRequired()
     {
-        Skip.IfNot(_pythonAnalyzer.IsAvailable(), "Python not available");
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
 
         var apiIndex = CreatePythonApiIndex(
             classes: [("DataClient", ["get_data", "get_data_async", "process_data"])],
@@ -224,10 +224,10 @@ def main():
         Assert.Contains(result.UncoveredOperations, o => o.Operation == "process_data");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Python_Subclient_MethodsTrackedSeparately()
     {
-        Skip.IfNot(_pythonAnalyzer.IsAvailable(), "Python not available");
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
 
         var apiIndex = CreatePythonApiIndex(
             classes:
@@ -265,7 +265,7 @@ container.create()
         Assert.Contains(result.UncoveredOperations, o => o.ClientType == "ContainerClient" && o.Operation == "list_blobs");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Python_TopLevelFunctions_TrackedCorrectly()
     {
 
@@ -326,10 +326,10 @@ client.send()
 
     #region TypeScript Usage Analyzer Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task TypeScript_DirectMethodMatch_ExactNameRequired()
     {
-        Skip.IfNot(_tsAnalyzer.IsAvailable(), "Node.js not available");
+        if (!_tsAnalyzer.IsAvailable()) Assert.Skip("Node.js not available");
 
         var apiIndex = CreateTypeScriptApiIndex(
             classes: [("DataClient", ["getData", "getDataAsync", "processData"])],
@@ -352,10 +352,10 @@ client.send()
         Assert.Contains(result.UncoveredOperations, o => o.Operation == "processData");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task TypeScript_Subclient_MethodsTrackedSeparately()
     {
-        Skip.IfNot(_tsAnalyzer.IsAvailable(), "Node.js not available");
+        if (!_tsAnalyzer.IsAvailable()) Assert.Skip("Node.js not available");
 
         var apiIndex = CreateTypeScriptApiIndexWithProperties(
             classes:
@@ -393,10 +393,10 @@ client.send()
         Assert.Contains(result.UncoveredOperations, o => o.ClientType == "ContainerClient" && o.Operation == "listBlobs");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task TypeScript_TopLevelFunctions_TrackedCorrectly()
     {
-        Skip.IfNot(_tsAnalyzer.IsAvailable(), "Node.js not available");
+        if (!_tsAnalyzer.IsAvailable()) Assert.Skip("Node.js not available");
 
         var apiIndex = CreateTypeScriptApiIndex(
             classes: [("Client", ["send"])],
@@ -484,10 +484,10 @@ client.send()
 
     #region Java Usage Analyzer Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task Java_DirectMethodMatch_ExactNameRequired()
     {
-        Skip.IfNot(_javaAnalyzer.IsAvailable(), "JBang not available");
+        if (!_javaAnalyzer.IsAvailable()) Assert.Skip("JBang not available");
 
         var apiIndex = CreateJavaApiIndex(
             classes: [("DataClient", ["getData", "getDataAsync", "processData"])],
@@ -514,10 +514,10 @@ client.send()
         Assert.Contains(result.UncoveredOperations, o => o.Operation == "processData");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Java_Subclient_MethodsTrackedSeparately()
     {
-        Skip.IfNot(_javaAnalyzer.IsAvailable(), "JBang not available");
+        if (!_javaAnalyzer.IsAvailable()) Assert.Skip("JBang not available");
 
         var apiIndex = CreateJavaApiIndex(
             classes:
@@ -559,10 +559,10 @@ client.send()
         Assert.Contains(result.UncoveredOperations, o => o.ClientType == "ContainerClient" && o.Operation == "listBlobs");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Java_InterfaceMethods_TrackedCorrectly()
     {
-        Skip.IfNot(_javaAnalyzer.IsAvailable(), "JBang not available");
+        if (!_javaAnalyzer.IsAvailable()) Assert.Skip("JBang not available");
 
         var apiIndex = CreateJavaApiIndex(
             classes: [("ClientImpl", ["send"])],
@@ -626,10 +626,10 @@ client.send()
 
     #region Go Usage Analyzer Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task Go_DirectMethodMatch_ExactNameRequired()
     {
-        Skip.IfNot(_goAnalyzer.IsAvailable(), "Go not available");
+        if (!_goAnalyzer.IsAvailable()) Assert.Skip("Go not available");
 
         var apiIndex = CreateGoApiIndex(
             structs: [("DataClient", ["GetData", "GetDataAsync", "ProcessData"])],
@@ -656,10 +656,10 @@ client.send()
         Assert.Contains(result.UncoveredOperations, o => o.Operation == "ProcessData");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Go_Subclient_MethodsTrackedSeparately()
     {
-        Skip.IfNot(_goAnalyzer.IsAvailable(), "Go not available");
+        if (!_goAnalyzer.IsAvailable()) Assert.Skip("Go not available");
 
         // StorageClient has methods that return subclient types (Blobs→BlobClient, Containers→ContainerClient)
         var apiIndex = CreateGoApiIndexWithMethodRets(
@@ -702,10 +702,10 @@ client.send()
         Assert.Contains(result.UncoveredOperations, o => o.ClientType == "ContainerClient" && o.Operation == "ListBlobs");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Go_TopLevelFunctions_TrackedCorrectly()
     {
-        Skip.IfNot(_goAnalyzer.IsAvailable(), "Go not available");
+        if (!_goAnalyzer.IsAvailable()) Assert.Skip("Go not available");
 
         var apiIndex = CreateGoApiIndex(
             structs: [("Client", ["Send"])],
@@ -728,10 +728,10 @@ client.send()
         Assert.Contains(result.CoveredOperations, o => o.Operation == "Send");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Go_InterfaceMethods_TrackedCorrectly()
     {
-        Skip.IfNot(_goAnalyzer.IsAvailable(), "Go not available");
+        if (!_goAnalyzer.IsAvailable()) Assert.Skip("Go not available");
 
         var apiIndex = CreateGoApiIndex(
             structs: [("ClientImpl", ["Send"])],

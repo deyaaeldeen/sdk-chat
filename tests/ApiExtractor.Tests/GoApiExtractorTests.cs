@@ -19,7 +19,7 @@ public class GoExtractorFixture : IAsyncLifetime
     public string? SkipReason { get; private set; }
     public string FixturePath => TestFixturesPath;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var extractor = new GoApiExtractor();
         if (!extractor.IsAvailable())
@@ -38,7 +38,7 @@ public class GoExtractorFixture : IAsyncLifetime
         }
     }
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => default;
 }
 
 /// <summary>
@@ -56,11 +56,11 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
 
     private ApiIndex GetApi()
     {
-        Skip.If(_fixture.SkipReason != null, _fixture.SkipReason);
+        if (_fixture.SkipReason != null) Assert.Skip(_fixture.SkipReason);
         return _fixture.Api!;
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ReturnsApiIndex_WithPackageName()
     {
         var api = GetApi();
@@ -68,7 +68,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.False(string.IsNullOrEmpty(api.Package));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsPackages()
     {
         var api = GetApi();
@@ -76,7 +76,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.NotEmpty(api.Packages);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsStructs()
     {
         var api = GetApi();
@@ -85,7 +85,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.NotNull(sampleClient);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsStructMethods()
     {
         var api = GetApi();
@@ -96,7 +96,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.Contains(sampleClient.Methods, m => m.Name == "GetResource");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsInterfaces()
     {
         var api = GetApi();
@@ -105,7 +105,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.NotNull(iface);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsFunctions()
     {
         var api = GetApi();
@@ -114,7 +114,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.Contains(functions, f => f.Name == "NewSampleClient");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsTypeAliases()
     {
         var api = GetApi();
@@ -122,7 +122,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.NotEmpty(types);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsConstants()
     {
         var api = GetApi();
@@ -130,7 +130,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.NotEmpty(constants);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_CapturesDocComments()
     {
         var api = GetApi();
@@ -140,7 +140,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.False(string.IsNullOrEmpty(sampleClient.Doc));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_CapturesFunctionSignatures()
     {
         var api = GetApi();
@@ -150,7 +150,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.False(string.IsNullOrEmpty(newClient.Sig));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_OnlyIncludesExportedSymbols()
     {
         var api = GetApi();
@@ -174,7 +174,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsStructFields()
     {
         var api = GetApi();
@@ -185,7 +185,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.NotEmpty(resource.Fields);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsInterfaceMethods()
     {
         var api = GetApi();
@@ -196,7 +196,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         Assert.NotEmpty(iface.Methods);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ProducesSmallerOutputThanSource()
     {
         // For small test fixtures, API surface can be 80-120% of source size

@@ -60,10 +60,10 @@ public class ReleaseContainerTests
 
     #region Baseline Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task Container_HelpCommand_ReturnsSuccess()
     {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
 
         var (exitCode, output, error) = await _fixture.RunAsync(["--help"]);
 
@@ -71,10 +71,10 @@ public class ReleaseContainerTests
         Assert.Contains("package", output);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Container_DoctorCommand_ReturnsSuccess()
     {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
 
         var (exitCode, output, error) = await _fixture.RunAsync(["doctor"]);
 
@@ -88,11 +88,11 @@ public class ReleaseContainerTests
 
     #region Source Detection Tests
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(AllLanguages))]
     public async Task SourceDetect_ReturnsValidOutput(string language)
     {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
 
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package source detect", language);
@@ -110,11 +110,11 @@ public class ReleaseContainerTests
 
     #region API Extraction Tests
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(SupportedLanguages))]
     public async Task ApiExtract_ReturnsValidJson(string language)
     {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
 
         // Minimal fixtures don't have project files, so we need to specify language explicitly
         // --json flag outputs structured JSON instead of human-readable stubs
@@ -135,11 +135,11 @@ public class ReleaseContainerTests
 
     #region Samples Detection Tests
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(SupportedLanguages))]
     public async Task SamplesDetect_ExecutesWithoutCrash(string language)
     {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
 
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package samples detect", language);
@@ -153,11 +153,11 @@ public class ReleaseContainerTests
 
     #region API Coverage Tests
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(SupportedLanguages))]
     public async Task ApiCoverage_ExecutesWithoutCrash(string language)
     {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
 
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package api coverage", language);
@@ -166,11 +166,11 @@ public class ReleaseContainerTests
         Assert.True(exitCode >= 0, $"[{language}] Unexpected exit code. Error: {error}");
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(SupportedLanguages))]
     public async Task ApiCoverage_DetectsSubclientOperations(string language)
     {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
 
         var langFlag = ReleaseContainerFixture.GetLanguageFlag(language);
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
@@ -202,11 +202,11 @@ public class ReleaseContainerTests
         Assert.True(matched, $"[{language}] Expected covered operation {expected.Client}.{expected.Operation}. Output: {output}");
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(SupportedLanguages))]
     public async Task ApiCoverage_DetectsInterfaceSubclientOperations(string language)
     {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
 
         var langFlag = ReleaseContainerFixture.GetLanguageFlag(language);
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(

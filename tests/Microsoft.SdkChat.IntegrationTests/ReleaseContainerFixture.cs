@@ -43,7 +43,7 @@ public class ReleaseContainerFixture : IAsyncLifetime
     /// </summary>
     public string? SkipReason { get; private set; }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         // Check wrapper script exists
         if (!File.Exists(WrapperScript))
@@ -82,7 +82,7 @@ public class ReleaseContainerFixture : IAsyncLifetime
         IsAvailable = true;
     }
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => default;
 
     /// <summary>
     /// Runs a command using the wrapper script, which handles Docker setup.

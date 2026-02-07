@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Collections.Frozen;
+
 namespace Microsoft.SdkChat.Services;
 
 /// <summary>
@@ -16,8 +18,8 @@ public static class SafeFileEnumerator
     /// These are typically build artifacts, dependencies, or version control folders
     /// that should never be scanned (e.g., node_modules can contain 100K+ files).
     /// </summary>
-    public static readonly IReadOnlySet<string> ExcludedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
+    public static readonly FrozenSet<string> ExcludedFolders = FrozenSet.ToFrozenSet(
+    [
         // Build artifacts
         "bin", "obj", "dist", "build", "target", "out", "artifacts",
         // Package managers / dependencies
@@ -33,7 +35,7 @@ public static class SafeFileEnumerator
         ".gradle",
         // pytest
         ".pytest_cache",
-    };
+    ], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Safe enumeration options that skip excluded folders.
@@ -81,25 +83,41 @@ public static class SafeFileEnumerator
             var (currentDir, depth) = stack.Pop();
 
             // Enumerate files in current directory
-            IEnumerable<string> files;
-            try
+            if (count < maxFiles)
             {
-                files = Directory.EnumerateFiles(currentDir, searchPattern, SearchOption.TopDirectoryOnly);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                continue;
-            }
+                // Manual enumeration to handle exceptions during lazy iteration
+                // while permitting yield return (which cannot be in a try-catch block)
+                IEnumerator<string>? fileEnumerator = null;
+                try
+                {
+                    fileEnumerator = Directory.EnumerateFiles(currentDir, searchPattern, SearchOption.TopDirectoryOnly).GetEnumerator();
+                }
+                catch (Exception ex) when (IsFileSystemError(ex)) { }
 
-            foreach (var file in files)
-            {
-                if (++count > maxFiles)
-                    yield break;
-                yield return file;
+                if (fileEnumerator != null)
+                {
+                    using (fileEnumerator)
+                    {
+                        while (true)
+                        {
+                            string file;
+                            try
+                            {
+                                if (!fileEnumerator.MoveNext()) break;
+                                file = fileEnumerator.Current;
+                            }
+                            catch (Exception ex) when (IsFileSystemError(ex))
+                            {
+                                break;
+                            }
+
+                            if (++count > maxFiles)
+                                yield break;
+
+                            yield return file;
+                        }
+                    }
+                }
             }
 
             // Don't recurse deeper than maxDepth
@@ -107,22 +125,18 @@ public static class SafeFileEnumerator
                 continue;
 
             // Add subdirectories (excluding dangerous ones)
-            IEnumerable<string> subdirs;
+            // Use eager evaluation (GetDirectories) for simplicity as we iterate all nested dirs anyway
+            string[]? subdirs = null;
             try
             {
-                subdirs = Directory.EnumerateDirectories(currentDir);
+                subdirs = Directory.GetDirectories(currentDir);
             }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                continue;
-            }
+            catch (Exception ex) when (IsFileSystemError(ex)) { }
 
-            foreach (var subdir in subdirs)
+            if (subdirs != null)
             {
+                foreach (var subdir in subdirs)
+                {
                 var dirName = Path.GetFileName(subdir);
                 if (ExcludedFolders.Contains(dirName))
                     continue;
@@ -134,8 +148,12 @@ public static class SafeFileEnumerator
                     stack.Push((subdir, depth + 1));
                 }
             }
+            }
         }
     }
+
+    private static bool IsFileSystemError(Exception ex)
+        => ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException;
 
     /// <summary>
     /// Safely counts files matching a pattern, skipping excluded folders.
@@ -155,23 +173,31 @@ public static class SafeFileEnumerator
 
     /// <summary>
     /// Returns a canonical path for symlink cycle detection.
-    /// Resolves symlinks on supported platforms; falls back to GetFullPath on others.
+    /// Resolves the full symlink chain on supported platforms; falls back to GetFullPath on others.
     /// </summary>
-    private static string GetCanonicalPath(string path)
+    internal static string GetCanonicalPath(string path)
     {
         try
         {
-            // ResolveLinkTarget returns the target, but we need to resolve the whole chain
-            var info = new DirectoryInfo(path);
-            if (info.LinkTarget != null)
+            // Optimization: avoid expensive DirectoryInfo/ResolveLinkTarget if not a reparse point
+            // File.GetAttributes works for directories too and is a fast syscall
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReparsePoint) == 0)
             {
-                var resolved = Path.GetFullPath(info.LinkTarget, Path.GetDirectoryName(path)!);
-                return resolved;
+                return Path.GetFullPath(path);
+            }
+
+            var info = new DirectoryInfo(path);
+            // ResolveLinkTarget with returnFinalTarget: true follows the entire symlink chain (A→B→C → C)
+            var resolved = info.ResolveLinkTarget(returnFinalTarget: true);
+            if (resolved != null)
+            {
+                return resolved.FullName;
             }
         }
-        catch
+        catch (Exception ex) when (IsFileSystemError(ex))
         {
-            // Fallback on any error (e.g., permission denied)
+            // Fallback on expected filesystem errors (e.g., permission denied, broken symlinks)
         }
 
         return Path.GetFullPath(path);
