@@ -11,7 +11,7 @@ namespace Microsoft.SdkChat.Tests.Mocks;
 /// <summary>
 /// Factory for creating fake MCP samplers for testing.
 /// </summary>
-public static class MockMcpServerFactory
+public static class MockMcpSamplerFactory
 {
     /// <summary>
     /// Creates a fake MCP sampler that returns the specified samples when SampleAsync is called.

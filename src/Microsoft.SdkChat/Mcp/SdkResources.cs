@@ -19,7 +19,7 @@ public class SdkResources
 
     [McpServerResource(UriTemplate = "sdk://{path}/api"), Description(
         "Public API surface of the SDK package. " +
-        "Returns the extracted API signatures, types, methods, and documentation. " +
+        "Returns the extracted API signatures, types, methods, and documentation as JSON. " +
         "Use this to understand what operations the SDK provides without reading raw source code. " +
         "~70% more token-efficient than raw source.")]
     public async Task<string> GetApiAsync(
@@ -37,7 +37,10 @@ public class SdkResources
                     McpJsonContext.Default.McpErrorResponse);
             }
 
-            return result.ApiSurface ?? string.Empty;
+            // Return consistent JSON format - wrap the API surface in a response object
+            return JsonSerializer.Serialize(
+                new McpResponse<ApiExtractionResult> { Success = true, Data = result },
+                McpJsonContext.Default.McpResponseApiExtractionResult);
         }
         catch (Exception ex)
         {

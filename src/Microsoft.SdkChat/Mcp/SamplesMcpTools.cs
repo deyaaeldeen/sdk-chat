@@ -18,10 +18,11 @@ namespace Microsoft.SdkChat.Mcp;
 /// Entity group: samples
 /// </summary>
 [McpServerToolType]
-public class SamplesMcpTools(FileHelper fileHelper)
+public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
 {
     private readonly PackageInfoService _infoService = new();
     private readonly FileHelper _fileHelper = fileHelper;
+    private readonly IMcpSampler _mcpSampler = mcpSampler;
 
     [McpServerTool(Name = "detect_samples"), Description(
         "Find existing samples/examples folder in an SDK package. " +
@@ -59,7 +60,6 @@ public class SamplesMcpTools(FileHelper fileHelper)
         "SUPPORTS: .NET/C#, Python, Java, JavaScript, TypeScript, Go. " +
         "WORKFLOW: detect_source → analyze_coverage → generate_samples with prompt targeting uncovered APIs.")]
     public async Task<string> GenerateSamplesAsync(
-        IMcpSampler mcpSampler,
         [Description("Absolute path to SDK root. Must contain project files (.csproj, pyproject.toml, pom.xml, package.json, go.mod).")] string packagePath,
         [Description("Where to write samples. Default: auto-detected samples/, examples/, or new 'examples' folder.")] string? outputPath = null,
         [Description("Guide the AI: 'streaming examples', 'error handling patterns', 'authentication scenarios', 'async/await usage'.")] string? prompt = null,
@@ -131,6 +131,7 @@ public class SamplesMcpTools(FileHelper fileHelper)
                 cancellationToken).ConfigureAwait(false);
 
             // Request samples from host LLM via MCP Sampling
+            // Let the host control model parameters (temperature, etc.), but set reasonable token limit for code generation
             var createMessageRequest = new CreateMessageRequestParams
             {
                 Messages =
@@ -142,12 +143,11 @@ public class SamplesMcpTools(FileHelper fileHelper)
                     }
                 ],
                 SystemPrompt = systemPrompt,
-                MaxTokens = 16000, // Reasonable limit for code generation
-                Temperature = 0.7f,
+                MaxTokens = 16000, // Reasonable default for code generation; host can override if needed
                 IncludeContext = ContextInclusion.ThisServer
             };
 
-            var samplingResult = await mcpSampler.SampleAsync(createMessageRequest, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var samplingResult = await _mcpSampler.SampleAsync(createMessageRequest, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             // Parse LLM response to extract generated samples
             var responseText = ExtractTextFromSamplingResponse(samplingResult);
@@ -183,11 +183,14 @@ public class SamplesMcpTools(FileHelper fileHelper)
             var writtenFiles = new List<string>();
             Directory.CreateDirectory(outputFullPath);
 
-            foreach (var sample in samples)
-            {
-                if (string.IsNullOrEmpty(sample.Name) || string.IsNullOrEmpty(sample.Code))
-                    continue;
+            // Normalize output path for containment checks
+            var normalizedOutputPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputFullPath));
 
+            // Filter out samples with missing name or code explicitly
+            var validSamples = samples.Where(s => !string.IsNullOrEmpty(s.Name) && !string.IsNullOrEmpty(s.Code));
+
+            foreach (var sample in validSamples)
+            {
                 var relativePath = !string.IsNullOrEmpty(sample.FilePath)
                     ? PathSanitizer.SanitizeFilePath(sample.FilePath, context.FileExtension)
                     : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
@@ -195,8 +198,9 @@ public class SamplesMcpTools(FileHelper fileHelper)
                 var filePath = Path.GetFullPath(Path.Combine(outputFullPath, relativePath));
 
                 // Security: ensure path stays within output directory
-                if (!filePath.StartsWith(outputFullPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                    && !filePath.Equals(outputFullPath, StringComparison.OrdinalIgnoreCase))
+                var normalizedFilePath = Path.GetFullPath(filePath);
+                if (!normalizedFilePath.StartsWith(normalizedOutputPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    && !normalizedFilePath.Equals(normalizedOutputPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
