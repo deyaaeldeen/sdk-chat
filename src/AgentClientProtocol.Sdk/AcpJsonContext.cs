@@ -134,7 +134,7 @@ namespace AgentClientProtocol.Sdk;
 public partial class AcpJsonContext : JsonSerializerContext
 {
     private static System.Text.Json.JsonSerializerOptions? _flexibleOptions;
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
 
     /// <summary>
     /// Hardened JsonDocumentOptions for parsing untrusted JSON input.

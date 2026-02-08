@@ -601,7 +601,7 @@ public class AiDebugSession : IAsyncDisposable
     /// Writer for streaming response chunks to disk. Opened lazily on first write.
     /// </summary>
     private StreamWriter? _responseWriter;
-    private readonly object _writerLock = new();
+    private readonly Lock _writerLock = new();
 
     /// <summary>
     /// Total characters written to the response stream.

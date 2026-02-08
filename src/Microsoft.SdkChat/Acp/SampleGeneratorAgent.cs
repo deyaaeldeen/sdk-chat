@@ -344,7 +344,7 @@ public sealed class SampleGeneratorAgent(
         var outputFolder = Path.GetFullPath(session.OutputFolder!);
         var language = SdkLanguageHelpers.Parse(session.SourceResult!.Language!);
         var fileExtension = GetFileExtension(language);
-        var writtenFiles = new List<string>();
+        List<string> writtenFiles = [];
 
         Directory.CreateDirectory(outputFolder);
 
@@ -472,7 +472,7 @@ public sealed class SampleGeneratorAgent(
 
     private static string ExtractUserText(ContentBlock[] prompt)
     {
-        var parts = new List<string>();
+        List<string> parts = [];
         foreach (var block in prompt)
         {
             if (block is TextContent text && !string.IsNullOrWhiteSpace(text.Text))

@@ -2,10 +2,10 @@
 // Licensed under the MIT License.
 
 using ApiExtractor.DotNet;
+using ApiExtractor.Go;
+using ApiExtractor.Java;
 using ApiExtractor.Python;
 using ApiExtractor.TypeScript;
-using ApiExtractor.Java;
-using ApiExtractor.Go;
 using Xunit;
 
 namespace ApiExtractor.Tests;

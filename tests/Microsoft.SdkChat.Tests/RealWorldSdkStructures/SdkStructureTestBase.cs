@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
-using Xunit;
 
 namespace Microsoft.SdkChat.Tests.RealWorldSdkStructures;
 

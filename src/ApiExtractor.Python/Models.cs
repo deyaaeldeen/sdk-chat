@@ -9,7 +9,7 @@ namespace ApiExtractor.Python;
 
 // Reuse the same output models for consistency across languages
 public sealed record ApiIndex(
-    string Package, 
+    string Package,
     IReadOnlyList<ModuleInfo> Modules,
     IReadOnlyList<DependencyInfo>? Dependencies = null) : IApiIndex
 {
@@ -99,7 +99,7 @@ public sealed record ClassInfo
     /// <summary>Gets type names referenced in method signatures.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        var refs = new HashSet<string>();
+        HashSet<string> refs = [];
 
         if (!string.IsNullOrEmpty(Base))
         {

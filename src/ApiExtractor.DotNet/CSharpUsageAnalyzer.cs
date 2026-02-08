@@ -41,7 +41,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                      && !f.Contains("/bin/") && !f.Contains("\\bin\\"))
             .ToList();
 
-        var syntaxTrees = new List<SyntaxTree>();
+        List<SyntaxTree> syntaxTrees = [];
         var filePathMap = new Dictionary<SyntaxTree, string>();
 
         foreach (var file in files)
@@ -75,8 +75,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             foreach (var type in ns.Types ?? [])
                 allTypeNames.TryAdd(type.Name, type.Name);
 
-        var coveredOperations = new List<OperationUsage>();
-        var seenOperations = new HashSet<string>(); // Dedupe: "ClientType.Method"
+        List<OperationUsage> coveredOperations = [];
+        HashSet<string> seenOperations = []; // Dedupe: "ClientType.Method"
 
         foreach (var tree in syntaxTrees)
         {
@@ -98,13 +98,13 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
                 // Fall back to syntactic resolution when Roslyn can't resolve types
                 // (e.g., missing assembly references in sample code)
-                if (clientType == null)
+                if (clientType is null)
                 {
                     (clientType, methodName) = ExtractMethodCallSyntactic(
                         invocation, clientMethods, varTypes, propertyTypeMap, methodReturnTypeMap);
                 }
 
-                if (clientType != null && methodName != null)
+                if (clientType is not null && methodName is not null)
                 {
                     var key = $"{clientType}.{methodName}";
                     if (seenOperations.Add(key))
@@ -137,7 +137,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// </summary>
     private static IReadOnlyList<MetadataReference> GetBasicMetadataReferences()
     {
-        var references = new List<MetadataReference>();
+        List<MetadataReference> references = [];
         var runtimeDir = AppContext.BaseDirectory;
 
         var runtimeAssemblies = new[]
@@ -239,7 +239,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 var ifaceName = iface.Split('<')[0];
                 if (!interfaceImplementers.TryGetValue(ifaceName, out var list))
                 {
-                    list = new List<TypeInfo>();
+                    list = [];
                     interfaceImplementers[ifaceName] = list;
                 }
                 list.Add(type);
@@ -370,7 +370,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             if (symbolInfo.Symbol is IMethodSymbol methodSymbol)
             {
                 var containingType = methodSymbol.ContainingType;
-                if (containingType != null)
+                if (containingType is not null)
                 {
                     var typeName = containingType.Name;
 
@@ -392,7 +392,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
                     // Check base types
                     var baseType = containingType.BaseType;
-                    while (baseType != null)
+                    while (baseType is not null)
                     {
                         var baseName = baseType.Name;
                         if (clientMethods.TryGetValue(baseName, out var baseMethods) && baseMethods.Contains(methodName))
@@ -452,7 +452,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             }
         }
 
-        var uncovered = new List<UncoveredOperation>();
+        List<UncoveredOperation> uncovered = [];
 
         foreach (var (clientType, methods) in clientMethods)
         {
@@ -597,7 +597,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             if (initializer is ObjectCreationExpressionSyntax creation)
             {
                 var typeName = GetSimpleTypeName(creation.Type);
-                if (typeName != null && allTypeNames.TryGetValue(typeName, out var canonical))
+                if (typeName is not null && allTypeNames.TryGetValue(typeName, out var canonical))
                 {
                     varTypes[varName] = canonical;
                     continue;
@@ -609,7 +609,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 declaration.Parent is VariableDeclarationSyntax implDecl)
             {
                 var typeName = GetSimpleTypeName(implDecl.Type);
-                if (typeName != null && allTypeNames.TryGetValue(typeName, out var canonical))
+                if (typeName is not null && allTypeNames.TryGetValue(typeName, out var canonical))
                 {
                     varTypes[varName] = canonical;
                     continue;
@@ -620,7 +620,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             if (declaration.Parent is VariableDeclarationSyntax explDecl)
             {
                 var typeName = GetSimpleTypeName(explDecl.Type);
-                if (typeName != null && typeName != "var" && allTypeNames.TryGetValue(typeName, out var canonical))
+                if (typeName is not null && typeName != "var" && allTypeNames.TryGetValue(typeName, out var canonical))
                 {
                     varTypes[varName] = canonical;
                     continue;
@@ -705,7 +705,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     if (member.Kind == "property" && member.Signature is not null)
                     {
                         var returnType = ExtractReturnTypeFromPropertySignature(member.Signature);
-                        if (returnType != null && clientMethods.ContainsKey(returnType))
+                        if (returnType is not null && clientMethods.ContainsKey(returnType))
                         {
                             var key = $"{type.Name}.{member.Name}";
                             map[key] = GetCanonicalClientName(returnType, clientMethods);
@@ -749,10 +749,10 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     if (member.Kind == "method" && member.Signature is not null)
                     {
                         var returnType = ExtractReturnTypeFromMethodSignature(member.Signature);
-                        if (returnType != null)
+                        if (returnType is not null)
                         {
                             var unwrapped = UnwrapAsyncReturnType(returnType);
-                            if (unwrapped != null && clientMethods.ContainsKey(unwrapped))
+                            if (unwrapped is not null && clientMethods.ContainsKey(unwrapped))
                             {
                                 var key = $"{type.Name}.{member.Name}";
                                 map[key] = GetCanonicalClientName(unwrapped, clientMethods);
@@ -793,7 +793,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         foreach (var wrapper in wrappers)
         {
             if (returnType.StartsWith(wrapper + "<", StringComparison.Ordinal) &&
-                returnType.EndsWith(">", StringComparison.Ordinal))
+                returnType.EndsWith('>'))
             {
                 return returnType[(wrapper.Length + 1)..^1];
             }

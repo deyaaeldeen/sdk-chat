@@ -63,7 +63,7 @@ public class SampleGeneratorTool
         var existingSamplesPath = sdkInfo.SamplesFolder;
         // SAFETY: Use safe enumeration to avoid scanning node_modules, .git, etc.
         var existingCount = existingSamplesPath is not null && Directory.Exists(existingSamplesPath)
-            ? SdkInfo.CountFilesSafely(existingSamplesPath, "*" + (sdkInfo.FileExtension ?? ".*"))
+            ? SdkInfo.CountFilesSafely(existingSamplesPath, $"*{sdkInfo.FileExtension ?? ".*"}")
             : 0;
 
         ConsoleUx.Info($"Detected {ConsoleUx.Bold(sdkInfo.LanguageName ?? "unknown")} SDK");

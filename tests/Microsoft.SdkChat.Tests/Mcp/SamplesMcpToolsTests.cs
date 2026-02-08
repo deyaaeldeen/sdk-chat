@@ -380,7 +380,7 @@ public class SamplesMcpToolsTests : IDisposable
         var result = await _tool.GenerateSamplesAsync(_testRoot);
 
         // Assert
-        Assert.Contains("Generated 0 sample", result);
+        Assert.Contains("\"success\":false", result);
     }
 
     #endregion
@@ -436,7 +436,7 @@ public class Client
         File.WriteAllText(Path.Combine(srcDir, "client.py"), @"
 class Client:
     '''Test client for API operations.'''
-    
+
     def get_resource(self, id: int) -> str:
         '''Gets a resource by ID.'''
         return 'test'

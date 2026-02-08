@@ -52,12 +52,12 @@ public static class ExtractorTelemetry
     /// </summary>
     public static void RecordResult(Activity? activity, bool success, int? itemCount = null, string? error = null)
     {
-        if (activity == null) return;
+        if (activity is null) return;
 
         activity.SetTag("success", success);
         if (itemCount.HasValue)
             activity.SetTag("item_count", itemCount.Value);
-        if (error != null)
+        if (error is not null)
         {
             activity.SetStatus(ActivityStatusCode.Error, error);
             activity.SetTag("error.message", error);
@@ -73,7 +73,7 @@ public static class ExtractorTelemetry
     /// </summary>
     public static void RecordProcessResult(Activity? activity, int exitCode, TimeSpan duration, bool timedOut = false)
     {
-        if (activity == null) return;
+        if (activity is null) return;
 
         activity.SetTag("exit_code", exitCode);
         activity.SetTag("duration_ms", duration.TotalMilliseconds);

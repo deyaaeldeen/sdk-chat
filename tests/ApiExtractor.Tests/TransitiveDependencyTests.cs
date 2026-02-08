@@ -8,31 +8,31 @@ using ApiExtractor.Python;
 using ApiExtractor.TypeScript;
 using Xunit;
 using DotNetApiIndex = ApiExtractor.DotNet.ApiIndex;
+using DotNetDependencyInfo = ApiExtractor.DotNet.DependencyInfo;
+using DotNetMemberInfo = ApiExtractor.DotNet.MemberInfo;
 using DotNetNamespaceInfo = ApiExtractor.DotNet.NamespaceInfo;
 using DotNetTypeInfo = ApiExtractor.DotNet.TypeInfo;
-using DotNetMemberInfo = ApiExtractor.DotNet.MemberInfo;
-using DotNetDependencyInfo = ApiExtractor.DotNet.DependencyInfo;
-using TsApiIndex = ApiExtractor.TypeScript.ApiIndex;
-using TsModuleInfo = ApiExtractor.TypeScript.ModuleInfo;
-using TsClassInfo = ApiExtractor.TypeScript.ClassInfo;
-using TsInterfaceInfo = ApiExtractor.TypeScript.InterfaceInfo;
-using TsFunctionInfo = ApiExtractor.TypeScript.FunctionInfo;
-using TsDependencyInfo = ApiExtractor.TypeScript.DependencyInfo;
-using PyApiIndex = ApiExtractor.Python.ApiIndex;
-using PyModuleInfo = ApiExtractor.Python.ModuleInfo;
-using PyClassInfo = ApiExtractor.Python.ClassInfo;
-using PyDependencyInfo = ApiExtractor.Python.DependencyInfo;
 using GoApiIndex = ApiExtractor.Go.ApiIndex;
+using GoDependencyInfo = ApiExtractor.Go.DependencyInfo;
+using GoFuncApi = ApiExtractor.Go.FuncApi;
+using GoIfaceApi = ApiExtractor.Go.IfaceApi;
 using GoPackageApi = ApiExtractor.Go.PackageApi;
 using GoStructApi = ApiExtractor.Go.StructApi;
-using GoIfaceApi = ApiExtractor.Go.IfaceApi;
-using GoFuncApi = ApiExtractor.Go.FuncApi;
-using GoDependencyInfo = ApiExtractor.Go.DependencyInfo;
 using JavaApiIndex = ApiExtractor.Java.ApiIndex;
-using JavaPackageInfo = ApiExtractor.Java.PackageInfo;
 using JavaClassInfo = ApiExtractor.Java.ClassInfo;
-using JavaMethodInfo = ApiExtractor.Java.MethodInfo;
 using JavaDependencyInfo = ApiExtractor.Java.DependencyInfo;
+using JavaMethodInfo = ApiExtractor.Java.MethodInfo;
+using JavaPackageInfo = ApiExtractor.Java.PackageInfo;
+using PyApiIndex = ApiExtractor.Python.ApiIndex;
+using PyClassInfo = ApiExtractor.Python.ClassInfo;
+using PyDependencyInfo = ApiExtractor.Python.DependencyInfo;
+using PyModuleInfo = ApiExtractor.Python.ModuleInfo;
+using TsApiIndex = ApiExtractor.TypeScript.ApiIndex;
+using TsClassInfo = ApiExtractor.TypeScript.ClassInfo;
+using TsDependencyInfo = ApiExtractor.TypeScript.DependencyInfo;
+using TsFunctionInfo = ApiExtractor.TypeScript.FunctionInfo;
+using TsInterfaceInfo = ApiExtractor.TypeScript.InterfaceInfo;
+using TsModuleInfo = ApiExtractor.TypeScript.ModuleInfo;
 
 namespace ApiExtractor.Tests;
 
@@ -51,7 +51,7 @@ public class TransitiveDependencyTests
     {
         var extractor = new CSharpApiExtractor();
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "DotNet"));
-        
+
         // Dependencies property should exist (may be null if no external deps)
         // The test fixtures use standard .NET types, so Dependencies may be null
         Assert.NotNull(api);
@@ -64,7 +64,7 @@ public class TransitiveDependencyTests
         // Create a temp directory with a file that references external types
         var tempDir = Path.Combine(Path.GetTempPath(), $"DotNetDeps_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
-        
+
         try
         {
             var code = """
@@ -77,19 +77,19 @@ public class TransitiveDependencyTests
                     public Azure.Core.Pipeline.HttpPipeline Pipeline { get; }
                 }
                 """;
-            
+
             await File.WriteAllTextAsync(Path.Combine(tempDir, "MyClient.cs"), code);
-            
+
             var extractor = new CSharpApiExtractor();
             var api = await extractor.ExtractAsync(tempDir);
-            
+
             Assert.NotNull(api);
             Assert.NotEmpty(api.Namespaces);
-            
+
             // Should find the external Azure types
             if (api.Dependencies != null && api.Dependencies.Count > 0)
             {
-                Assert.Contains(api.Dependencies, d => 
+                Assert.Contains(api.Dependencies, d =>
                     d.Package.Contains("Azure", StringComparison.OrdinalIgnoreCase));
             }
         }
@@ -104,7 +104,7 @@ public class TransitiveDependencyTests
     {
         // Verify that common builtin types are not treated as external dependencies
         var builtinSignature = "Task<string> GetAsync(CancellationToken token, List<int> ids)";
-        
+
         // The signature contains only builtin types, so shouldn't produce dependencies
         var api = new DotNetApiIndex
         {
@@ -126,7 +126,7 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         // ToStubs should work without including builtin types as dependencies
         var stubs = api.ToStubs();
         Assert.NotNull(stubs);
@@ -152,9 +152,9 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var stubs = api.ToStubs();
-        
+
         Assert.Contains("Dependency Types", stubs);
         Assert.Contains("Azure.Core", stubs);
         Assert.Contains("Response", stubs);
@@ -169,12 +169,12 @@ public class TransitiveDependencyTests
     {
         var extractor = new TypeScriptApiExtractor();
         if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
-        
+
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "TypeScript"));
-        
+
         Assert.NotNull(api);
         Assert.NotEmpty(api.Modules);
-        
+
         // TypeScript fixture imports from @sdk/abort-controller, should have dependencies
         // The AbortSignalLike import should be detected
     }
@@ -205,9 +205,9 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var stubs = api.ToStubs();
-        
+
         Assert.Contains("Dependencies", stubs);
         Assert.Contains("@azure/core-rest-pipeline", stubs);
         Assert.Contains("PipelinePolicy", stubs);
@@ -237,7 +237,7 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var stubs = api.ToStubs();
         Assert.NotNull(stubs);
         // Should not have dependency section for builtin-only types
@@ -252,9 +252,9 @@ public class TransitiveDependencyTests
     {
         var extractor = new PythonApiExtractor();
         if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
-        
+
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Python"));
-        
+
         Assert.NotNull(api);
         Assert.NotEmpty(api.Modules);
     }
@@ -266,8 +266,8 @@ public class TransitiveDependencyTests
             Package: "test-pkg",
             Modules:
             [
-                new PyModuleInfo("client", 
-                    [new PyClassInfo { Name = "TestClient" }], 
+                new PyModuleInfo("client",
+                    [new PyClassInfo { Name = "TestClient" }],
                     null)
             ],
             Dependencies:
@@ -282,9 +282,9 @@ public class TransitiveDependencyTests
                 }
             ]
         );
-        
+
         var stubs = api.ToStubs();
-        
+
         Assert.Contains("Dependency Types", stubs);
         Assert.Contains("azure-core", stubs);
         Assert.Contains("PipelinePolicy", stubs);
@@ -299,9 +299,9 @@ public class TransitiveDependencyTests
     {
         var extractor = new GoApiExtractor();
         if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
-        
+
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Go"));
-        
+
         Assert.NotNull(api);
         Assert.NotEmpty(api.Packages);
     }
@@ -332,9 +332,9 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var stubs = api.ToStubs();
-        
+
         Assert.Contains("Dependency Types", stubs);
         Assert.Contains("azcore", stubs);
         Assert.Contains("Policy", stubs);
@@ -371,7 +371,7 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var stubs = api.ToStubs();
         Assert.NotNull(stubs);
         // Builtin-only signatures shouldn't produce dependency section
@@ -387,9 +387,9 @@ public class TransitiveDependencyTests
     {
         var extractor = new JavaApiExtractor();
         if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
-        
+
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Java"));
-        
+
         Assert.NotNull(api);
         Assert.NotEmpty(api.Packages);
     }
@@ -420,9 +420,9 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var stubs = api.ToStubs();
-        
+
         Assert.Contains("Dependency Types", stubs);
         Assert.Contains("com.azure.core", stubs);
         Assert.Contains("HttpPipeline", stubs);
@@ -458,7 +458,7 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var stubs = api.ToStubs();
         Assert.NotNull(stubs);
         // Builtin-only signatures shouldn't produce dependency section
@@ -484,9 +484,9 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var json = api.ToJson(pretty: true);
-        
+
         Assert.Contains("\"dependencies\"", json);
         Assert.Contains("\"External.Pkg\"", json);
         Assert.Contains("\"ExternalType\"", json);
@@ -508,9 +508,9 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var json = api.ToJson(pretty: true);
-        
+
         Assert.Contains("\"dependencies\"", json);
         Assert.Contains("\"@external/pkg\"", json);
         Assert.Contains("\"ExternalClass\"", json);
@@ -532,9 +532,9 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var json = api.ToJson(pretty: true);
-        
+
         Assert.Contains("\"dependencies\"", json);
         Assert.Contains("\"github.com/external/pkg\"", json);
         Assert.Contains("\"ExternalStruct\"", json);
@@ -556,9 +556,9 @@ public class TransitiveDependencyTests
                 }
             ]
         };
-        
+
         var json = api.ToJson(pretty: true);
-        
+
         Assert.Contains("\"dependencies\"", json);
         Assert.Contains("\"com.external.pkg\"", json);
         Assert.Contains("\"ExternalClass\"", json);
@@ -579,9 +579,9 @@ public class TransitiveDependencyTests
                 }
             ]
         );
-        
+
         var json = api.ToJson(pretty: true);
-        
+
         Assert.Contains("\"dependencies\"", json);
         Assert.Contains("\"external-pkg\"", json);
         Assert.Contains("\"ExternalClass\"", json);
@@ -600,9 +600,9 @@ public class TransitiveDependencyTests
             Namespaces = [],
             Dependencies = null
         };
-        
+
         var json = api.ToJson();
-        
+
         Assert.DoesNotContain("dependencies", json);
     }
 
@@ -615,9 +615,9 @@ public class TransitiveDependencyTests
             Modules = [],
             Dependencies = null
         };
-        
+
         var json = api.ToJson();
-        
+
         Assert.DoesNotContain("dependencies", json);
     }
 

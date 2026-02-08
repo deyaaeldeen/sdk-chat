@@ -113,7 +113,7 @@ public static class ExtractorAvailability
     {
         // 1. Check for precompiled native binary first (AOT mode)
         var nativePath = GetNativeBinaryPath(nativeBinaryName);
-        if (nativePath != null)
+        if (nativePath is not null)
         {
             var validation = ValidateExecutable(nativePath, nativeValidationArgs);
             if (validation.Success)
@@ -131,7 +131,7 @@ public static class ExtractorAvailability
             runtimeCandidates,
             runtimeValidationArgs);
 
-        if (runtimeResult.IsAvailable && runtimeResult.Path != null)
+        if (runtimeResult.IsAvailable && runtimeResult.Path is not null)
         {
             return ExtractorAvailabilityResult.RuntimeInterpreter(
                 runtimeResult.Path,
@@ -139,7 +139,7 @@ public static class ExtractorAvailability
         }
 
         // 3. Neither available - provide helpful error message
-        var nativeHint = nativePath != null
+        var nativeHint = nativePath is not null
             ? $" Native binary found at {nativePath} but failed to execute."
             : "";
 
@@ -186,7 +186,7 @@ public static class ExtractorAvailability
             }
 
             using var process = Process.Start(psi);
-            if (process == null)
+            if (process is null)
             {
                 return (false, "Failed to start process");
             }

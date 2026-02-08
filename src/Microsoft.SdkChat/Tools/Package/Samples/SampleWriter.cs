@@ -84,7 +84,7 @@ public class SampleWriter
     {
         Directory.CreateDirectory(outputFolder);
 
-        var results = new List<WriteResult>();
+        List<WriteResult> results = [];
         foreach (var sample in samples)
         {
             if (string.IsNullOrEmpty(sample.Name) || string.IsNullOrEmpty(sample.Code))

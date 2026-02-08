@@ -497,26 +497,6 @@ public class AcpInteropTests : IDisposable
     }
 
     /// <summary>
-    /// Read all stdout from a process, with cancellation support.
-    /// </summary>
-    private static async Task<string> ReadProcessStdout(Process process, CancellationTokenSource cts)
-    {
-        try
-        {
-            var output = await process.StandardOutput.ReadToEndAsync(cts.Token);
-            if (!process.HasExited)
-            {
-                await process.WaitForExitAsync(cts.Token);
-            }
-            return output;
-        }
-        catch (OperationCanceledException)
-        {
-            return "";
-        }
-    }
-
-    /// <summary>
     /// Wait for the TS client process to exit. The result is written to stderr.
     /// </summary>
     private static async Task WaitForTsClientExit(DotNetAgentContext ctx)

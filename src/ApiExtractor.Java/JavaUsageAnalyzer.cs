@@ -57,7 +57,7 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             // Parse the JSON output
             var result = DeserializeResult(output);
 
-            if (result == null)
+            if (result is null)
                 return new UsageIndex { FileCount = 0 };
 
             return new UsageIndex
@@ -198,7 +198,7 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 var ifaceName = iface.Split('<')[0];
                 if (!interfaceImplementers.TryGetValue(ifaceName, out var list))
                 {
-                    list = new List<ClassInfo>();
+                    list = [];
                     interfaceImplementers[ifaceName] = list;
                 }
                 list.Add(cls);

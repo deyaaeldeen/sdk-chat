@@ -520,7 +520,7 @@ public sealed class PackageInfoService : IPackageInfoService
         };
 
         // Potential monorepo package roots to search
-        var searchRoots = new List<string>();
+        List<string> searchRoots = [];
 
         // Check for common monorepo structures
         var sdkDir = Path.Combine(rootPath, "sdk");

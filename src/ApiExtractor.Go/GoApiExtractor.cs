@@ -200,11 +200,11 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             Directory.CreateDirectory(cacheDir);
 
             var binaryName = OperatingSystem.IsWindows() ? $"extractor_{hash}.exe" : $"extractor_{hash}";
-            
+
             // SECURITY: Validate binary name to prevent path traversal attacks
             // Even though hash is hex-safe, be defensive against future code changes
             ToolPathResolver.ValidateSafeInput(binaryName, nameof(binaryName), allowPath: false);
-            
+
             var binaryPath = Path.Combine(cacheDir, binaryName);
 
             if (File.Exists(binaryPath))

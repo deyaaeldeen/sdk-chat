@@ -64,7 +64,7 @@ public static class CSharpFormatter
             .Where(t => uncoveredByClient.ContainsKey(t.Name))
             .ToList();
 
-        var neededTypes = new HashSet<string>();
+        HashSet<string> neededTypes = [];
         foreach (var t in typesWithUncovered)
         {
             neededTypes.Add(t.Name);
@@ -78,7 +78,7 @@ public static class CSharpFormatter
         {
             typesByName.TryAdd(t.Name, t);
         }
-        var includedTypes = new HashSet<string>();
+        HashSet<string> includedTypes = [];
         var currentLength = sb.Length;
 
         // Include types with uncovered operations first, then their dependencies
@@ -150,7 +150,7 @@ public static class CSharpFormatter
         var orderedTypes = GetPrioritizedTypes(allTypes, allTypeNames);
 
         // Track what we've included
-        var includedTypes = new HashSet<string>();
+        HashSet<string> includedTypes = [];
         var currentLength = sb.Length;
 
         // Include types by priority, pulling in dependencies
@@ -160,7 +160,7 @@ public static class CSharpFormatter
                 continue;
 
             // Calculate size of this type + its dependencies
-            var typesToAdd = new List<TypeInfo> { type };
+            List<TypeInfo> typesToAdd = [type];
             var deps = type.GetReferencedTypes(allTypeNames);
             foreach (var depName in deps)
             {
@@ -189,9 +189,9 @@ public static class CSharpFormatter
         if (index.Dependencies?.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine($"// {new string('=', 77)}");
             sb.AppendLine("// Dependency Types (from external packages)");
-            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine($"// {new string('=', 77)}");
             sb.AppendLine();
 
             foreach (var dep in index.Dependencies)
@@ -219,7 +219,7 @@ public static class CSharpFormatter
     {
         // Get clients and their dependencies first
         var clients = allTypes.Where(t => t.IsClientType).ToList();
-        var clientDeps = new HashSet<string>();
+        HashSet<string> clientDeps = [];
         foreach (var client in clients)
         {
             foreach (var dep in client.GetReferencedTypes(allTypeNames))
@@ -366,7 +366,7 @@ public static class CSharpFormatter
         if (!string.IsNullOrEmpty(member.Doc))
             sb.AppendLine($"{indent}/// <summary>{EscapeXml(member.Doc)}</summary>");
 
-        var modifiers = new List<string> { "public" };
+        List<string> modifiers = ["public"];
         if (member.IsStatic == true) modifiers.Add("static");
         if (member.IsAsync == true && member.Kind == "method") modifiers.Add("async");
 
@@ -400,7 +400,7 @@ public static class CSharpFormatter
 
     private static string BuildInheritance(TypeInfo type)
     {
-        var parts = new List<string>();
+        List<string> parts = [];
         if (!string.IsNullOrEmpty(type.Base))
             parts.Add(type.Base);
         if (type.Interfaces?.Count > 0)

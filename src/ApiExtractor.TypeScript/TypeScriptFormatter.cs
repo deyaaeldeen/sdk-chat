@@ -55,7 +55,7 @@ public static class TypeScriptFormatter
         var allClasses = index.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
-        var includedClasses = new HashSet<string>();
+        HashSet<string> includedClasses = [];
         var currentLength = sb.Length;
 
         foreach (var cls in classesWithUncovered)
@@ -116,7 +116,7 @@ public static class TypeScriptFormatter
         var allFunctions = index.Modules.SelectMany(m => m.Functions ?? []).ToList();
 
         // Build set of all type names for dependency tracking
-        var allTypeNames = new HashSet<string>();
+        HashSet<string> allTypeNames = [];
         foreach (var c in allClasses) allTypeNames.Add(c.Name);
         foreach (var i in allInterfaces) allTypeNames.Add(i.Name);
         foreach (var e in allEnums) allTypeNames.Add(e.Name);
@@ -130,7 +130,7 @@ public static class TypeScriptFormatter
         }
 
         // Group entry points by export path
-        var exportPaths = new HashSet<string>();
+        HashSet<string> exportPaths = [];
         foreach (var cls in allClasses.Where(c => c.ExportPath != null))
             exportPaths.Add(cls.ExportPath!);
         foreach (var iface in allInterfaces.Where(i => i.ExportPath != null))
@@ -145,7 +145,7 @@ public static class TypeScriptFormatter
 
         int totalItems = allClasses.Count + allInterfaces.Count + allEnums.Count + allTypes.Count + allFunctions.Count;
         int includedItems = 0;
-        var includedTypeNames = new HashSet<string>();
+        HashSet<string> includedTypeNames = [];
 
         // Format by export path sections if we have multiple paths
         if (sortedExportPaths.Count > 1)
@@ -398,8 +398,8 @@ public static class TypeScriptFormatter
 
     private static List<ClassInfo> GetPrioritizedClasses(List<ClassInfo> classes, Dictionary<string, HashSet<string>> deps)
     {
-        var result = new List<ClassInfo>();
-        var added = new HashSet<string>();
+        List<ClassInfo> result = [];
+        HashSet<string> added = [];
 
         // Add client classes first (priority 0)
         var clientClasses = classes.Where(c => c.IsClientType).OrderBy(c => c.Name).ToList();

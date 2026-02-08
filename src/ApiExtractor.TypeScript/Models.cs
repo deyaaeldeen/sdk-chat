@@ -153,7 +153,7 @@ public sealed record ClassInfo
     /// <summary>Gets type names referenced in method signatures and properties.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        var refs = new HashSet<string>();
+        HashSet<string> refs = [];
 
         if (!string.IsNullOrEmpty(Extends))
         {

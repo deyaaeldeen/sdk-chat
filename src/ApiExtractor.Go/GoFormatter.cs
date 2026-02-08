@@ -56,7 +56,7 @@ public static class GoFormatter
         var allStructs = index.GetAllStructs().ToList();
         var structsWithUncovered = allStructs.Where(s => uncoveredByClient.ContainsKey(s.Name)).ToList();
 
-        var includedStructs = new HashSet<string>();
+        HashSet<string> includedStructs = [];
         var currentLength = sb.Length;
 
         foreach (var st in structsWithUncovered)
@@ -119,7 +119,7 @@ public static class GoFormatter
 
         // Get client dependencies first
         var clients = allStructs.Where(s => s.IsClientType).ToList();
-        var clientDeps = new HashSet<string>();
+        HashSet<string> clientDeps = [];
         foreach (var client in clients)
             foreach (var dep in client.GetReferencedTypes(allTypeNames))
                 clientDeps.Add(dep);
@@ -135,7 +135,7 @@ public static class GoFormatter
             .ThenBy(s => s.Name)
             .ToList();
 
-        var includedStructs = new HashSet<string>();
+        HashSet<string> includedStructs = [];
         var currentLength = sb.Length;
 
         foreach (var pkg in index.Packages ?? [])
@@ -202,7 +202,7 @@ public static class GoFormatter
                     continue;
 
                 // Include struct + dependencies
-                var structsToAdd = new List<StructApi> { s };
+                List<StructApi> structsToAdd = [s];
                 var deps = s.GetReferencedTypes(allTypeNames);
                 foreach (var depName in deps)
                 {
@@ -242,9 +242,9 @@ public static class GoFormatter
         if (index.Dependencies?.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine($"// {new string('=', 77)}");
             sb.AppendLine("// Dependency Types (from external modules)");
-            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine($"// {new string('=', 77)}");
             sb.AppendLine();
 
             foreach (var dep in index.Dependencies)

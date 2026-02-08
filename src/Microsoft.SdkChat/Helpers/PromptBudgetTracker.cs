@@ -9,7 +9,7 @@ public sealed class PromptBudgetTracker
     private readonly int _total;
     private readonly int _reserved;
     private int _consumed;
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     public PromptBudgetTracker(int totalBudget, int reserved = 0)
     {

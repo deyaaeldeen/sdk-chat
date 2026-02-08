@@ -182,7 +182,7 @@ public static partial class ToolPathResolver
             }
 
             using var process = Process.Start(psi);
-            if (process == null) return false;
+            if (process is null) return false;
 
             process.WaitForExit(3000);
             return process.ExitCode == 0;
@@ -220,7 +220,7 @@ public static partial class ToolPathResolver
             psi.ArgumentList.Add(command);
 
             using var process = Process.Start(psi);
-            if (process == null) return null;
+            if (process is null) return null;
 
             var output = process.StandardOutput.ReadToEnd();
             process.WaitForExit(1000);
