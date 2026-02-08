@@ -237,7 +237,7 @@ public class ExtractApi {
 
                 String relPath = samplesPath.relativize(file).toString().replace('\\', '/');
 
-                // Build variable → client type map for this file
+                // Build variable -> client type map for this file
                 Map<String, String> varTypes = buildVarTypeMap(cu, clientNames, methodReturnTypeMap, fieldTypeMap);
 
                 // Find method calls using AST - resolve receiver type via var tracking first
@@ -257,7 +257,7 @@ public class ExtractApi {
                             }
                         }
 
-                        // Strategy 1b: Chained call — receiver.getSubClient().method()
+                        // Strategy 1b: Chained call -- receiver.getSubClient().method()
                         if (resolvedClient == null && scope instanceof MethodCallExpr) {
                             MethodCallExpr innerCall = (MethodCallExpr) scope;
                             String innerMethodName = innerCall.getNameAsString();
@@ -298,7 +298,7 @@ public class ExtractApi {
                     }
                 });
 
-                // Detect patterns using purely structural AST analysis — no keyword matching
+                // Detect patterns using purely structural AST analysis -- no keyword matching
                 cu.walk(Node.class, node -> {
                     if (node instanceof com.github.javaparser.ast.stmt.TryStmt) patterns.add("error-handling");
                     if (node instanceof com.github.javaparser.ast.expr.LambdaExpr) patterns.add("async-callback");
@@ -309,7 +309,7 @@ public class ExtractApi {
             }
         }
 
-        // Build bidirectional interface ↔ implementation mapping for coverage cross-referencing
+        // Build bidirectional interface <-> implementation mapping for coverage cross-referencing
         Map<String, List<String>> ifaceToImplNames = new HashMap<>();
         Map<String, List<String>> implToIfaceNames = new HashMap<>();
         for (JsonObject cls : allClasses) {
@@ -373,12 +373,12 @@ public class ExtractApi {
     }
 
     // =========================================================================
-    // Variable Tracking — API-data-driven type resolution
+    // Variable Tracking -- API-data-driven type resolution
     // =========================================================================
 
     /**
      * Unwrap Java async/wrapper return types.
-     * E.g., "CompletableFuture&lt;BlobClient&gt;" → "BlobClient", "Mono&lt;BlobClient&gt;" → "BlobClient"
+     * E.g., "CompletableFuture&lt;BlobClient&gt;" -> "BlobClient", "Mono&lt;BlobClient&gt;" -> "BlobClient"
      */
     private static String unwrapJavaReturnType(String ret) {
         if (ret == null || ret.isEmpty()) return "";
@@ -394,7 +394,7 @@ public class ExtractApi {
     }
 
     /**
-     * Build a map of "OwnerType.MethodName" → return type from API method data,
+     * Build a map of "OwnerType.MethodName" -> return type from API method data,
      * only for methods that return a known client type.
      */
     private static Map<String, String> buildMethodReturnTypeMap(List<JsonObject> usageClasses, Set<String> clientNames) {
@@ -413,7 +413,7 @@ public class ExtractApi {
                     }
                 }
             }
-            // Also check constructors — they return the class type itself
+            // Also check constructors -- they return the class type itself
             JsonArray constructors = cls.getAsJsonArray("constructors");
             if (constructors != null) {
                 for (JsonElement cEl : constructors) {
@@ -429,7 +429,7 @@ public class ExtractApi {
     }
 
     /**
-     * Build a map of "OwnerType.FieldName" → client type from API field data,
+     * Build a map of "OwnerType.FieldName" -> client type from API field data,
      * for fields whose type is a known client type.
      */
     private static Map<String, String> buildFieldTypeMap(List<JsonObject> usageClasses, Set<String> clientNames) {
@@ -450,15 +450,15 @@ public class ExtractApi {
     }
 
     /**
-     * Build a variable → client type map for a compilation unit.
+     * Build a variable -> client type map for a compilation unit.
      *
      * Tracks patterns:
-     *   - BlobClient client = new BlobClient(...)    → client maps to BlobClient
-     *   - var client = new BlobClient(...)            → client maps to BlobClient
-     *   - BlobClient client = svc.getBlobClient(...)  → client maps to BlobClient (via method return type map)
-     *   - BlobClient client = BlobClientBuilder.build() → client maps to BlobClient
+     *   - BlobClient client = new BlobClient(...)    -> client maps to BlobClient
+     *   - var client = new BlobClient(...)            -> client maps to BlobClient
+     *   - BlobClient client = svc.getBlobClient(...)  -> client maps to BlobClient (via method return type map)
+     *   - BlobClient client = BlobClientBuilder.build() -> client maps to BlobClient
      *
-     * All type resolution is driven by API index data — no name-based heuristics.
+     * All type resolution is driven by API index data -- no name-based heuristics.
      */
     @SuppressWarnings("unchecked")
     private static Map<String, String> buildVarTypeMap(CompilationUnit cu, Set<String> clientNames,
