@@ -16,9 +16,6 @@ namespace Microsoft.SdkChat.Services;
 /// </summary>
 public static partial class SensitiveDataScrubber
 {
-    // Compiled regex patterns for common secret formats
-    // Using source generators for performance (Regex attribute)
-
     /// <summary>OpenAI API keys: sk-... or sk-proj-...</summary>
     [GeneratedRegex(@"sk-(?:proj-)?[a-zA-Z0-9]{20,}", RegexOptions.Compiled)]
     private static partial Regex OpenAiKeyPattern();
@@ -203,6 +200,208 @@ public class AiDebugLogger
         _logger.LogDebug("Wrote debug log to {FilePath}", session.FilePath);
     }
 
+    /// <summary>
+    /// Complete a debug session using response chunks that were streamed to disk
+    /// via <see cref="AiDebugSession.AppendResponseChunk"/>.
+    /// Avoids holding the full response in memory.
+    /// </summary>
+    public async Task CompleteSessionFromStreamAsync(
+        AiDebugSession session,
+        bool streaming,
+        int? promptTokens = null,
+        int? completionTokens = null,
+        Exception? error = null)
+    {
+        if (!_enabled || session.FilePath == null) return;
+
+        // Flush any buffered chunks to disk
+        await session.FlushResponseStreamAsync();
+        await session.DisposeAsync();
+
+        session.Streaming = streaming;
+        session.PromptTokens = promptTokens;
+        session.CompletionTokens = completionTokens;
+        session.Error = error;
+        session.EndTime = DateTime.UtcNow;
+
+        // Write the markdown file, reading the response from the temp file
+        await using var writer = new StreamWriter(session.FilePath, false, Encoding.UTF8);
+        await WriteMarkdownFromStreamAsync(writer, session);
+
+        // Clean up the temporary response file
+        if (session.ResponseChunkFile != null && File.Exists(session.ResponseChunkFile))
+        {
+            try { File.Delete(session.ResponseChunkFile); }
+            catch { /* best-effort cleanup */ }
+        }
+
+        _logger.LogDebug("Wrote debug log to {FilePath}", session.FilePath);
+    }
+
+    /// <summary>
+    /// Writes the markdown debug log, reading the response section from the temp chunk file
+    /// instead of from an in-memory string.
+    /// </summary>
+    private static async Task WriteMarkdownFromStreamAsync(StreamWriter writer, AiDebugSession session)
+    {
+        // Write everything except the response section using the existing method
+        // by temporarily setting Response to a placeholder
+        var responseLength = session.ResponseCharsWritten;
+
+        // Header
+        await writer.WriteLineAsync($"# AI Debug Log: {session.SessionId}");
+        await writer.WriteLineAsync();
+        await writer.WriteLineAsync($"**Generated:** {session.StartTime:yyyy-MM-dd HH:mm:ss} UTC");
+        await writer.WriteLineAsync();
+
+        // Summary Table
+        await writer.WriteLineAsync("## Summary");
+        await writer.WriteLineAsync();
+        await writer.WriteLineAsync("| Property | Value |");
+        await writer.WriteLineAsync("|----------|-------|");
+        await writer.WriteLineAsync($"| Provider | {session.Provider} |");
+        await writer.WriteLineAsync($"| Model | {session.Model} |");
+        await writer.WriteLineAsync($"| Endpoint | {session.Endpoint ?? "(default)"} |");
+        await writer.WriteLineAsync($"| Streaming | {session.Streaming} |");
+        await writer.WriteLineAsync($"| Duration | {(session.EndTime - session.StartTime)?.TotalMilliseconds:F0}ms |");
+        await writer.WriteLineAsync($"| Status | {(session.Error == null ? "✅ Success" : "❌ Error")} |");
+        await writer.WriteLineAsync();
+
+        // Token usage if available
+        if (session.PromptTokens.HasValue || session.CompletionTokens.HasValue)
+        {
+            await writer.WriteLineAsync("### Token Usage");
+            await writer.WriteLineAsync();
+            await writer.WriteLineAsync("| Type | Count |");
+            await writer.WriteLineAsync("|------|-------|");
+            if (session.PromptTokens.HasValue)
+                await writer.WriteLineAsync($"| Prompt Tokens | {session.PromptTokens:N0} |");
+            if (session.CompletionTokens.HasValue)
+                await writer.WriteLineAsync($"| Completion Tokens | {session.CompletionTokens:N0} |");
+            if (session.PromptTokens.HasValue && session.CompletionTokens.HasValue)
+                await writer.WriteLineAsync($"| **Total** | **{session.PromptTokens + session.CompletionTokens:N0}** |");
+            await writer.WriteLineAsync();
+        }
+
+        // Context Information
+        if (session.ContextInfo != null)
+        {
+            await writer.WriteLineAsync("## Context Files");
+            await writer.WriteLineAsync();
+
+            if (session.ContextInfo.Files.Count > 0)
+            {
+                await writer.WriteLineAsync("| File | Size | Status |");
+                await writer.WriteLineAsync("|------|------|--------|");
+
+                foreach (var file in session.ContextInfo.Files.OrderByDescending(f => f.OriginalSize))
+                {
+                    var status = file.WasTruncated
+                        ? $"⚠️ Truncated ({file.TruncatedSize:N0}/{file.OriginalSize:N0} chars, {file.TruncationPercent:F0}%)"
+                        : "✅ Full";
+                    await writer.WriteLineAsync($"| `{file.RelativePath}` | {FormatBytes(file.OriginalSize)} | {status} |");
+                }
+                await writer.WriteLineAsync();
+            }
+
+            await writer.WriteLineAsync("### Context Statistics");
+            await writer.WriteLineAsync();
+            await writer.WriteLineAsync($"- **Total Files:** {session.ContextInfo.TotalFiles}");
+            await writer.WriteLineAsync($"- **Files Included:** {session.ContextInfo.FilesIncluded}");
+            await writer.WriteLineAsync($"- **Files Truncated:** {session.ContextInfo.FilesTruncated}");
+            await writer.WriteLineAsync($"- **Files Skipped:** {session.ContextInfo.FilesSkipped}");
+            await writer.WriteLineAsync($"- **Total Context Size:** {FormatBytes(session.ContextInfo.TotalContextSize)}");
+            await writer.WriteLineAsync($"- **Max Context Size:** {FormatBytes(session.ContextInfo.MaxContextSize)}");
+            await writer.WriteLineAsync();
+        }
+
+        // System Prompt
+        await writer.WriteLineAsync("## System Prompt");
+        await writer.WriteLineAsync();
+        await writer.WriteLineAsync("```");
+        await writer.WriteLineAsync(SensitiveDataScrubber.Scrub(session.SystemPrompt));
+        await writer.WriteLineAsync("```");
+        await writer.WriteLineAsync();
+
+        // User Prompt
+        var scrubbedUserPrompt = SensitiveDataScrubber.Scrub(session.UserPrompt);
+        await writer.WriteLineAsync("## User Prompt");
+        await writer.WriteLineAsync();
+        await writer.WriteLineAsync($"**Length:** {session.UserPrompt.Length:N0} characters (~{EstimateTokens(session.UserPrompt):N0} tokens)");
+        await writer.WriteLineAsync();
+        await writer.WriteLineAsync("```");
+        await writer.WriteAsync(scrubbedUserPrompt);
+        await writer.WriteLineAsync();
+        await writer.WriteLineAsync("```");
+        await writer.WriteLineAsync();
+
+        // Response — stream from temp file instead of holding in memory
+        await writer.WriteLineAsync("## Response");
+        await writer.WriteLineAsync();
+
+        if (session.Error != null)
+        {
+            await writer.WriteLineAsync("### ❌ Error");
+            await writer.WriteLineAsync();
+            await writer.WriteLineAsync("```");
+            await writer.WriteLineAsync(SensitiveDataScrubber.Scrub(session.Error.ToString()));
+            await writer.WriteLineAsync("```");
+        }
+        else if (session.ResponseChunkFile != null && File.Exists(session.ResponseChunkFile))
+        {
+            await writer.WriteLineAsync($"**Length:** {responseLength:N0} characters (~{responseLength / 4:N0} tokens)");
+            await writer.WriteLineAsync();
+            await writer.WriteLineAsync("```");
+
+            // Stream from temp file in chunks — never load the full response into memory
+            const int ReadBufferSize = 8192;
+            var buffer = new char[ReadBufferSize];
+            using var reader = new StreamReader(session.ResponseChunkFile, Encoding.UTF8);
+            int charsRead;
+            while ((charsRead = await reader.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            {
+                var chunk = new string(buffer, 0, charsRead);
+                await writer.WriteAsync(SensitiveDataScrubber.Scrub(chunk));
+            }
+
+            await writer.WriteLineAsync();
+            await writer.WriteLineAsync("```");
+        }
+        else
+        {
+            await writer.WriteLineAsync("**Length:** 0 characters");
+            await writer.WriteLineAsync();
+            await writer.WriteLineAsync("```");
+            await writer.WriteLineAsync("(empty)");
+            await writer.WriteLineAsync("```");
+        }
+        await writer.WriteLineAsync();
+
+        // Request Details
+        await writer.WriteLineAsync("## Request Details");
+        await writer.WriteLineAsync();
+        await writer.WriteLineAsync("```json");
+        var details = new DebugRequestDetails
+        {
+            Provider = session.Provider,
+            Model = session.Model,
+            Endpoint = session.Endpoint ?? "(default)",
+            Streaming = session.Streaming,
+            SystemPromptHash = ComputeHash(session.SystemPrompt),
+            UserPromptHash = ComputeHash(session.UserPrompt),
+            UserPromptLength = session.UserPrompt.Length,
+            ResponseHash = "(streamed)",
+            ResponseLength = (int)responseLength,
+            DurationMs = (session.EndTime - session.StartTime)?.TotalMilliseconds
+        };
+        await writer.WriteLineAsync(JsonSerializer.Serialize(details, DebugJsonContext.Default.DebugRequestDetails));
+        await writer.WriteLineAsync("```");
+        await writer.WriteLineAsync();
+
+        await writer.WriteLineAsync("---");
+        await writer.WriteLineAsync($"*Debug log generated by SDK Chat v1.0.0*");
+    }
+
     private static async Task WriteMarkdownAsync(StreamWriter writer, AiDebugSession session)
     {
         // Header
@@ -371,7 +570,7 @@ public class AiDebugLogger
 /// <summary>
 /// Represents an active debug session for tracking request/response.
 /// </summary>
-public class AiDebugSession
+public class AiDebugSession : IAsyncDisposable
 {
     public string? SessionId { get; }
     public string? FilePath { get; }
@@ -392,12 +591,80 @@ public class AiDebugSession
     public int? CompletionTokens { get; set; }
     public Exception? Error { get; set; }
 
+    /// <summary>
+    /// Path to a temporary file that accumulates raw response chunks on disk.
+    /// Null when debug logging is disabled.
+    /// </summary>
+    internal string? ResponseChunkFile { get; }
+
+    /// <summary>
+    /// Writer for streaming response chunks to disk. Opened lazily on first write.
+    /// </summary>
+    private StreamWriter? _responseWriter;
+    private readonly object _writerLock = new();
+
+    /// <summary>
+    /// Total characters written to the response stream.
+    /// Updated atomically; safe to read from any thread.
+    /// </summary>
+    public long ResponseCharsWritten => Interlocked.Read(ref _responseCharsWritten);
+    private long _responseCharsWritten;
+
+    /// <summary>
+    /// Whether this session is actively recording response chunks to disk.
+    /// </summary>
+    public bool IsRecording => ResponseChunkFile != null;
+
     public AiDebugSession(string? debugDir, string? sessionId)
     {
         SessionId = sessionId;
         FilePath = sessionId != null && debugDir != null
             ? Path.Combine(debugDir, $"{sessionId}.md")
             : null;
+        ResponseChunkFile = FilePath != null
+            ? FilePath + ".response.tmp"
+            : null;
+    }
+
+    /// <summary>
+    /// Append a response chunk to the temporary file on disk.
+    /// No-op if this session is not recording.
+    /// </summary>
+    internal void AppendResponseChunk(string chunk)
+    {
+        if (ResponseChunkFile == null || string.IsNullOrEmpty(chunk))
+            return;
+
+        lock (_writerLock)
+        {
+            _responseWriter ??= new StreamWriter(ResponseChunkFile, append: true, Encoding.UTF8)
+            {
+                AutoFlush = false // Buffer writes; OS will flush on close
+            };
+            _responseWriter.Write(chunk);
+            Interlocked.Add(ref _responseCharsWritten, chunk.Length);
+        }
+    }
+
+    /// <summary>
+    /// Flush and close the response chunk writer.
+    /// </summary>
+    internal async Task FlushResponseStreamAsync()
+    {
+        if (_responseWriter != null)
+        {
+            await _responseWriter.FlushAsync();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_responseWriter != null)
+        {
+            await _responseWriter.DisposeAsync();
+            _responseWriter = null;
+        }
+        GC.SuppressFinalize(this);
     }
 }
 

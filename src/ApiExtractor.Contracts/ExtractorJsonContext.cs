@@ -32,7 +32,6 @@ namespace ApiExtractor.Contracts;
 [JsonSerializable(typeof(List<UncoveredOp>))]
 [JsonSerializable(typeof(List<string>))]
 
-// Python raw API models
 [JsonSerializable(typeof(RawPythonApiIndex))]
 [JsonSerializable(typeof(RawPythonModule))]
 [JsonSerializable(typeof(RawPythonClass))]
@@ -85,20 +84,17 @@ public sealed record UncoveredOp(
 
 #region Python Raw API Models
 
-/// <summary>Raw Python API index from extractor script.</summary>
 public sealed record RawPythonApiIndex(
     [property: JsonPropertyName("package")] string? Package,
     [property: JsonPropertyName("modules")] List<RawPythonModule>? Modules
 );
 
-/// <summary>Raw Python module.</summary>
 public sealed record RawPythonModule(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("classes")] List<RawPythonClass>? Classes,
     [property: JsonPropertyName("functions")] List<RawPythonFunction>? Functions
 );
 
-/// <summary>Raw Python class.</summary>
 public sealed record RawPythonClass(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("base")] string? Base,
@@ -107,7 +103,6 @@ public sealed record RawPythonClass(
     [property: JsonPropertyName("properties")] List<RawPythonProperty>? Properties
 );
 
-/// <summary>Raw Python method.</summary>
 public sealed record RawPythonMethod(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("sig")] string? Sig,
@@ -117,14 +112,12 @@ public sealed record RawPythonMethod(
     [property: JsonPropertyName("staticmethod")] bool? Staticmethod
 );
 
-/// <summary>Raw Python property.</summary>
 public sealed record RawPythonProperty(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("type")] string? Type,
     [property: JsonPropertyName("doc")] string? Doc
 );
 
-/// <summary>Raw Python function.</summary>
 public sealed record RawPythonFunction(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("sig")] string? Sig,

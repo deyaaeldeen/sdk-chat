@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 using AgentClientProtocol.Sdk.JsonRpc;
 using AgentClientProtocol.Sdk.Stream;
 using Xunit;

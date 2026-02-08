@@ -72,6 +72,8 @@ public class AiService : IAiService
         AiStreamCompleteCallback? onStreamComplete = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        ObjectDisposedException.ThrowIf(_disposed == 1, this);
+
         // Acquire rate limit permit - throws RateLimiterRejectedException if queue is full
         using var lease = await _rateLimiter.AcquireAsync(1, cancellationToken);
         if (!lease.IsAcquired)
@@ -83,11 +85,19 @@ public class AiService : IAiService
         var effectiveModel = _options.GetEffectiveModel(model);
         using var activity = Telemetry.SdkChatTelemetry.StartPrompt(sessionId, effectiveModel);
 
-        // Materialize the streamed prompt (APIs require full prompt upfront)
+        // Materialize the streamed prompt (APIs require full prompt upfront).
+        // Hard cap prevents unbounded memory growth from runaway prompt streams.
+        const int MaxPromptChars = 10 * 1024 * 1024; // 10M chars (~2.5M tokens)
         var promptBuilder = new StringBuilder();
         await foreach (var chunk in userPromptStream.WithCancellation(cancellationToken))
         {
             promptBuilder.Append(chunk);
+            if (promptBuilder.Length > MaxPromptChars)
+            {
+                throw new InvalidOperationException(
+                    $"User prompt exceeded maximum allowed size of {MaxPromptChars:N0} characters. " +
+                    "Reduce the context budget or SDK scope.");
+            }
         }
         var userPrompt = promptBuilder.ToString();
 
@@ -114,7 +124,6 @@ public class AiService : IAiService
             await onPromptReady(new AiPromptReadyEventArgs(promptChars, estimatedTokens));
         }
 
-        // Start debug session
         var debugSession = _debugLogger.StartSession(
             provider,
             effectiveModel,
@@ -122,15 +131,15 @@ public class AiService : IAiService
             enhancedSystemPrompt,
             userPrompt,
             contextInfo);
-
-        var responseBuilder = new StringBuilder();
+        await using (debugSession)
+        {
         var itemCount = 0;
         var startTime = DateTime.UtcNow;
 
         IAsyncEnumerable<string> stream = StreamCopilotAsync(enhancedSystemPrompt, userPrompt, effectiveModel, cancellationToken);
 
         await using var enumerator = NdjsonStreamParser
-            .ParseAsync(TapStreamAsync(stream, responseBuilder, cancellationToken), jsonTypeInfo, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
+            .ParseAsync(TapStreamAsync(stream, debugSession, cancellationToken), jsonTypeInfo, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
             .GetAsyncEnumerator(cancellationToken);
 
         while (true)
@@ -148,8 +157,8 @@ public class AiService : IAiService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "AI stream failed after {Duration}ms with {ResponseChars} chars received",
-                    (DateTime.UtcNow - startTime).TotalMilliseconds, responseBuilder.Length);
-                await _debugLogger.CompleteSessionAsync(debugSession, responseBuilder.ToString(), streaming: true, error: ex);
+                    (DateTime.UtcNow - startTime).TotalMilliseconds, debugSession.ResponseCharsWritten);
+                await _debugLogger.CompleteSessionFromStreamAsync(debugSession, streaming: true, error: ex);
                 throw;
             }
 
@@ -158,26 +167,32 @@ public class AiService : IAiService
         }
 
         // Invoke async stream complete callback with response usage
-        var responseChars = responseBuilder.Length;
-        var estimatedResponseTokens = responseChars / SampleConstants.CharsPerToken;
+        var responseChars = debugSession.ResponseCharsWritten;
+        var estimatedResponseTokens = (int)(responseChars / SampleConstants.CharsPerToken);
         var duration = DateTime.UtcNow - startTime;
 
         if (onStreamComplete != null)
         {
-            await onStreamComplete(new AiStreamCompleteEventArgs(responseChars, estimatedResponseTokens, duration));
+            await onStreamComplete(new AiStreamCompleteEventArgs((int)responseChars, estimatedResponseTokens, duration));
         }
 
-        await _debugLogger.CompleteSessionAsync(debugSession, responseBuilder.ToString(), streaming: true);
+        await _debugLogger.CompleteSessionFromStreamAsync(debugSession, streaming: true);
+        } // await using debugSession
     }
 
+    /// <summary>
+    /// Passes stream chunks through, writing each to the debug session's disk-backed
+    /// response file. When debug is disabled (session.IsRecording == false), this is
+    /// a zero-allocation pass-through — no StringBuilder, no buffering.
+    /// </summary>
     private static async IAsyncEnumerable<string> TapStreamAsync(
         IAsyncEnumerable<string> stream,
-        StringBuilder responseBuilder,
+        AiDebugSession debugSession,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await foreach (var chunk in stream.WithCancellation(cancellationToken))
         {
-            responseBuilder.Append(chunk);
+            debugSession.AppendResponseChunk(chunk);
             yield return chunk;
         }
     }
@@ -260,7 +275,6 @@ public class AiService : IAiService
             return $"[{GetJsonType(elementType, indentLevel, visitedTypes)}]";
         }
 
-        // Dictionary<string, T>
         if (underlying.IsGenericType && underlying.GetGenericTypeDefinition() == typeof(Dictionary<,>))
         {
             var keyType = underlying.GetGenericArguments()[0];

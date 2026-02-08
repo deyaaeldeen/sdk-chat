@@ -53,7 +53,6 @@ public static class GoFormatter
         sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
 
-        // Format only structs that have uncovered operations
         var allStructs = index.GetAllStructs().ToList();
         var structsWithUncovered = allStructs.Where(s => uncoveredByClient.ContainsKey(s.Name)).ToList();
 
@@ -182,7 +181,6 @@ public static class GoFormatter
                 sb.AppendLine();
             }
 
-            // Interfaces
             foreach (var iface in pkg.Interfaces ?? [])
             {
                 if (!string.IsNullOrEmpty(iface.Doc))

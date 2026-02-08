@@ -47,7 +47,6 @@ internal static class DotEnv
 
                 var value = line[(equalsIndex + 1)..].Trim();
 
-                // Strip surrounding quotes.
                 if (value.Length >= 2)
                 {
                     if ((value[0] == '"' && value[^1] == '"') || (value[0] == '\'' && value[^1] == '\''))
@@ -65,7 +64,7 @@ internal static class DotEnv
                 Environment.SetEnvironmentVariable(key, value);
             }
         }
-        catch
+        catch (Exception)
         {
             // Best-effort. Avoid failing startup due to local .env issues.
         }

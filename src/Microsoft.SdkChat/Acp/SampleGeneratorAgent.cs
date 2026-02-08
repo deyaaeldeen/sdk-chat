@@ -8,6 +8,7 @@ using AgentClientProtocol.Sdk.JsonRpc;
 using AgentClientProtocol.Sdk.Schema;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.SdkChat.Configuration;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
@@ -28,8 +29,12 @@ namespace Microsoft.SdkChat.Acp;
 /// </summary>
 public sealed class SampleGeneratorAgent(
     IServiceProvider services,
-    ILogger<SampleGeneratorAgent> logger) : IAgent
+    ILogger<SampleGeneratorAgent> logger,
+    int maxSessions = SdkChatOptions.DefaultMaxAcpSessions) : IAgent
 {
+    /// <summary>Maximum concurrent sessions to prevent memory exhaustion from misbehaving clients.</summary>
+    private readonly int _maxSessions = maxSessions;
+
     private readonly ConcurrentDictionary<string, AgentSessionState> _sessions = new();
     private AgentSideConnection? _currentConnection;
 
@@ -58,6 +63,13 @@ public sealed class SampleGeneratorAgent(
 
     public Task<NewSessionResponse> NewSessionAsync(NewSessionRequest request, CancellationToken ct = default)
     {
+        // Guard against unbounded session creation (DoS protection)
+        if (_sessions.Count >= _maxSessions)
+        {
+            throw RequestError.InternalError(null,
+                $"Maximum session limit ({_maxSessions}) reached. Close existing sessions before creating new ones.");
+        }
+
         var sessionId = $"sess_{Guid.NewGuid():N}";
 
         var state = new AgentSessionState
@@ -329,7 +341,7 @@ public sealed class SampleGeneratorAgent(
         }
 
         // Write samples to disk
-        var outputFolder = session.OutputFolder!;
+        var outputFolder = Path.GetFullPath(session.OutputFolder!);
         var language = SdkLanguageHelpers.Parse(session.SourceResult!.Language!);
         var fileExtension = GetFileExtension(language);
         var writtenFiles = new List<string>();
@@ -349,8 +361,9 @@ public sealed class SampleGeneratorAgent(
 
             var filePath = Path.GetFullPath(Path.Combine(outputFolder, relativePath));
 
-            // Security: ensure path stays within output directory
-            if (!filePath.StartsWith(outputFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            // Security: ensure path stays within output directory (normalize separators)
+            var normalizedOutput = outputFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (!filePath.StartsWith(normalizedOutput + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogWarning("Skipping sample with path outside output directory: {Path}", filePath);
                 continue;

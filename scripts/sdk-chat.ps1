@@ -124,13 +124,17 @@ if ($FirstArg -eq "mcp") {
         }
     }
 
-    # For MCP SSE, expose port
-    if ($ArgsString -match "--transport[=\s]+sse") {
+    # For MCP SSE/HTTP, expose port and bind to 0.0.0.0 inside the container
+    if ($ArgsString -match "--transport[=\s]+(sse|http)") {
         $Port = "8080"
         if ($ArgsString -match "--port[=\s]+(\d+)") {
             $Port = $Matches[1]
         }
         $DockerArgs += @("-p", "${Port}:${Port}")
+        # Add --bind 0.0.0.0 if not already specified
+        if ($ArgsString -notmatch "--bind") {
+            $Arguments += @("--bind", "0.0.0.0")
+        }
     }
 }
 

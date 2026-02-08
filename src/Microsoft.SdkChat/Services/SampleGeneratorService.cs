@@ -49,6 +49,7 @@ public sealed record SampleGenerationResult
     public int Count { get; init; }
     public string? OutputPath { get; init; }
     public string[] GeneratedFiles { get; init; } = [];
+    public string[] FailedFiles { get; init; } = [];
     public string? Language { get; init; }
     public int PromptTokens { get; init; }
     public int ResponseTokens { get; init; }
@@ -141,7 +142,7 @@ public class SampleGeneratorService(
 
             progress?.OnSdkScanned(sourceResult, samplesResult, existingSampleCount);
 
-            // Determine output path
+            // Determine output path — always normalize to absolute for containment checks
             var outputPath = Path.GetFullPath(options.OutputPath ?? samplesResult.SuggestedSamplesFolder);
 
             // Callbacks for AI service
@@ -176,6 +177,7 @@ public class SampleGeneratorService(
             // Generate samples
             List<GeneratedSample> samples = [];
             List<string> generatedFiles = [];
+            List<string> failedFiles = [];
 
             await foreach (var sample in aiService.StreamItemsAsync(
                 systemPrompt,
@@ -197,27 +199,46 @@ public class SampleGeneratorService(
                         : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
                     var filePath = Path.GetFullPath(Path.Combine(outputPath, relativePath));
 
-                    // Security: ensure path stays within output directory
-                    if (!filePath.StartsWith(outputPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                        && !filePath.Equals(outputPath, StringComparison.OrdinalIgnoreCase))
+                    // Security: ensure path stays within output directory.
+                    // Use normalized outputPath (already via GetFullPath above) with both
+                    // separator chars to prevent bypass on Windows where / and \ are both valid.
+                    var normalizedOutput = outputPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    var normalizedFile = filePath;
+                    if (!normalizedFile.StartsWith(normalizedOutput + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        && !normalizedFile.Equals(normalizedOutput, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
 
                     progress?.OnSampleGenerated(sample, filePath);
 
-                    // Write file unless dry run
+                    // Write file unless dry run — isolate IO failures so one bad write
+                    // doesn't destroy already-generated samples.
                     if (!options.DryRun)
                     {
-                        var fileDir = Path.GetDirectoryName(filePath);
-                        if (!string.IsNullOrEmpty(fileDir))
+                        try
                         {
-                            Directory.CreateDirectory(fileDir);
+                            var fileDir = Path.GetDirectoryName(filePath);
+                            if (!string.IsNullOrEmpty(fileDir))
+                            {
+                                Directory.CreateDirectory(fileDir);
+                            }
+                            await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken).ConfigureAwait(false);
+                            generatedFiles.Add(filePath);
                         }
-                        await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken).ConfigureAwait(false);
+                        catch (OperationCanceledException)
+                        {
+                            throw; // Propagate cancellation
+                        }
+                        catch (Exception)
+                        {
+                            failedFiles.Add(filePath);
+                        }
                     }
-
-                    generatedFiles.Add(filePath);
+                    else
+                    {
+                        generatedFiles.Add(filePath);
+                    }
                 }
             }
 
@@ -228,10 +249,13 @@ public class SampleGeneratorService(
 
             return new SampleGenerationResult
             {
-                Success = true,
+                Success = generatedFiles.Count > 0 || (options.DryRun && samples.Count > 0),
+                ErrorMessage = failedFiles.Count > 0 ? $"Failed to write {failedFiles.Count} file(s)." : null,
+                ErrorCode = failedFiles.Count > 0 ? "PARTIAL_FAILURE" : null,
                 Count = samples.Count,
                 OutputPath = outputPath,
                 GeneratedFiles = [.. generatedFiles],
+                FailedFiles = [.. failedFiles],
                 Language = effectiveLanguage.Value.ToString(),
                 PromptTokens = promptTokens,
                 ResponseTokens = responseTokens,

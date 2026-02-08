@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Stream abstraction
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Diagnostics.CodeAnalysis;
 using AgentClientProtocol.Sdk.JsonRpc;

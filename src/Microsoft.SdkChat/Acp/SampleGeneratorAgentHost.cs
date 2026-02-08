@@ -22,7 +22,8 @@ public static class SampleGeneratorAgentHost
         var logger = services.GetRequiredService<ILogger<SampleGeneratorAgent>>();
 
         // Create the agent
-        var agent = new SampleGeneratorAgent(services, logger);
+        var options = services.GetRequiredService<SdkChatOptions>();
+        var agent = new SampleGeneratorAgent(services, logger, options.MaxAcpSessions);
 
         // Create stdio transport using ACP SDK
         var reader = new StreamReader(Console.OpenStandardInput());

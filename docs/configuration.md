@@ -14,6 +14,7 @@
 | `SDK_CLI_DEBUG` | Set `true` to log prompts/responses |
 | `SDK_CLI_DEBUG_DIR` | Directory for debug output files |
 | `SDK_CLI_USE_OPENAI` | Set `true` to use OpenAI by default |
+| `SDK_CLI_ACP_MAX_SESSIONS` | Maximum concurrent ACP sessions (default: 100) |
 | `NO_COLOR` | Disable colored output |
 
 ## Telemetry (optional)

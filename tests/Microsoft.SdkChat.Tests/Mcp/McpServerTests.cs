@@ -34,7 +34,7 @@ public class McpServerTests
     {
         // Act & Assert
         var exception = await Assert.ThrowsAsync<NotSupportedException>(() =>
-            McpServer.RunAsync(transport, 8080, "info", useOpenAi: false));
+            McpServer.RunAsync(transport, 8080, "127.0.0.1", "info", useOpenAi: false));
 
         Assert.Contains("not supported", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -57,7 +57,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync(transport, port, "error", useOpenAi: false, cancellationToken: cts.Token);
+                await McpServer.RunAsync(transport, port, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -107,7 +107,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync(transport, port, "error", useOpenAi: false, cancellationToken: cts.Token);
+                await McpServer.RunAsync(transport, port, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -139,7 +139,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync("http", port, "error", useOpenAi: false, cancellationToken: cts.Token);
+                await McpServer.RunAsync("http", port, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -219,7 +219,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync("http", port1, "error", useOpenAi: false, cancellationToken: cts1.Token);
+                await McpServer.RunAsync("http", port1, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts1.Token);
             }
             catch (OperationCanceledException)
             {
@@ -232,7 +232,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync("http", port2, "error", useOpenAi: false, cancellationToken: cts2.Token);
+                await McpServer.RunAsync("http", port2, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts2.Token);
             }
             catch (OperationCanceledException)
             {
@@ -320,7 +320,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync(transport.ToLower(), port, "error", useOpenAi: false, cancellationToken: cts.Token);
+                await McpServer.RunAsync(transport.ToLower(), port, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -353,7 +353,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync(transport.ToUpper(), port2, "error", useOpenAi: false, cancellationToken: cts2.Token);
+                await McpServer.RunAsync(transport.ToUpper(), port2, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts2.Token);
             }
             catch (OperationCanceledException)
             {
@@ -394,7 +394,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync(transport, port, "error", useOpenAi: false);
+                await McpServer.RunAsync(transport, port, "127.0.0.1", "error", useOpenAi: false);
             }
             catch (NotSupportedException ex)
             {

@@ -168,7 +168,6 @@ public static class CSharpFormatter
                     typesToAdd.Add(depType);
             }
 
-            // Format these types
             var typeContent = FormatTypes(typesToAdd, GetNamespace(type, index));
 
             // Check if we have room
@@ -316,7 +315,6 @@ public static class CSharpFormatter
                 FormatMember(sb, m, indent + "    ");
         }
 
-        // Static properties
         if (membersByKind.TryGetValue("property", out var properties))
         {
             foreach (var m in properties.Where(m => m.IsStatic == true))

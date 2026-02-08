@@ -79,8 +79,6 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             })
             .ToList();
 
-        // Key: "namespace.TypeName", Value: merged type
-        // Using ConcurrentDictionary for thread-safe parallel processing
         var typeMap = new ConcurrentDictionary<string, MergedType>();
 
         // Resolve entry point namespaces from project configuration
@@ -355,7 +353,6 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         HashSet<string> definedTypes,
         Dictionary<string, (ITypeSymbol, string)> externalTypes)
     {
-        // Unwrap nullable
         if (typeSymbol is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
         {
             var underlyingType = nullable.TypeArguments.FirstOrDefault();
@@ -364,7 +361,6 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             return;
         }
 
-        // Handle arrays
         if (typeSymbol is IArrayTypeSymbol arrayType)
         {
             CollectExternalTypeSymbolRecursive(arrayType.ElementType, definedTypes, externalTypes);
@@ -613,7 +609,6 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     {
         var entryPoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Find .csproj file
         var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
                   ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
 
@@ -831,7 +826,6 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Take first doc - thread-safe
         merged.SetDocIfNull(GetXmlDoc(type));
 
-        // Merge members
         if (type is EnumDeclarationSyntax e)
         {
             merged.SetValuesIfNull(e.Members.Select(m => m.Identifier.Text).ToList());

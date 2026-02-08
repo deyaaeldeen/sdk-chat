@@ -40,7 +40,6 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
-        // Write API index to temp file for the script
         var tempApiFile = Path.GetTempFileName();
         try
         {
@@ -51,7 +50,6 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             if (string.IsNullOrWhiteSpace(output))
                 return new UsageIndex { FileCount = 0 };
 
-            // Parse the JSON output
             var result = DeserializeResult(output);
 
             if (result == null)

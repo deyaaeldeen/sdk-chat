@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Standard JSON-RPC error codes
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;

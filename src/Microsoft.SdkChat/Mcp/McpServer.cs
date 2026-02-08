@@ -31,22 +31,19 @@ public static class McpServer
         Justification = "WithTools<T> is AOT-safe, but analyzer can't verify it")]
     [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
         Justification = "WithTools<T> is AOT-safe, but analyzer can't verify it")]
-    public static async Task RunAsync(string transport, int port, string logLevel, bool useOpenAi = false, CancellationToken cancellationToken = default)
+    public static async Task RunAsync(string transport, int port, string bind, string logLevel, bool useOpenAi = false, CancellationToken cancellationToken = default)
     {
-        // Validate transport type - fail fast if unsupported
         if (!SupportedTransports.Contains(transport))
         {
             throw new NotSupportedException(
                 $"Transport '{transport}' is not supported. Supported transports: {string.Join(", ", SupportedTransports)}.");
         }
 
-        // For Streamable HTTP transport, use WebApplication
         if (transport.Equals("http", StringComparison.OrdinalIgnoreCase))
         {
             var builder = WebApplication.CreateBuilder();
             ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
 
-            // Configure MCP server with Streamable HTTP transport
             // Use explicit tool registration for Native AOT compatibility
             builder.Services.AddMcpServer(options =>
             {
@@ -59,9 +56,11 @@ public static class McpServer
 
             var app = builder.Build();
 
-            // Configure endpoint - bind to all interfaces for Docker compatibility
+            // Configure endpoint - bind to the address specified by --bind.
+            // Defaults to 127.0.0.1 (loopback) for security. Docker users should
+            // pass --bind 0.0.0.0 to accept connections from outside the container.
             app.Urls.Clear();
-            app.Urls.Add($"http://0.0.0.0:{port}");
+            app.Urls.Add($"http://{bind}:{port}");
 
             app.MapMcp();
             await app.RunAsync(cancellationToken);
@@ -71,7 +70,6 @@ public static class McpServer
             var builder = Host.CreateApplicationBuilder();
             ConfigureLoggingAndServices(builder.Logging, builder.Services, logLevel, useOpenAi);
 
-            // Configure MCP server with stdio transport
             // Use explicit tool registration for Native AOT compatibility
             builder.Services.AddMcpServer(options =>
             {
@@ -91,14 +89,11 @@ public static class McpServer
         Justification = "ValidationContext uses reflection for DisplayNameAttribute; SdkChatOptions is a known type")]
     private static void ConfigureLoggingAndServices(ILoggingBuilder logging, IServiceCollection services, string logLevel, bool useOpenAi)
     {
-        // Configure logging
         logging.AddConsole().SetMinimumLevel(ParseLogLevel(logLevel));
 
-        // Configure centralized options - fail fast on validation errors
         var options = SdkChatOptions.FromEnvironment();
         if (useOpenAi) options.UseOpenAi = true;
 
-        // Validate configuration at startup
         var validationResults = options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options) { DisplayName = nameof(SdkChatOptions) });
         var errors = validationResults.ToList();
         if (errors.Count > 0)
@@ -109,7 +104,6 @@ public static class McpServer
 
         services.AddSingleton(options);
 
-        // Register services
         services.AddSingleton<ProcessSandboxService>();
         services.AddSingleton<AiDebugLogger>();
         services.AddSingleton<AiService>();

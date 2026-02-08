@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Protocol version constants
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 namespace AgentClientProtocol.Sdk.Schema;
 

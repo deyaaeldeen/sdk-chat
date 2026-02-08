@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 using System.CommandLine;
 using Microsoft.SdkChat.Acp;
 using Microsoft.SdkChat.Helpers;

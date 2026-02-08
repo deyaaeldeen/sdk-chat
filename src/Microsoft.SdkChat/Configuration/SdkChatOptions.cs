@@ -32,6 +32,11 @@ public sealed class SdkChatOptions : IValidatableObject
     public const int DefaultTimeoutSeconds = 300;
 
     /// <summary>
+    /// Default maximum concurrent ACP sessions.
+    /// </summary>
+    public const int DefaultMaxAcpSessions = 100;
+
+    /// <summary>
     /// Use custom OpenAI-compatible endpoint instead of GitHub Copilot.
     /// Environment: SDK_CLI_USE_OPENAI
     /// </summary>
@@ -72,6 +77,12 @@ public sealed class SdkChatOptions : IValidatableObject
     /// Environment: SDK_CLI_TIMEOUT
     /// </summary>
     public int TimeoutSeconds { get; set; } = DefaultTimeoutSeconds;
+
+    /// <summary>
+    /// Maximum concurrent ACP sessions.
+    /// Environment: SDK_CLI_ACP_MAX_SESSIONS
+    /// </summary>
+    public int MaxAcpSessions { get; set; } = DefaultMaxAcpSessions;
 
     /// <summary>
     /// Path to Copilot CLI executable.
@@ -126,6 +137,7 @@ public sealed class SdkChatOptions : IValidatableObject
                            string.Equals(debug, "1", StringComparison.OrdinalIgnoreCase),
             DebugDirectory = Environment.GetEnvironmentVariable("SDK_CLI_DEBUG_DIR"),
             TimeoutSeconds = int.TryParse(timeoutStr, out var timeout) ? timeout : DefaultTimeoutSeconds,
+            MaxAcpSessions = int.TryParse(Environment.GetEnvironmentVariable("SDK_CLI_ACP_MAX_SESSIONS"), out var maxSessions) ? maxSessions : DefaultMaxAcpSessions,
             CopilotCliPath = Environment.GetEnvironmentVariable("COPILOT_CLI_PATH") ?? "copilot",
             GitHubToken = Environment.GetEnvironmentVariable("GH_TOKEN")
                        ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
@@ -154,6 +166,13 @@ public sealed class SdkChatOptions : IValidatableObject
             yield return new ValidationResult(
                 "TimeoutSeconds cannot exceed 3600 (1 hour).",
                 [nameof(TimeoutSeconds)]);
+        }
+
+        if (MaxAcpSessions <= 0)
+        {
+            yield return new ValidationResult(
+                "MaxAcpSessions must be greater than 0.",
+                [nameof(MaxAcpSessions)]);
         }
     }
 }

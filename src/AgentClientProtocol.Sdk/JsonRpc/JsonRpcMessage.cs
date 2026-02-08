@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// JSON-RPC 2.0 type definitions
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

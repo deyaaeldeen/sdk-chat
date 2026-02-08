@@ -11,7 +11,7 @@ namespace ApiExtractor.Contracts;
 /// <summary>
 /// Centralized, hardened process execution for API extractors.
 /// All external process invocations SHOULD go through this class.
-/// 
+///
 /// Security features:
 /// - Enforced timeouts (no runaway processes)
 /// - Output capture with size limits
@@ -19,8 +19,8 @@ namespace ApiExtractor.Contracts;
 /// </summary>
 public static class ProcessSandbox
 {
-    /// <summary>Maximum output size per stream (10MB).</summary>
-    public const int MaxOutputBytes = 10 * 1024 * 1024;
+    /// <summary>Maximum output size per stream in characters (~10M chars).</summary>
+    public const int MaxOutputChars = 10 * 1024 * 1024;
 
     /// <summary>
     /// Validates that a root path is safe to pass to an external process.
@@ -112,8 +112,8 @@ public static class ProcessSandbox
             process.StandardInput.Close();
 
             // Read streams in parallel to prevent deadlocks
-            var outputTask = ReadStreamWithLimitAsync(process.StandardOutput, MaxOutputBytes, effectiveCt);
-            var errorTask = ReadStreamWithLimitAsync(process.StandardError, MaxOutputBytes, effectiveCt);
+            var outputTask = ReadStreamWithLimitAsync(process.StandardOutput, MaxOutputChars, effectiveCt);
+            var errorTask = ReadStreamWithLimitAsync(process.StandardError, MaxOutputChars, effectiveCt);
 
             await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(effectiveCt)).ConfigureAwait(false);
 
@@ -167,33 +167,36 @@ public static class ProcessSandbox
     }
 
     /// <summary>
-    /// Read stream with size limit to prevent memory exhaustion.
+    /// Read stream with character limit to prevent memory exhaustion.
     /// </summary>
     private static async Task<string> ReadStreamWithLimitAsync(
         StreamReader reader,
-        int maxBytes,
+        int maxChars,
         CancellationToken cancellationToken)
     {
         var buffer = new char[8192];
         var result = new StringBuilder();
-        var totalRead = 0;
+        var totalCharsRead = 0;
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            var bytesRead = await reader.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (bytesRead == 0) break;
+            var charsRead = await reader.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (charsRead == 0) break;
 
-            totalRead += bytesRead * sizeof(char);
-            if (totalRead > maxBytes)
+            totalCharsRead += charsRead;
+            if (totalCharsRead > maxChars)
             {
-                result.Append(buffer, 0, bytesRead);
+                // Append only the portion that fits within the limit
+                var remaining = maxChars - (totalCharsRead - charsRead);
+                if (remaining > 0)
+                    result.Append(buffer, 0, remaining);
                 result.Append("\n[OUTPUT TRUNCATED - exceeded ");
-                result.Append(maxBytes / 1024 / 1024);
-                result.Append("MB limit]");
+                result.Append(maxChars / 1024 / 1024);
+                result.Append("M char limit]");
                 break;
             }
 
-            result.Append(buffer, 0, bytesRead);
+            result.Append(buffer, 0, charsRead);
         }
 
         return result.ToString();

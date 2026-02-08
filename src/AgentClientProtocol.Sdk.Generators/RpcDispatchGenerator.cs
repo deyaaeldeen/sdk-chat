@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Source generator for RPC method dispatch
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Collections.Immutable;
 using System.Text;
@@ -11,7 +11,7 @@ namespace AgentClientProtocol.Sdk.Generators;
 
 /// <summary>
 /// Incremental source generator that creates compile-time RPC dispatch tables.
-/// 
+///
 /// Scans interfaces marked with [RpcDispatcher] and methods marked with [RpcMethod]
 /// to generate static dispatch dictionaries, eliminating runtime reflection and
 /// switch statement maintenance.
@@ -21,13 +21,11 @@ public class RpcDispatchGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // Register the attribute source
         context.RegisterPostInitializationOutput(static ctx =>
         {
             ctx.AddSource("RpcAttributes.g.cs", SourceText.From(AttributeSource, Encoding.UTF8));
         });
 
-        // Find all interfaces with [RpcDispatcher]
         var dispatcherInterfaces = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 "AgentClientProtocol.Sdk.RpcDispatcherAttribute",
@@ -36,7 +34,6 @@ public class RpcDispatchGenerator : IIncrementalGenerator
             .Where(static info => info is not null)
             .Select(static (info, _) => info!);
 
-        // Generate dispatch code
         context.RegisterSourceOutput(dispatcherInterfaces.Collect(), static (ctx, dispatchers) =>
         {
             if (dispatchers.IsDefaultOrEmpty) return;
@@ -57,7 +54,6 @@ public class RpcDispatchGenerator : IIncrementalGenerator
         if (attribute is null)
             return null;
 
-        // Get the connection type from attribute
         var connectionType = attribute.ConstructorArguments.Length > 0
             ? attribute.ConstructorArguments[0].Value as string ?? "Client"
             : "Client";
@@ -83,7 +79,6 @@ public class RpcDispatchGenerator : IIncrementalGenerator
                 .FirstOrDefault(a => a.Key == "IsNotification")
                 .Value.Value as bool? ?? false;
 
-            // Get request and response types from method signature
             var requestType = method.Parameters.FirstOrDefault()?.Type.ToDisplayString();
             var responseType = method.ReturnType is INamedTypeSymbol returnType &&
                                returnType.IsGenericType &&
@@ -119,7 +114,6 @@ public class RpcDispatchGenerator : IIncrementalGenerator
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine();
 
-        // Group dispatchers by namespace
         var byNamespace = dispatchers.GroupBy(d => d.Namespace);
 
         foreach (var nsGroup in byNamespace)
@@ -135,7 +129,6 @@ public class RpcDispatchGenerator : IIncrementalGenerator
                 sb.AppendLine($"    public static class {dispatcher.InterfaceName}Dispatch");
                 sb.AppendLine("    {");
 
-                // Generate request handlers dictionary
                 var requestMethods = dispatcher.Methods.Where(m => !m.IsNotification).ToList();
                 if (requestMethods.Count > 0)
                 {
@@ -158,7 +151,6 @@ public class RpcDispatchGenerator : IIncrementalGenerator
                     sb.AppendLine();
                 }
 
-                // Generate notification handlers dictionary
                 var notificationMethods = dispatcher.Methods.Where(m => m.IsNotification).ToList();
                 if (notificationMethods.Count > 0)
                 {
@@ -180,7 +172,6 @@ public class RpcDispatchGenerator : IIncrementalGenerator
                     sb.AppendLine();
                 }
 
-                // Generate deserialize helper with AOT suppression attributes
                 sb.AppendLine("        [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(\"AOT\", \"IL2026:RequiresUnreferencedCode\",");
                 sb.AppendLine("            Justification = \"RPC dispatch uses known ACP schema types registered in AcpJsonContext\")]");
                 sb.AppendLine("        [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(\"AOT\", \"IL3050:RequiresDynamicCode\",");
@@ -216,7 +207,7 @@ public sealed class RpcDispatcherAttribute : System.Attribute
     /// The type of connection (""Client"" or ""Agent"") for documentation.
     /// </summary>
     public string ConnectionType { get; }
-    
+
     public RpcDispatcherAttribute(string connectionType = ""Client"")
     {
         ConnectionType = connectionType;
@@ -233,12 +224,12 @@ public sealed class RpcMethodAttribute : System.Attribute
     /// The JSON-RPC method name (e.g., ""session/prompt"").
     /// </summary>
     public string MethodName { get; }
-    
+
     /// <summary>
     /// True if this is a notification (no response expected).
     /// </summary>
     public bool IsNotification { get; set; }
-    
+
     public RpcMethodAttribute(string methodName)
     {
         MethodName = methodName;

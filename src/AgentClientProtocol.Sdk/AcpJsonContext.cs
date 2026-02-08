@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// JSON source generator for compile-time serialization
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
@@ -22,13 +22,11 @@ namespace AgentClientProtocol.Sdk;
     WriteIndented = false,
     UseStringEnumConverter = true)]
 
-// JSON-RPC message types
 [JsonSerializable(typeof(JsonRpcRequest))]
 [JsonSerializable(typeof(JsonRpcResponse))]
 [JsonSerializable(typeof(JsonRpcNotification))]
 [JsonSerializable(typeof(JsonRpcError))]
 
-// Session types
 [JsonSerializable(typeof(InitializeRequest))]
 [JsonSerializable(typeof(InitializeResponse))]
 [JsonSerializable(typeof(AuthenticateRequest))]
@@ -44,7 +42,6 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(CancelNotification))]
 [JsonSerializable(typeof(SessionNotification))]
 
-// Capability types
 [JsonSerializable(typeof(AgentCapabilities))]
 [JsonSerializable(typeof(ClientCapabilities))]
 [JsonSerializable(typeof(FileSystemCapability))]
@@ -53,7 +50,6 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(SessionCapabilities))]
 [JsonSerializable(typeof(Implementation))]
 
-// Content types
 [JsonSerializable(typeof(ContentBlock))]
 [JsonSerializable(typeof(TextContent))]
 [JsonSerializable(typeof(ImageContent))]
@@ -67,7 +63,6 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(Content))]
 [JsonSerializable(typeof(ContentChunk))]
 
-// Session update types
 [JsonSerializable(typeof(SessionUpdate))]
 [JsonSerializable(typeof(UserMessageChunk))]
 [JsonSerializable(typeof(AgentMessageChunk))]
@@ -85,7 +80,6 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(ToolCallLocation))]
 [JsonSerializable(typeof(Diff))]
 
-// Permission types
 [JsonSerializable(typeof(RequestPermissionRequest))]
 [JsonSerializable(typeof(RequestPermissionResponse))]
 [JsonSerializable(typeof(PermissionOption))]
@@ -93,13 +87,11 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(SelectedPermissionOutcome))]
 [JsonSerializable(typeof(CancelledPermissionOutcome))]
 
-// File system types
 [JsonSerializable(typeof(ReadTextFileRequest))]
 [JsonSerializable(typeof(ReadTextFileResponse))]
 [JsonSerializable(typeof(WriteTextFileRequest))]
 [JsonSerializable(typeof(WriteTextFileResponse))]
 
-// Terminal types
 [JsonSerializable(typeof(CreateTerminalRequest))]
 [JsonSerializable(typeof(CreateTerminalResponse))]
 [JsonSerializable(typeof(TerminalOutputRequest))]
@@ -113,7 +105,6 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(TerminalExitStatus))]
 [JsonSerializable(typeof(Terminal))]
 
-// MCP server configuration types
 [JsonSerializable(typeof(McpServer))]
 [JsonSerializable(typeof(McpServerStdio))]
 [JsonSerializable(typeof(McpServerHttp))]
@@ -121,12 +112,10 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(EnvVariable))]
 [JsonSerializable(typeof(HttpHeader))]
 
-// Session mode types
 [JsonSerializable(typeof(SessionModeState))]
 [JsonSerializable(typeof(SessionMode))]
 [JsonSerializable(typeof(AuthMethod))]
 
-// Arrays for common collection types
 [JsonSerializable(typeof(ContentBlock[]))]
 [JsonSerializable(typeof(PlanEntry[]))]
 [JsonSerializable(typeof(PermissionOption[]))]
@@ -140,7 +129,6 @@ namespace AgentClientProtocol.Sdk;
 [JsonSerializable(typeof(SessionMode[]))]
 [JsonSerializable(typeof(string[]))]
 
-// Dictionary types for error data
 [JsonSerializable(typeof(Dictionary<string, object?>))]
 
 public partial class AcpJsonContext : JsonSerializerContext
