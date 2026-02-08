@@ -52,7 +52,6 @@ public static class TypeScriptFormatter
         sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
 
-        // Format only classes that have uncovered operations
         var allClasses = index.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
@@ -340,7 +339,6 @@ public static class TypeScriptFormatter
                 sb.AppendLine($"// From: {dep.Package}");
                 sb.AppendLine();
 
-                // Interfaces
                 foreach (var iface in dep.Interfaces ?? [])
                 {
                     if (sb.Length >= maxLength) break;
@@ -352,7 +350,6 @@ public static class TypeScriptFormatter
                     }
                 }
 
-                // Classes
                 foreach (var cls in dep.Classes ?? [])
                 {
                     if (sb.Length >= maxLength) break;

@@ -102,15 +102,19 @@ if [[ "${ARGS[0]:-}" == "mcp" ]] && [[ "${ARGS[1]:-}" != "--transport" || "${ARG
     fi
 fi
 
-# For MCP SSE, expose port
+# For MCP SSE/HTTP, expose port and bind to 0.0.0.0 inside the container
 ARGS_STR="${ARGS[*]:-}"
-if [[ "${ARGS[0]:-}" == "mcp" ]] && [[ "${ARGS_STR}" == *"--transport sse"* || "${ARGS_STR}" == *"--transport=sse"* ]]; then
+if [[ "${ARGS[0]:-}" == "mcp" ]] && [[ "${ARGS_STR}" == *"--transport sse"* || "${ARGS_STR}" == *"--transport=sse"* || "${ARGS_STR}" == *"--transport http"* || "${ARGS_STR}" == *"--transport=http"* ]]; then
     # Extract port from args, default to 8080
     PORT=8080
     if [[ "${ARGS_STR}" =~ --port[=\ ]([0-9]+) ]]; then
         PORT="${BASH_REMATCH[1]}"
     fi
     DOCKER_ARGS+=(-p "${PORT}:${PORT}")
+    # Add --bind 0.0.0.0 if not already specified
+    if [[ "${ARGS_STR}" != *"--bind"* ]]; then
+        ARGS+=("--bind" "0.0.0.0")
+    fi
 fi
 
 # Process arguments to find and mount SDK paths

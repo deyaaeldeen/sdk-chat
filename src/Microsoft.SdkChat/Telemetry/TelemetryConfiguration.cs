@@ -37,14 +37,12 @@ public static class TelemetryConfiguration
                         serviceVersion: SdkChatTelemetry.SourceVersion))
                 .AddSource(SdkChatTelemetry.SourceName);
 
-            // Check for OTLP endpoint - if set, enable OTLP exporter
             var otlpEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
             if (!string.IsNullOrEmpty(otlpEndpoint))
             {
                 builder.AddOtlpExporter();
             }
 
-            // Check for explicit console export request
             var consoleExport = Environment.GetEnvironmentVariable("SDK_CLI_TELEMETRY_CONSOLE");
             var tracesExporter = Environment.GetEnvironmentVariable("OTEL_TRACES_EXPORTER");
 

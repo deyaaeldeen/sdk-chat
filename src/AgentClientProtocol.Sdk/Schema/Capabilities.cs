@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Capability types for initialization
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Text.Json.Serialization;
 

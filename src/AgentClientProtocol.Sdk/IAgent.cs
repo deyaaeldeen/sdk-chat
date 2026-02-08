@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Agent interface
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using AgentClientProtocol.Sdk.Schema;
 

@@ -12,7 +12,6 @@ public static class ConsoleUx
     private static bool _supportsAnsi = !Console.IsOutputRedirected &&
         Environment.GetEnvironmentVariable("NO_COLOR") == null;
 
-    // Colors
     public static string Dim(string text) => _supportsAnsi ? $"\x1b[90m{text}\x1b[0m" : text;
     public static string Green(string text) => _supportsAnsi ? $"\x1b[32m{text}\x1b[0m" : text;
     public static string Yellow(string text) => _supportsAnsi ? $"\x1b[33m{text}\x1b[0m" : text;

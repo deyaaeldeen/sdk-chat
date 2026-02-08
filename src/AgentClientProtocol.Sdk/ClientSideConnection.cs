@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Client's view of the ACP connection
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
@@ -12,11 +12,11 @@ namespace AgentClientProtocol.Sdk;
 
 /// <summary>
 /// Client-side connection to an agent.
-/// 
+///
 /// Provides the client's view of an ACP connection, allowing clients (IDEs)
 /// to communicate with agents. Implements the IAgent interface to provide methods
 /// for initializing sessions, sending prompts, and managing the agent lifecycle.
-/// 
+///
 /// Uses compile-time generated dispatch tables for O(1) method lookup.
 /// </summary>
 [UnconditionalSuppressMessage("AOT", "IL2026:RequiresUnreferencedCode",

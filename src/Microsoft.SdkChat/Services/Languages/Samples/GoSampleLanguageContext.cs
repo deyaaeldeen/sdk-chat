@@ -13,7 +13,6 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
 {
     private readonly GoUsageAnalyzer _usageAnalyzer = new();
 
-    // Cached API index for reuse
     private ApiIndex? _cachedApiIndex;
     private string? _cachedSourcePath;
 
@@ -81,7 +80,6 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Extract API surface
         var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
 
         if (apiIndex == null)
@@ -102,7 +100,6 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
                 "Ensure the path contains Go source files with exported types or functions.");
         }
 
-        // Analyze coverage if samples exist
         UsageIndex? coverage = null;
         if (!string.IsNullOrEmpty(samplesPath) && Directory.Exists(samplesPath))
         {
@@ -119,11 +116,9 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
         }
         else
         {
-            // No coverage data - fall back to standard format
             apiSurface = GoFormatter.Format(apiIndex, maxLength);
         }
 
-        // Yield unified API surface with coverage annotations
         yield return $"<api-surface package=\"{apiIndex.Package}\">\n";
         yield return apiSurface;
         yield return "</api-surface>\n";

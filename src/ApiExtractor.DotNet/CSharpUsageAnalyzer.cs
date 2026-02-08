@@ -32,18 +32,15 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
 
-        // Get all client + subclient types and their methods from the API
         var clientMethods = BuildClientMethodMap(apiIndex);
         if (clientMethods.Count == 0)
             return new UsageIndex { FileCount = 0 };
 
-        // Find all C# files in the code path (exclude bin/obj)
         var files = Directory.EnumerateFiles(normalizedPath, "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains("/obj/") && !f.Contains("\\obj\\")
                      && !f.Contains("/bin/") && !f.Contains("\\bin\\"))
             .ToList();
 
-        // Parse all files into syntax trees first
         var syntaxTrees = new List<SyntaxTree>();
         var filePathMap = new Dictionary<SyntaxTree, string>();
 
@@ -125,7 +122,6 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             }
         }
 
-        // Build uncovered operations list
         var uncoveredOperations = BuildUncoveredList(clientMethods, seenOperations, apiIndex);
 
         return new UsageIndex

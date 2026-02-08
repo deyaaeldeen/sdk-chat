@@ -53,7 +53,6 @@ public static class PythonFormatter
         sb.AppendLine($"# UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
 
-        // Format only classes that have uncovered operations
         var allClasses = index.GetAllClasses().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
@@ -158,7 +157,6 @@ public static class PythonFormatter
                 currentLength += funcContent.Length;
             }
 
-            // Classes by priority
             foreach (var cls in moduleClasses)
             {
                 if (includedClasses.Contains(cls.Name))
@@ -237,11 +235,9 @@ public static class PythonFormatter
 
     private static void FormatClass(StringBuilder sb, ClassInfo cls)
     {
-        // Docstring
         if (!string.IsNullOrEmpty(cls.Doc))
             sb.AppendLine($"    \"\"\"{cls.Doc}\"\"\"");
 
-        // Class declaration
         var baseClass = !string.IsNullOrEmpty(cls.Base) ? $"({cls.Base})" : "";
         sb.AppendLine($"class {cls.Name}{baseClass}:");
 

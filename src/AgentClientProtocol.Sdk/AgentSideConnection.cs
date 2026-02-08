@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Agent's view of the ACP connection
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;

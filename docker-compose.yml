@@ -36,6 +36,7 @@ services:
       - SDK_CLI_DEBUG
       - SDK_CLI_DEBUG_DIR
       - SDK_CLI_USE_OPENAI
+      - SDK_CLI_ACP_MAX_SESSIONS
       - NO_COLOR
     stdin_open: true
     tty: true
@@ -54,7 +55,7 @@ services:
       - GITHUB_TOKEN
       - SDK_CLI_MODEL
       - SDK_CLI_USE_OPENAI
-    command: ["mcp", "--transport", "http", "--port", "${MCP_PORT:-8080}"]
+    command: ["mcp", "--transport", "http", "--port", "${MCP_PORT:-8080}", "--bind", "0.0.0.0"]
 
   # Interactive ACP agent
   acp:
@@ -68,6 +69,7 @@ services:
       - GH_TOKEN
       - GITHUB_TOKEN
       - SDK_CLI_MODEL
+      - SDK_CLI_ACP_MAX_SESSIONS
       - SDK_CLI_USE_OPENAI
     stdin_open: true
     tty: true

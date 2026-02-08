@@ -64,6 +64,7 @@ public static class NdjsonStreamParser
         var braceDepth = 0;
         var inString = false;
         var escapeNext = false;
+        var inCodeFence = false;
 
         await foreach (var chunk in chunks.WithCancellation(cancellationToken))
         {
@@ -74,25 +75,35 @@ public static class NdjsonStreamParser
                     continue; // normalize CRLF to LF
                 }
 
-                // Track whether we're inside a JSON object
                 if (braceDepth == 0 && objectBuilder.Length == 0)
                 {
-                    // Not currently building an object - skip non-JSON content
-                    if (ch == '\n' || char.IsWhiteSpace(ch))
+                    // Handle code fence toggling (```json ... ```)
+                    if (ch == '`')
+                    {
+                        inCodeFence = !inCodeFence;
+                        continue;
+                    }
+
+                    // While inside a code fence line or consuming fence chars, skip
+                    if (inCodeFence && ch != '\n')
                     {
                         continue;
                     }
 
-                    // Skip code fence markers
-                    if (ch == '`')
+                    // Newline resets code fence state (fences are line-scoped)
+                    if (ch == '\n')
                     {
-                        // Consume until end of line
+                        inCodeFence = false;
+                        continue;
+                    }
+
+                    if (char.IsWhiteSpace(ch))
+                    {
                         continue;
                     }
 
                     if (ch != '{')
                     {
-                        // Skip non-JSON lines before first object
                         if (ignoreNonJsonLinesBeforeFirstObject && !seenAnyItem)
                         {
                             continue;
@@ -144,7 +155,6 @@ public static class NdjsonStreamParser
 
                         if (braceDepth == 0)
                         {
-                            // Complete JSON object
                             var jsonText = objectBuilder.ToString().Trim();
                             objectBuilder.Clear();
 
@@ -159,7 +169,6 @@ public static class NdjsonStreamParser
             }
         }
 
-        // Handle any remaining content
         if (objectBuilder.Length > 0)
         {
             var remaining = objectBuilder.ToString().Trim();
@@ -192,7 +201,6 @@ public static class NdjsonStreamParser
         }
         catch (JsonException)
         {
-            // Malformed JSON - skip it
         }
 
         item = default!;

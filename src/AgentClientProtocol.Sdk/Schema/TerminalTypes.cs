@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Terminal-related types
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Text.Json.Serialization;
 

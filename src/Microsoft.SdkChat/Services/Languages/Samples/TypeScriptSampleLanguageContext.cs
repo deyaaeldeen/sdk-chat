@@ -13,7 +13,6 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
 {
     private readonly TypeScriptUsageAnalyzer _usageAnalyzer = new();
 
-    // Cached API index for reuse
     private ApiIndex? _cachedApiIndex;
     private string? _cachedSourcePath;
 
@@ -83,7 +82,6 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Extract API surface
         var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
 
         if (apiIndex == null)
@@ -104,7 +102,6 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
                 "Ensure the path contains TypeScript source files with exported classes, interfaces, or functions.");
         }
 
-        // Analyze coverage if samples exist
         UsageIndex? coverage = null;
         if (!string.IsNullOrEmpty(samplesPath) && Directory.Exists(samplesPath))
         {
@@ -121,11 +118,9 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
         }
         else
         {
-            // No coverage data - fall back to standard format
             apiSurface = TypeScriptFormatter.Format(apiIndex, maxLength);
         }
 
-        // Yield unified API surface with coverage annotations
         yield return $"<api-surface package=\"{apiIndex.Package}\">\n";
         yield return apiSurface;
         yield return "</api-surface>\n";

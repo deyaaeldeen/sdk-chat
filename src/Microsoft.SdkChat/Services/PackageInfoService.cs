@@ -220,21 +220,66 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
 
-        // Extract API first
-        var apiResult = await ExtractPublicApiAsync(packagePath, language, asJson: false, ct).ConfigureAwait(false);
-        if (!apiResult.Success)
+        // Extract API and analyze usage in a single pass to avoid spawning the
+        // extractor process twice (once here and once inside AnalyzeUsageInternalAsync).
+        if (!AnalyzerRegistry.TryGetValue(effectiveLanguage.Value, out var factory))
         {
             return new CoverageAnalysisResult
             {
                 Success = false,
-                ErrorCode = apiResult.ErrorCode,
-                ErrorMessage = apiResult.ErrorMessage
+                ErrorCode = "EXTRACTOR_NOT_FOUND",
+                ErrorMessage = $"No extractor available for language: {effectiveLanguage}"
             };
         }
 
-        // Analyze usage
-        var (covered, uncovered, totalOperations) = await AnalyzeUsageInternalAsync(
-            effectiveLanguage.Value, sdkInfo.SourceFolder, effectiveSamplesPath, ct).ConfigureAwait(false);
+        var (extractor, analyzer) = factory();
+
+        if (!extractor.IsAvailable())
+        {
+            return new CoverageAnalysisResult
+            {
+                Success = false,
+                ErrorCode = "EXTRACTOR_UNAVAILABLE",
+                ErrorMessage = extractor.UnavailableReason ?? $"Extractor for {effectiveLanguage} is not available"
+            };
+        }
+
+        var extractResult = await extractor.ExtractAsyncCore(sdkInfo.SourceFolder, ct).ConfigureAwait(false);
+        if (!extractResult.IsSuccess)
+        {
+            var failure = (ExtractorResult.Failure)extractResult;
+            return new CoverageAnalysisResult
+            {
+                Success = false,
+                ErrorCode = "EXTRACTION_FAILED",
+                ErrorMessage = failure.Error
+            };
+        }
+
+        var apiIndex = extractResult.GetValueOrThrow();
+
+        // Analyze usage with the already-extracted API surface
+        var usage = await analyzer.AnalyzeAsyncCore(effectiveSamplesPath, apiIndex, ct).ConfigureAwait(false);
+        var totalOperations = usage.CoveredOperations.Count + usage.UncoveredOperations.Count;
+
+        var covered = usage.CoveredOperations
+            .Select(o => new CoveredOperationInfo
+            {
+                ClientType = o.ClientType,
+                Operation = o.Operation,
+                File = o.File,
+                Line = o.Line
+            })
+            .ToList();
+
+        var uncovered = usage.UncoveredOperations
+            .Select(o => new UncoveredOperationInfo
+            {
+                ClientType = o.ClientType,
+                Operation = o.Operation,
+                Signature = o.Signature
+            })
+            .ToList();
 
         var coveragePercent = totalOperations > 0 ? (covered.Count * 100.0 / totalOperations) : 0;
 
@@ -266,58 +311,6 @@ public sealed class PackageInfoService : IPackageInfoService
         [SdkLanguage.JavaScript] = () => (new TypeScriptApiExtractor(), new TypeScriptUsageAnalyzer()), // JS uses TS tooling
         [SdkLanguage.Java] = () => (new JavaApiExtractor(), new JavaUsageAnalyzer()),
     };
-
-    private async Task<(List<CoveredOperationInfo> Covered, List<UncoveredOperationInfo> Uncovered, int Total)> AnalyzeUsageInternalAsync(
-        SdkLanguage language,
-        string sourcePath,
-        string samplesPath,
-        CancellationToken ct)
-    {
-        // Check if language is supported
-        if (!AnalyzerRegistry.TryGetValue(language, out var factory))
-            return ([], [], 0);
-
-        // Create extractor and analyzer from registry
-        var (extractor, analyzer) = factory();
-
-        // Check availability
-        if (!extractor.IsAvailable())
-            return ([], [], 0);
-
-        // Extract API surface
-        var extractResult = await extractor.ExtractAsyncCore(sourcePath, ct).ConfigureAwait(false);
-        if (!extractResult.IsSuccess)
-            return ([], [], 0);
-
-        var apiIndex = extractResult.GetValueOrThrow();
-
-        // Analyze usage with the non-generic interface
-        var usage = await analyzer.AnalyzeAsyncCore(samplesPath, apiIndex, ct).ConfigureAwait(false);
-
-        // Map to output format
-        var total = usage.CoveredOperations.Count + usage.UncoveredOperations.Count;
-
-        var covered = usage.CoveredOperations
-            .Select(o => new CoveredOperationInfo
-            {
-                ClientType = o.ClientType,
-                Operation = o.Operation,
-                File = o.File,
-                Line = o.Line
-            })
-            .ToList();
-
-        var uncovered = usage.UncoveredOperations
-            .Select(o => new UncoveredOperationInfo
-            {
-                ClientType = o.ClientType,
-                Operation = o.Operation,
-                Signature = o.Signature
-            })
-            .ToList();
-
-        return (covered, uncovered, total);
-    }
 
     private static IApiExtractor? CreateExtractor(SdkLanguage language)
     {

@@ -14,7 +14,6 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
     private readonly CSharpApiExtractor _extractor = new();
     private readonly CSharpUsageAnalyzer _usageAnalyzer = new();
 
-    // Cached API index for reuse between StreamContextAsync and usage analysis
     private ApiIndex? _cachedApiIndex;
     private string? _cachedSourcePath;
 
@@ -43,7 +42,6 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Extract API surface (C# extractor is native - always available)
         var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
 
         // Validate that we extracted meaningful API surface
@@ -55,7 +53,6 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
                 "Ensure the path contains C# source files with public types and the SDK is built correctly.");
         }
 
-        // Analyze coverage if samples exist
         UsageIndex? coverage = null;
         if (!string.IsNullOrEmpty(samplesPath) && Directory.Exists(samplesPath))
         {
@@ -72,11 +69,9 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
         }
         else
         {
-            // No coverage data - fall back to standard format
             apiSurface = CSharpFormatter.Format(apiIndex, maxLength);
         }
 
-        // Yield unified API surface with coverage annotations
         yield return $"<api-surface package=\"{apiIndex.Package}\">\n";
         yield return apiSurface;
         yield return "</api-surface>\n";

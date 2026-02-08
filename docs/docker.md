@@ -92,7 +92,7 @@ docker run --rm -i \
 ```bash
 docker run --rm -p 8080:8080 \
   -e GH_TOKEN="ghp_..." \
-  sdk-chat:latest mcp --transport http --port 8080
+  sdk-chat:latest mcp --transport http --port 8080 --bind 0.0.0.0
 ```
 
 Connect to `http://localhost:8080/mcp` from your MCP client.

@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Methods that agents call on clients
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 namespace AgentClientProtocol.Sdk.Schema;
 
@@ -8,15 +8,12 @@ namespace AgentClientProtocol.Sdk.Schema;
 /// </summary>
 public static class ClientMethods
 {
-    // File system methods
     public const string FsReadTextFile = "fs/read_text_file";
     public const string FsWriteTextFile = "fs/write_text_file";
 
-    // Session methods
     public const string SessionRequestPermission = "session/request_permission";
     public const string SessionUpdate = "session/update";
 
-    // Terminal methods
     public const string TerminalCreate = "terminal/create";
     public const string TerminalOutput = "terminal/output";
     public const string TerminalRelease = "terminal/release";

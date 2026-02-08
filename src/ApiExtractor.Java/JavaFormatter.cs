@@ -53,7 +53,6 @@ public static class JavaFormatter
         sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
 
-        // Format only classes that have uncovered operations
         var allClasses = index.GetAllClasses().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
@@ -151,7 +150,6 @@ public static class JavaFormatter
             if (pkg.Enums != null)
                 FormatEnums(sb, pkg.Enums);
 
-            // Classes by priority
             foreach (var cls in pkgClasses)
             {
                 if (includedClasses.Contains(cls.Name))

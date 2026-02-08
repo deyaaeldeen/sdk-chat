@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Newline-delimited JSON transport (stdio)
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
@@ -119,14 +119,17 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
 
         GC.SuppressFinalize(this);
 
-        // Wait for any in-flight writes to complete before disposing
+        // Wait for any in-flight writes to complete before disposing.
+        // Track acquisition so we only release if we actually acquired the lock.
+        var lockAcquired = false;
         try
         {
             await _writeLock.WaitAsync();
+            lockAcquired = true;
         }
         catch (ObjectDisposedException)
         {
-            // Already disposed, that's fine
+            // Already disposed by another path, that's fine
         }
 
         try
@@ -136,11 +139,9 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
         }
         finally
         {
-            // Release only if we successfully acquired it above (not already disposed)
-            // The WaitAsync above may have thrown ObjectDisposedException which we caught
-            if (_disposed == 1)
+            if (lockAcquired)
             {
-                try { _writeLock.Release(); } catch (ObjectDisposedException) { /* Already disposed, safe to ignore */ }
+                try { _writeLock.Release(); } catch (ObjectDisposedException) { /* Safe to ignore */ }
             }
             _writeLock.Dispose();
         }

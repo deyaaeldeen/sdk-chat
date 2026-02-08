@@ -96,7 +96,6 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         }
         else if (availability.Mode == ExtractorMode.RuntimeInterpreter)
         {
-            // Compile using the Go runtime
             binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
         }
         else
@@ -149,7 +148,6 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             throw new InvalidOperationException(availability.UnavailableReason ?? "Go extractor not available");
         }
 
-        // Use ProcessSandbox for hardened execution with timeout and output limits
         var result = await ProcessSandbox.ExecuteAsync(
             binaryPath,
             ["--stub", rootPath],
@@ -195,11 +193,9 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
                 return _cachedBinaryPath;
             }
 
-            // Compute hash of source for cache key
             var sourceContent = await File.ReadAllBytesAsync(scriptPath, ct).ConfigureAwait(false);
             var hash = Convert.ToHexString(SHA256.HashData(sourceContent))[..16].ToLowerInvariant();
 
-            // Cache in user's temp directory
             var cacheDir = Path.Combine(Path.GetTempPath(), "sdk-chat", "go-cache");
             Directory.CreateDirectory(cacheDir);
 
@@ -211,14 +207,12 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             
             var binaryPath = Path.Combine(cacheDir, binaryName);
 
-            // Check if binary exists and is valid
             if (File.Exists(binaryPath))
             {
                 _cachedBinaryPath = binaryPath;
                 return binaryPath;
             }
 
-            // Compile the binary via ProcessSandbox for enforced timeout and output limits
             var compileResult = await ProcessSandbox.ExecuteAsync(
                 goPath,
                 ["build", "-o", binaryPath, scriptPath],

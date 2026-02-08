@@ -61,11 +61,9 @@ public static class PathSanitizer
 
         if (validPartCount == 0) return "Sample" + expectedExtension;
 
-        // Create final array with only valid parts
         var finalParts = sanitizedParts[..validPartCount];
         var result = string.Join(Path.DirectorySeparatorChar, finalParts);
 
-        // Ensure correct extension
         if (!result.EndsWith(expectedExtension, StringComparison.OrdinalIgnoreCase))
         {
             var lastPart = finalParts[^1];

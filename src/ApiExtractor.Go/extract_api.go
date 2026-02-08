@@ -1012,7 +1012,7 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 	}
 
 	// Resolve transitive dependencies
-	deps := resolveTransitiveDependencies(api, absPath)
+	deps := resolveTransitiveDependencies()
 	if len(deps) > 0 {
 		api.Dependencies = deps
 	}
@@ -1176,13 +1176,13 @@ func collectImports(file *ast.File) {
 	}
 }
 
-func collectTypeReferences(api *ApiIndex) map[string]bool {
+func collectTypeReferences() map[string]bool {
 	// Use the AST-collected references instead
 	return typeCollector.GetExternalRefs()
 }
 
-func resolveTransitiveDependencies(api *ApiIndex, rootPath string) []DependencyInfo {
-	refs := collectTypeReferences(api)
+func resolveTransitiveDependencies() []DependencyInfo {
+	refs := collectTypeReferences()
 	if len(refs) == 0 {
 		return nil
 	}

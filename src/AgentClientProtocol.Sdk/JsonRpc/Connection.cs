@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Low-level JSON-RPC connection management
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;

@@ -30,14 +30,10 @@ public sealed class LruCache<TKey, TValue> where TKey : notnull
         _cache = new ConcurrentDictionary<TKey, CacheEntry>(comparer ?? EqualityComparer<TKey>.Default);
     }
 
-    /// <summary>
-    /// Current number of items in the cache.
-    /// </summary>
+    /// <summary>Current number of items.</summary>
     public int Count => _cache.Count;
 
-    /// <summary>
-    /// Maximum size of the cache.
-    /// </summary>
+    /// <summary>Maximum cache size.</summary>
     public int MaxSize => _maxSize;
 
     /// <summary>
@@ -67,9 +63,10 @@ public sealed class LruCache<TKey, TValue> where TKey : notnull
             return existing.Value;
         }
 
-        // Race with eviction: the winning entry was already evicted between
-        // TryAdd and TryGetValue. Force-add our value to ensure caching.
-        _cache[key] = entry;
+        // Race with eviction: the winning entry was evicted between TryAdd and
+        // TryGetValue. Return the locally computed value without forcing it into
+        // the cache — a force-add here could overwrite a newer entry inserted by
+        // a third concurrent thread, causing silent cache corruption.
         return value;
     }
 

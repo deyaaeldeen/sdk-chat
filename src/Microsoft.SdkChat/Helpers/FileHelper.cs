@@ -87,7 +87,6 @@ public class FileHelper
     {
         foreach (var group in groups)
         {
-            // Discover and plan for this group
             List<FileMetadata> files = [];
             var priorityFunc = group.PriorityFunc ?? (_ => 0);
 
@@ -122,29 +121,24 @@ public class FileHelper
             if (files.Count == 0)
                 continue;
 
-            // Sort by priority (ascending), then by size (ascending)
             files.Sort((a, b) =>
             {
                 var priorityComparison = a.Priority.CompareTo(b.Priority);
                 return priorityComparison != 0 ? priorityComparison : a.FileSize.CompareTo(b.FileSize);
             });
 
-            // Create plan with this group's budget
             var plan = CreateLoadingPlan(files, group.Budget, group.PerFileLimit);
 
             if (plan.Items.Count == 0)
                 continue;
 
-            // Yield section open tag
             yield return new FileChunk($"<{group.SectionName}>\n", "", IsHeader: true, IsFooter: false, IsTruncated: false);
 
-            // Stream files
             await foreach (var chunk in StreamFilesAsync(plan, ct))
             {
                 yield return chunk;
             }
 
-            // Yield section close tag
             yield return new FileChunk($"</{group.SectionName}>\n\n", "", IsHeader: false, IsFooter: true, IsTruncated: false);
         }
     }
@@ -184,7 +178,6 @@ public class FileHelper
 
         foreach (var filePath in Directory.EnumerateFiles(directory, "*.*", enumerationOptions))
         {
-            // Extension filter
             if (extensionSet != null)
             {
                 var ext = Path.GetExtension(filePath);
@@ -192,7 +185,6 @@ public class FileHelper
                     continue;
             }
 
-            // Glob exclusion filter
             if (excludeMatcher != null)
             {
                 var globPath = Path.GetRelativePath(relativeTo, filePath).Replace(Path.DirectorySeparatorChar, '/');
@@ -211,12 +203,10 @@ public class FileHelper
                 Priority: 0
             );
 
-            // Calculate priority using the function
             metadata = metadata with { Priority = priorityFunc(metadata) };
             files.Add(metadata);
         }
 
-        // Sort by priority (ascending), then by size (ascending)
         files.Sort((a, b) =>
         {
             var priorityComparison = a.Priority.CompareTo(b.Priority);
@@ -283,7 +273,6 @@ public class FileHelper
     {
         foreach (var item in plan.Items)
         {
-            // Yield header
             yield return new FileChunk(
                 $"<file path=\"{item.RelativePath}\" size=\"{item.FileSize}\" tokens=\"~{item.EstimatedTokens}\">\n",
                 item.RelativePath,
@@ -291,13 +280,11 @@ public class FileHelper
                 IsFooter: false,
                 IsTruncated: false);
 
-            // Stream content
             await foreach (var chunk in StreamFileContentAsync(item, ct))
             {
                 yield return chunk;
             }
 
-            // Yield footer
             yield return new FileChunk(
                 "\n</file>\n\n",
                 item.RelativePath,
@@ -355,7 +342,6 @@ public class FileHelper
                 IsTruncated: false);
         }
 
-        // Add truncation marker if needed
         if (item.IsTruncated)
         {
             yield return new FileChunk(

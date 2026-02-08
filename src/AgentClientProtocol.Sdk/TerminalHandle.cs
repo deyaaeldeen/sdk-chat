@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Terminal handle for managing terminal lifecycle
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using AgentClientProtocol.Sdk.Schema;
 
@@ -7,7 +7,7 @@ namespace AgentClientProtocol.Sdk;
 
 /// <summary>
 /// Handle for controlling and monitoring a terminal created via CreateTerminal.
-/// 
+///
 /// Provides methods to:
 /// - Get current output without waiting
 /// - Wait for command completion

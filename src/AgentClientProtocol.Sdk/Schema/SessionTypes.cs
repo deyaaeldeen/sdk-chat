@@ -1,5 +1,5 @@
-// Agent Client Protocol - .NET SDK
-// Session-related types
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;

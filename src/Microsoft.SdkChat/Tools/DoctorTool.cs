@@ -93,25 +93,18 @@ public sealed partial class DoctorTool
         // Check .NET (always available since we're running on it)
         standardResults.Add(await CheckDotNetAsync(ct));
 
-        // Check Python
         standardResults.Add(await CheckPythonAsync(ct));
 
-        // Check Go
         standardResults.Add(await CheckGoAsync(ct));
 
-        // Check Java/JBang
         standardResults.Add(await CheckJBangAsync(ct));
 
-        // Check Node.js
         standardResults.Add(await CheckNodeAsync(ct));
 
-        // Print results
         PrintResults(standardResults, verbose);
 
-        // Print security advisory
         PrintSecurityAdvisory(standardResults);
 
-        // Return non-zero if any required dependency is missing
         var requiredMissing = standardResults.Any(r => !r.IsAvailable && r.Name == ".NET Runtime");
         var optionalMissing = standardResults.Where(r => !r.IsAvailable && r.Name != ".NET Runtime").ToList();
 
@@ -327,7 +320,6 @@ public sealed partial class DoctorTool
     {
         if (string.IsNullOrEmpty(path)) return null;
 
-        // Normalize path
         var normalizedPath = Path.GetFullPath(path);
 
         // Define trusted locations based on OS

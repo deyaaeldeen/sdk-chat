@@ -14,7 +14,6 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
     private readonly PythonApiExtractor _extractor = new();
     private readonly PythonUsageAnalyzer _usageAnalyzer = new();
 
-    // Cached API index for reuse
     private ApiIndex? _cachedApiIndex;
     private string? _cachedSourcePath;
 
@@ -86,7 +85,6 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Extract API surface
         var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
 
         if (apiIndex == null)
@@ -106,7 +104,6 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
                 "Ensure the path contains Python source files with classes or functions.");
         }
 
-        // Analyze coverage if samples exist
         UsageIndex? coverage = null;
         if (!string.IsNullOrEmpty(samplesPath) && Directory.Exists(samplesPath))
         {
@@ -123,11 +120,9 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
         }
         else
         {
-            // No coverage data - fall back to standard format
             apiSurface = PythonFormatter.Format(apiIndex, maxLength);
         }
 
-        // Yield unified API surface with coverage annotations
         yield return $"<api-surface package=\"{apiIndex.Package}\">\n";
         yield return apiSurface;
         yield return "</api-surface>\n";
