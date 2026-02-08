@@ -59,7 +59,7 @@ public class SamplesMcpTools(FileHelper fileHelper)
         "SUPPORTS: .NET/C#, Python, Java, JavaScript, TypeScript, Go. " +
         "WORKFLOW: detect_source → analyze_coverage → generate_samples with prompt targeting uncovered APIs.")]
     public async Task<string> GenerateSamplesAsync(
-        ModelContextProtocol.Server.McpServer mcpServer,
+        IMcpSampler mcpSampler,
         [Description("Absolute path to SDK root. Must contain project files (.csproj, pyproject.toml, pom.xml, package.json, go.mod).")] string packagePath,
         [Description("Where to write samples. Default: auto-detected samples/, examples/, or new 'examples' folder.")] string? outputPath = null,
         [Description("Guide the AI: 'streaming examples', 'error handling patterns', 'authentication scenarios', 'async/await usage'.")] string? prompt = null,
@@ -147,7 +147,7 @@ public class SamplesMcpTools(FileHelper fileHelper)
                 IncludeContext = ContextInclusion.ThisServer
             };
 
-            var samplingResult = await mcpServer.SampleAsync(createMessageRequest, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var samplingResult = await mcpSampler.SampleAsync(createMessageRequest, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             // Parse LLM response to extract generated samples
             var responseText = ExtractTextFromSamplingResponse(samplingResult);
