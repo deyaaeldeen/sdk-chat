@@ -17,6 +17,15 @@ internal sealed record McpResponse<T>
 }
 
 /// <summary>
+/// Error response for MCP operations.
+/// </summary>
+internal sealed record McpErrorResponse
+{
+    public required string Error { get; init; }
+    public required string ErrorCode { get; init; }
+}
+
+/// <summary>
 /// Shared JSON context for all MCP tools.
 /// </summary>
 [JsonSourceGenerationOptions(
@@ -26,6 +35,7 @@ internal sealed record McpResponse<T>
 [JsonSerializable(typeof(McpToolResult))]
 [JsonSerializable(typeof(ErrorDetails))]
 [JsonSerializable(typeof(ResultData))]
+[JsonSerializable(typeof(McpErrorResponse))]
 [JsonSerializable(typeof(McpResponse<SourceFolderResult>))]
 [JsonSerializable(typeof(McpResponse<SamplesFolderResult>))]
 [JsonSerializable(typeof(McpResponse<ApiExtractionResult>))]
