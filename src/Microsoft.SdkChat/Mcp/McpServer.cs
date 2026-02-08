@@ -55,7 +55,8 @@ public static class McpServer
             .WithHttpTransport()
             .WithTools<SourceMcpTools>()
             .WithTools<SamplesMcpTools>()
-            .WithTools<ApiMcpTools>();
+            .WithTools<ApiMcpTools>()
+            .WithResources<SdkResources>();
 
             var app = builder.Build();
 
@@ -80,7 +81,8 @@ public static class McpServer
             .WithStdioServerTransport()
             .WithTools<SourceMcpTools>()
             .WithTools<SamplesMcpTools>()
-            .WithTools<ApiMcpTools>();
+            .WithTools<ApiMcpTools>()
+            .WithResources<SdkResources>();
 
             var host = builder.Build();
             await host.RunAsync(cancellationToken);
