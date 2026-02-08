@@ -19,7 +19,7 @@ public class JavaExtractorFixture : IAsyncLifetime
     public string? SkipReason { get; private set; }
     public string FixturePath => TestFixturesPath;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var extractor = new JavaApiExtractor();
         if (!extractor.IsAvailable())
@@ -38,7 +38,7 @@ public class JavaExtractorFixture : IAsyncLifetime
         }
     }
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => default;
 }
 
 /// <summary>
@@ -56,11 +56,11 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
 
     private ApiIndex GetApi()
     {
-        Skip.If(_fixture.SkipReason != null, _fixture.SkipReason);
+        if (_fixture.SkipReason != null) Assert.Skip(_fixture.SkipReason);
         return _fixture.Api!;
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ReturnsApiIndex_WithPackageName()
     {
         var api = GetApi();
@@ -68,7 +68,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.False(string.IsNullOrEmpty(api.Package));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsPackages()
     {
         var api = GetApi();
@@ -76,7 +76,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.NotEmpty(api.Packages);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsClasses()
     {
         var api = GetApi();
@@ -85,7 +85,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.NotNull(sampleClient);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsConstructors()
     {
         var api = GetApi();
@@ -96,7 +96,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.NotEmpty(sampleClient.Constructors);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsMethods()
     {
         var api = GetApi();
@@ -107,7 +107,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.Contains(sampleClient.Methods, m => m.Name == "getResource");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsInterfaces()
     {
         var api = GetApi();
@@ -116,7 +116,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.NotNull(resourceOps);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsEnums()
     {
         var api = GetApi();
@@ -127,7 +127,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.NotEmpty(serviceVersion.Values);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsEnumValues()
     {
         var api = GetApi();
@@ -137,7 +137,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.Contains(serviceVersion.Values!, v => v.Contains("V2024_01_01"));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsClassFields()
     {
         var api = GetApi();
@@ -148,7 +148,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         // Fields collection may be empty if all fields are private
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ExcludesPrivateMethods()
     {
         var api = GetApi();
@@ -159,7 +159,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.DoesNotContain(allMethods, m => m.Modifiers?.Contains("private") == true);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ProducesSmallerOutputThanSource()
     {
         // For small test fixtures, API surface can be close to source size
@@ -174,7 +174,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
             $"JSON ({json.Length}) should be <= 120% of source ({sourceSize})");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsInterfaceMethods()
     {
         var api = GetApi();

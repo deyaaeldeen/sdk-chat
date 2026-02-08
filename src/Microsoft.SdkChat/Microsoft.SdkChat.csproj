@@ -20,6 +20,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Microsoft.SdkChat.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Required for ASP.NET Core types (WebApplication, etc.) used by Streamable HTTP transport -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>

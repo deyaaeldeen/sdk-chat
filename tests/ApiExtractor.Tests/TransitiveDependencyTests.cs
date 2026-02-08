@@ -164,11 +164,11 @@ public class TransitiveDependencyTests
 
     #region TypeScript Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task TypeScript_Extract_IncludesDependenciesProperty()
     {
         var extractor = new TypeScriptApiExtractor();
-        Skip.If(!extractor.IsAvailable(), extractor.UnavailableReason);
+        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
         
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "TypeScript"));
         
@@ -247,11 +247,11 @@ public class TransitiveDependencyTests
 
     #region Python Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task Python_Extract_IncludesDependenciesProperty()
     {
         var extractor = new PythonApiExtractor();
-        Skip.If(!extractor.IsAvailable(), extractor.UnavailableReason);
+        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
         
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Python"));
         
@@ -294,11 +294,11 @@ public class TransitiveDependencyTests
 
     #region Go Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task Go_Extract_IncludesDependenciesProperty()
     {
         var extractor = new GoApiExtractor();
-        Skip.If(!extractor.IsAvailable(), extractor.UnavailableReason);
+        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
         
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Go"));
         
@@ -382,11 +382,11 @@ public class TransitiveDependencyTests
 
     #region Java Tests
 
-    [SkippableFact]
+    [Fact]
     public async Task Java_Extract_IncludesDependenciesProperty()
     {
         var extractor = new JavaApiExtractor();
-        Skip.If(!extractor.IsAvailable(), extractor.UnavailableReason);
+        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
         
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Java"));
         

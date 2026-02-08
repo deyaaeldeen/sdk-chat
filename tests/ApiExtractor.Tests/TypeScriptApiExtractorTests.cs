@@ -19,7 +19,7 @@ public class TypeScriptExtractorFixture : IAsyncLifetime
     public string? SkipReason { get; private set; }
     public string FixturePath => TestFixturesPath;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         if (!CheckNodeInstalled())
         {
@@ -37,7 +37,7 @@ public class TypeScriptExtractorFixture : IAsyncLifetime
         }
     }
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => default;
 
     private static bool CheckNodeInstalled()
     {
@@ -74,11 +74,11 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
 
     private ApiIndex GetApi()
     {
-        Skip.If(_fixture.SkipReason != null, _fixture.SkipReason);
+        if (_fixture.SkipReason != null) Assert.Skip(_fixture.SkipReason);
         return _fixture.Api!;
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ReturnsApiIndex_WithPackageName()
     {
         var api = GetApi();
@@ -86,7 +86,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.False(string.IsNullOrEmpty(api.Package));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsModules()
     {
         var api = GetApi();
@@ -94,7 +94,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.NotEmpty(api.Modules);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsClasses()
     {
         var api = GetApi();
@@ -103,7 +103,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.NotNull(sampleClient);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsConstructors()
     {
         var api = GetApi();
@@ -114,7 +114,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.NotEmpty(sampleClient.Constructors);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsMethods()
     {
         var api = GetApi();
@@ -125,7 +125,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.Contains(sampleClient.Methods, m => m.Name == "getResource");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsInterfaces()
     {
         var api = GetApi();
@@ -134,7 +134,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.NotNull(resource);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsEnums()
     {
         var api = GetApi();
@@ -145,7 +145,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.NotEmpty(resultStatus.Values);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsTypeAliases()
     {
         var api = GetApi();
@@ -153,7 +153,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.NotEmpty(types);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsFunctions()
     {
         var api = GetApi();
@@ -162,7 +162,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.Contains(functions, f => f.Name == "createDefaultClient" || f.Name == "batchGetResources");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsAsyncMethods()
     {
         var api = GetApi();
@@ -173,7 +173,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.Contains(sampleClient.Methods, m => m.Async == true);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsStaticMethods()
     {
         var api = GetApi();
@@ -184,7 +184,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.Contains(sampleClient.Methods, m => m.Static == true);
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_FindsProperties()
     {
         var api = GetApi();
@@ -195,7 +195,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.Contains(resource.Properties, p => p.Name == "id");
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ExcludesPrivateMethods()
     {
         var api = GetApi();
@@ -206,7 +206,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.DoesNotContain(allMethods, m => m.Name.StartsWith('#'));
     }
 
-    [SkippableFact]
+    [Fact]
     public void Extract_ProducesSmallerOutputThanSource()
     {
         // For small test fixtures, API surface can be close to source size

@@ -15,7 +15,7 @@ public sealed class LruCache<TKey, TValue> where TKey : notnull
 {
     private readonly ConcurrentDictionary<TKey, CacheEntry> _cache;
     private readonly int _maxSize;
-    private readonly object _evictionLock = new();
+    private readonly Lock _evictionLock = new();
     private long _accessCounter;
 
     /// <summary>
@@ -67,6 +67,9 @@ public sealed class LruCache<TKey, TValue> where TKey : notnull
             return existing.Value;
         }
 
+        // Race with eviction: the winning entry was already evicted between
+        // TryAdd and TryGetValue. Force-add our value to ensure caching.
+        _cache[key] = entry;
         return value;
     }
 
@@ -122,6 +125,16 @@ public sealed class LruCache<TKey, TValue> where TKey : notnull
     private sealed class CacheEntry(TValue value, long lastAccess)
     {
         public TValue Value { get; } = value;
-        public long LastAccess { get; set; } = lastAccess;
+
+        /// <summary>
+        /// Last access timestamp. Uses Volatile to ensure visibility across threads
+        /// (prevents torn reads on ARM64 where long writes may not be atomic).
+        /// </summary>
+        private long _lastAccess = lastAccess;
+        public long LastAccess
+        {
+            get => Volatile.Read(ref _lastAccess);
+            set => Volatile.Write(ref _lastAccess, value);
+        }
     }
 }
