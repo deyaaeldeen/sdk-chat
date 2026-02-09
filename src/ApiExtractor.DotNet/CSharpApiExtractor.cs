@@ -180,15 +180,15 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Collect all defined type names (to exclude from dependencies)
         var definedTypes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var ns in namespaces)
-        foreach (var type in ns.Types)
-        {
-            definedTypes.Add(type.Name.Split('<')[0]);
-            // Also add fully qualified name
-            if (!string.IsNullOrEmpty(ns.Name))
+            foreach (var type in ns.Types)
             {
-                definedTypes.Add($"{ns.Name}.{type.Name.Split('<')[0]}");
+                definedTypes.Add(type.Name.Split('<')[0]);
+                // Also add fully qualified name
+                if (!string.IsNullOrEmpty(ns.Name))
+                {
+                    definedTypes.Add($"{ns.Name}.{type.Name.Split('<')[0]}");
+                }
             }
-        }
 
         // Load metadata references from NuGet packages
         var references = LoadMetadataReferences(rootPath);
@@ -290,10 +290,10 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 }
                 // Collect from type constraints
                 foreach (var constraint in method.ConstraintClauses)
-                foreach (var typeConstraint in constraint.Constraints.OfType<TypeConstraintSyntax>())
-                {
-                    CollectExternalTypeSymbol(typeConstraint.Type, semanticModel, definedTypes, externalTypes);
-                }
+                    foreach (var typeConstraint in constraint.Constraints.OfType<TypeConstraintSyntax>())
+                    {
+                        CollectExternalTypeSymbol(typeConstraint.Type, semanticModel, definedTypes, externalTypes);
+                    }
                 break;
 
             case PropertyDeclarationSyntax prop:
@@ -426,7 +426,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     private static IReadOnlyList<MetadataReference> LoadRuntimeReferences()
     {
-        var references = new List<MetadataReference>();
+        List<MetadataReference> references = [];
         var runtimeDir = AppContext.BaseDirectory;
         if (!string.IsNullOrEmpty(runtimeDir))
         {
@@ -534,7 +534,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     private static IReadOnlyList<(string Name, string Version)> ParseProjectPackageReferences(string rootPath)
     {
-        var results = new List<(string, string)>();
+        List<(string, string)> results = [];
 
         var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
                   ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
@@ -708,7 +708,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     private sealed class MergedType
     {
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
 
         public string Namespace { get; set; } = "";
         public string Name { get; set; } = "";
@@ -923,7 +923,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     {
         var name = type.Identifier.Text;
         if (type is TypeDeclarationSyntax tds && tds.TypeParameterList != null)
-            name += "<" + string.Join(",", tds.TypeParameterList.Parameters.Select(p => p.Identifier.Text)) + ">";
+            name += $"<{string.Join(",", tds.TypeParameterList.Parameters.Select(p => p.Identifier.Text))}>";
         return name;
     }
 
@@ -981,7 +981,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
     private static string TypeParams(MethodDeclarationSyntax m) =>
         m.TypeParameterList != null
-            ? "<" + string.Join(",", m.TypeParameterList.Parameters.Select(p => p.Identifier.Text)) + ">"
+            ? $"<{string.Join(",", m.TypeParameterList.Parameters.Select(p => p.Identifier.Text))}>"
             : "";
 
     /// <summary>
@@ -1040,7 +1040,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         var mods = string.Join(" ", p.Modifiers.Select(m => m.Text));
         var type = Simplify(p.Type);
         var name = p.Identifier.Text;
-        var def = p.Default != null ? " = " + (p.Default.Value.ToString().Length < 20 ? p.Default.Value.ToString() : "...") : "";
+        var def = p.Default is not null ? $" = {(p.Default.Value.ToString().Length < 20 ? p.Default.Value.ToString() : "...")}" : "";
         return string.IsNullOrEmpty(mods) ? $"{type} {name}{def}" : $"{mods} {type} {name}{def}";
     }
 
@@ -1065,7 +1065,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         QualifiedNameSyntax q when IsSystemNamespace(q.Left.ToString())
             => SimplifyType(q.Right),
         GenericNameSyntax g
-            => g.Identifier.Text + "<" + string.Join(", ", g.TypeArgumentList.Arguments.Select(SimplifyType)) + ">",
+            => $"{g.Identifier.Text}<{string.Join(", ", g.TypeArgumentList.Arguments.Select(SimplifyType))}>",
         ArrayTypeSyntax a
             => SimplifyType(a.ElementType) + string.Join("", a.RankSpecifiers),
         NullableTypeSyntax n

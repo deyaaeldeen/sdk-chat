@@ -141,7 +141,7 @@ public sealed record StructApi
     /// <summary>Gets type names referenced in method signatures and fields.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        var refs = new HashSet<string>();
+        HashSet<string> refs = [];
 
         foreach (var method in Methods ?? [])
         {

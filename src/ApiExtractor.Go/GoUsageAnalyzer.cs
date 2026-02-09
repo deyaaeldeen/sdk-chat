@@ -52,7 +52,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
             var result = DeserializeResult(output);
 
-            if (result == null)
+            if (result is null)
                 return new UsageIndex { FileCount = 0 };
 
             return new UsageIndex
@@ -239,7 +239,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 {
                     if (!interfaceImplementers.TryGetValue(iface.Key, out var list))
                     {
-                        list = new List<StructApi>();
+                        list = [];
                         interfaceImplementers[iface.Key] = list;
                     }
                     list.Add(strct);

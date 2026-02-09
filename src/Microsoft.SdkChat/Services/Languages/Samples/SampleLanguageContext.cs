@@ -190,14 +190,14 @@ public abstract class SampleLanguageContext
                 {
                     // Fallback: stream raw samples with smaller per-file limit (samples should be small)
                     var basePath = Path.GetDirectoryName(sourcePath) ?? sourcePath;
-                    var groups = new List<SourceInputGroup>
-                    {
+                    List<SourceInputGroup> groups =
+                    [
                         new(
                             SectionName: "existing-samples",
                             Inputs: [new SourceInputSpec(samplesPath, [FileExtension], SampleConstants.ExistingSamplesExcludePatterns)],
                             PerFileLimit: SampleConstants.FallbackSampleFileLimit
                         )
-                    };
+                    ];
 
                     await foreach (var chunk in FileHelper.StreamFilesAsync(groups, basePath, ct))
                     {
@@ -213,7 +213,7 @@ public abstract class SampleLanguageContext
         // Extract extensions from patterns like "**/*.cs" -> ".cs"
         return patterns
             .Where(p => p.Contains("*."))
-            .Select(p => "." + p.Split("*.").Last().TrimEnd('*', '/'))
+            .Select(p => $".{p.Split("*.").Last().TrimEnd('*', '/')}")
             .Distinct()
             .ToArray();
     }

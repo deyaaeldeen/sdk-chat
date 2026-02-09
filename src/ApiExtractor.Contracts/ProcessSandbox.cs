@@ -90,7 +90,7 @@ public static class ProcessSandbox
         }
 
         // Use ArgumentList for proper escaping - prevents injection
-        if (arguments != null)
+        if (arguments is not null)
         {
             foreach (var arg in arguments)
             {
@@ -103,7 +103,7 @@ public static class ProcessSandbox
         try
         {
             using var process = Process.Start(psi);
-            if (process == null)
+            if (process is null)
             {
                 return ProcessResult.Failed(-1, "", $"Failed to start process: {fileName}");
             }

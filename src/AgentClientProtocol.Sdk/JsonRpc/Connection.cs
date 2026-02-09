@@ -127,7 +127,7 @@ public class Connection : IAsyncDisposable
             while (!ct.IsCancellationRequested)
             {
                 var message = await _stream.ReadAsync(ct).ConfigureAwait(false);
-                if (message == null) break;
+                if (message is null) break;
 
                 // Bounded channel - this will wait if consumer is slow (backpressure)
                 await _inboundChannel.Writer.WriteAsync(message, ct).ConfigureAwait(false);
@@ -182,7 +182,7 @@ public class Connection : IAsyncDisposable
 
     private async Task HandleRequestAsync(JsonRpcRequest request)
     {
-        if (_requestHandler == null)
+        if (_requestHandler is null)
         {
             await SendErrorAsync(request.Id, RequestError.MethodNotFound(request.Method));
             return;
@@ -206,11 +206,11 @@ public class Connection : IAsyncDisposable
 
     private void HandleResponse(JsonRpcResponse response)
     {
-        if (response.Id == null) return;
+        if (response.Id is null) return;
 
         // Normalize ID to int for matching (JSON deserializes numbers as JsonElement)
         var normalizedId = NormalizeId(response.Id);
-        if (normalizedId != null && _pendingRequests.TryRemove(normalizedId, out var tcs))
+        if (normalizedId is not null && _pendingRequests.TryRemove(normalizedId, out var tcs))
         {
             tcs.TrySetResult(response);
         }
@@ -232,7 +232,7 @@ public class Connection : IAsyncDisposable
 
     private async Task HandleNotificationAsync(JsonRpcNotification notification)
     {
-        if (_notificationHandler != null)
+        if (_notificationHandler is not null)
         {
             try
             {
@@ -260,7 +260,7 @@ public class Connection : IAsyncDisposable
         {
             // Parameters is dynamic object - type unknown at compile time
 #pragma warning disable IL2026, IL3050 // Dynamic object serialization unavoidable
-            var serializedParams = parameters != null ? System.Text.Json.JsonSerializer.SerializeToElement(parameters, AcpJsonContext.FlexibleOptions) : (System.Text.Json.JsonElement?)null;
+            var serializedParams = parameters is not null ? System.Text.Json.JsonSerializer.SerializeToElement(parameters, AcpJsonContext.FlexibleOptions) : (System.Text.Json.JsonElement?)null;
 #pragma warning restore IL2026, IL3050
 
             var request = new JsonRpcRequest
@@ -277,12 +277,12 @@ public class Connection : IAsyncDisposable
 
             var response = await tcs.Task.WaitAsync(cts.Token).ConfigureAwait(false);
 
-            if (response.Error != null)
+            if (response.Error is not null)
             {
                 throw new RequestError(response.Error.Code, response.Error.Message, response.Error.Data);
             }
 
-            if (response.Result == null) return default;
+            if (response.Result is null) return default;
 
             // Efficient deserialization: handle JsonElement directly without re-serializing
             // Generic T cannot use source-generated serialization at compile time
@@ -310,7 +310,7 @@ public class Connection : IAsyncDisposable
     {
         // Parameters is dynamic object - type unknown at compile time
 #pragma warning disable IL2026, IL3050 // Dynamic object serialization unavoidable
-        var serializedParams = parameters != null ? System.Text.Json.JsonSerializer.SerializeToElement(parameters, AcpJsonContext.FlexibleOptions) : (System.Text.Json.JsonElement?)null;
+        var serializedParams = parameters is not null ? System.Text.Json.JsonSerializer.SerializeToElement(parameters, AcpJsonContext.FlexibleOptions) : (System.Text.Json.JsonElement?)null;
 #pragma warning restore IL2026, IL3050
 
         var notification = new JsonRpcNotification

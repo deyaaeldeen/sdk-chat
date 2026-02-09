@@ -58,7 +58,7 @@ public class RpcDispatchGenerator : IIncrementalGenerator
             ? attribute.ConstructorArguments[0].Value as string ?? "Client"
             : "Client";
 
-        var methods = new List<RpcMethodInfo>();
+        List<RpcMethodInfo> methods = [];
 
         foreach (var member in interfaceSymbol.GetMembers())
         {

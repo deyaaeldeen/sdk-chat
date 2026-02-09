@@ -56,7 +56,7 @@ public sealed record ApiIndex : IApiIndex
 
         foreach (var type in GetAllTypes())
         {
-            var deps = new HashSet<string>();
+            HashSet<string> deps = [];
 
             // Check base type
             if (!string.IsNullOrEmpty(type.Base) && allTypeNames.Contains(type.Base.Split('<')[0]))
@@ -188,7 +188,7 @@ public record TypeInfo
     /// </summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        var refs = new HashSet<string>();
+        HashSet<string> refs = [];
 
         if (!string.IsNullOrEmpty(Base))
         {

@@ -56,7 +56,7 @@ public static class JavaFormatter
         var allClasses = index.GetAllClasses().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
-        var includedClasses = new HashSet<string>();
+        HashSet<string> includedClasses = [];
         var currentLength = sb.Length;
 
         foreach (var cls in classesWithUncovered)
@@ -115,7 +115,7 @@ public static class JavaFormatter
 
         // Get client dependencies first
         var clients = allClasses.Where(c => c.IsClientType).ToList();
-        var clientDeps = new HashSet<string>();
+        HashSet<string> clientDeps = [];
         foreach (var client in clients)
             foreach (var dep in client.GetReferencedTypes(allTypeNames))
                 clientDeps.Add(dep);
@@ -131,7 +131,7 @@ public static class JavaFormatter
             .ThenBy(c => c.Name)
             .ToList();
 
-        var includedClasses = new HashSet<string>();
+        HashSet<string> includedClasses = [];
         var currentLength = sb.Length;
 
         foreach (var pkg in api.Packages)
@@ -156,7 +156,7 @@ public static class JavaFormatter
                     continue;
 
                 // Include class + dependencies
-                var classesToAdd = new List<ClassInfo> { cls };
+                List<ClassInfo> classesToAdd = [cls];
                 var deps = cls.GetReferencedTypes(allTypeNames);
                 foreach (var depName in deps)
                 {
@@ -188,9 +188,9 @@ public static class JavaFormatter
         if (api.Dependencies?.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine($"// {new string('=', 77)}");
             sb.AppendLine("// Dependency Types (from external packages)");
-            sb.AppendLine("// " + new string('=', 77));
+            sb.AppendLine($"// {new string('=', 77)}");
             sb.AppendLine();
 
             foreach (var dep in api.Dependencies)

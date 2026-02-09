@@ -133,59 +133,50 @@ public class AiService : IAiService
             contextInfo);
         await using (debugSession)
         {
-        var itemCount = 0;
-        var startTime = DateTime.UtcNow;
+            var itemCount = 0;
+            var startTime = DateTime.UtcNow;
 
-        for (var attempt = 1; attempt <= Helpers.SampleResponseParser.MaxRetryAttempts; attempt++)
-        {
-        IAsyncEnumerable<string> stream = StreamCopilotAsync(enhancedSystemPrompt, userPrompt, effectiveModel, cancellationToken);
+            IAsyncEnumerable<string> stream = StreamCopilotAsync(enhancedSystemPrompt, userPrompt, effectiveModel, cancellationToken);
 
-        await using var enumerator = NdjsonStreamParser
-            .ParseAsync(TapStreamAsync(stream, debugSession, cancellationToken), jsonTypeInfo, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
-            .GetAsyncEnumerator(cancellationToken);
+            await using var enumerator = NdjsonStreamParser
+                .ParseAsync(TapStreamAsync(stream, debugSession, cancellationToken), jsonTypeInfo, ignoreNonJsonLinesBeforeFirstObject: true, cancellationToken: cancellationToken)
+                .GetAsyncEnumerator(cancellationToken);
 
-        while (true)
-        {
-            T item;
-            try
+            while (true)
             {
-                if (!await enumerator.MoveNextAsync())
+                T item;
+                try
                 {
-                    break;
+                    if (!await enumerator.MoveNextAsync())
+                    {
+                        break;
+                    }
+
+                    item = enumerator.Current;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "AI stream failed after {Duration}ms with {ResponseChars} chars received",
+                        (DateTime.UtcNow - startTime).TotalMilliseconds, debugSession.ResponseCharsWritten);
+                    await _debugLogger.CompleteSessionFromStreamAsync(debugSession, streaming: true, error: ex);
+                    throw;
                 }
 
-                item = enumerator.Current;
+                itemCount++;
+                yield return item;
             }
-            catch (Exception ex)
+
+            // Invoke async stream complete callback with response usage
+            var responseChars = debugSession.ResponseCharsWritten;
+            var estimatedResponseTokens = (int)(responseChars / SampleConstants.CharsPerToken);
+            var duration = DateTime.UtcNow - startTime;
+
+            if (onStreamComplete != null)
             {
-                _logger.LogError(ex, "AI stream failed after {Duration}ms with {ResponseChars} chars received",
-                    (DateTime.UtcNow - startTime).TotalMilliseconds, debugSession.ResponseCharsWritten);
-                await _debugLogger.CompleteSessionFromStreamAsync(debugSession, streaming: true, error: ex);
-                throw;
+                await onStreamComplete(new AiStreamCompleteEventArgs((int)responseChars, estimatedResponseTokens, duration));
             }
 
-            itemCount++;
-            yield return item;
-        }
-
-        if (itemCount > 0 || attempt >= Helpers.SampleResponseParser.MaxRetryAttempts)
-            break;
-
-        // No items parsed from stream — retry the AI call
-        _logger.LogWarning("AI stream yielded 0 parseable items on attempt {Attempt}, retrying", attempt);
-        }
-
-        // Invoke async stream complete callback with response usage
-        var responseChars = debugSession.ResponseCharsWritten;
-        var estimatedResponseTokens = (int)(responseChars / SampleConstants.CharsPerToken);
-        var duration = DateTime.UtcNow - startTime;
-
-        if (onStreamComplete != null)
-        {
-            await onStreamComplete(new AiStreamCompleteEventArgs((int)responseChars, estimatedResponseTokens, duration));
-        }
-
-        await _debugLogger.CompleteSessionFromStreamAsync(debugSession, streaming: true);
+            await _debugLogger.CompleteSessionFromStreamAsync(debugSession, streaming: true);
         } // await using debugSession
     }
 
@@ -215,7 +206,7 @@ public class AiService : IAiService
     {
         return SchemaCache.GetOrAdd(type, static t =>
         {
-            return GenerateObjectSchema(t, 0, new HashSet<Type>());
+            return GenerateObjectSchema(t, 0, []);
         });
     }
 
@@ -241,7 +232,7 @@ public class AiService : IAiService
             .Select(p => $"{propIndent}\"{ToCamelCase(p.Name)}\": {GetJsonType(p.PropertyType, indentLevel + 1, visitedTypes)}")
             .ToList();
 
-        return "{\n" + string.Join(",\n", properties) + $"\n{indent}}}";
+        return $"{{\n{string.Join(",\n", properties)}\n{indent}}}";
     }
 
     private static string ToCamelCase(string name) =>
@@ -415,7 +406,7 @@ public class AiService : IAiService
                 Mode = SystemMessageMode.Append,
                 Content = systemPrompt
             },
-            AvailableTools = new List<string>()
+            AvailableTools = []
         }, cancellationToken);
 
         var chunks = System.Threading.Channels.Channel.CreateUnbounded<string>();

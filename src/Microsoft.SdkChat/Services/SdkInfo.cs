@@ -821,7 +821,7 @@ public class SdkInfo
     {
         try
         {
-            return Directory.EnumerateFiles(folder, "*" + extension, SearchOption.TopDirectoryOnly).Count();
+            return Directory.EnumerateFiles(folder, $"*{extension}", SearchOption.TopDirectoryOnly).Count();
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
         {
@@ -1721,7 +1721,7 @@ public class SdkInfo
     {
         if (!string.IsNullOrEmpty(languageExtension))
         {
-            return SafeFileEnumerator.CountFiles(folder, "*" + languageExtension, maxCount: 200);
+            return SafeFileEnumerator.CountFiles(folder, $"*{languageExtension}", maxCount: 200);
         }
 
         // Enumerate once and filter in memory to avoid 6 separate directory traversals
@@ -1737,7 +1737,7 @@ public class SdkInfo
     /// </summary>
     private static int CountSourceFiles(string folder, string extension)
     {
-        return SafeFileEnumerator.CountFiles(folder, "*" + extension, maxCount: 200);
+        return SafeFileEnumerator.CountFiles(folder, $"*{extension}", maxCount: 200);
     }
 
     /// <summary>
@@ -2236,7 +2236,7 @@ public class SdkInfo
             return 0;
 
         var count = 0;
-        var searchPattern = "*" + fileExtension;
+        var searchPattern = $"*{fileExtension}";
 
         foreach (var filePath in SafeFileEnumerator.EnumerateFiles(folder, searchPattern, MaxImportScanFiles))
         {

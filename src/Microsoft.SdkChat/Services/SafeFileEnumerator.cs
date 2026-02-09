@@ -137,17 +137,17 @@ public static class SafeFileEnumerator
             {
                 foreach (var subdir in subdirs)
                 {
-                var dirName = Path.GetFileName(subdir);
-                if (ExcludedFolders.Contains(dirName))
-                    continue;
+                    var dirName = Path.GetFileName(subdir);
+                    if (ExcludedFolders.Contains(dirName))
+                        continue;
 
-                // Guard against symlink cycles
-                var canonical = GetCanonicalPath(subdir);
-                if (visited.Add(canonical))
-                {
-                    stack.Push((subdir, depth + 1));
+                    // Guard against symlink cycles
+                    var canonical = GetCanonicalPath(subdir);
+                    if (visited.Add(canonical))
+                    {
+                        stack.Push((subdir, depth + 1));
+                    }
                 }
-            }
             }
         }
     }

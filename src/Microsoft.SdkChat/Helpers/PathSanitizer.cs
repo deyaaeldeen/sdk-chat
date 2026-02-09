@@ -38,12 +38,12 @@ public static class PathSanitizer
     /// <summary>Sanitizes a relative path, blocking traversal attacks.</summary>
     public static string SanitizeFilePath(string? path, string expectedExtension)
     {
-        if (string.IsNullOrEmpty(path)) return "Sample" + expectedExtension;
+        if (string.IsNullOrEmpty(path)) return $"Sample{expectedExtension}";
 
         var normalized = path.Replace('\\', '/');
         var parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-        if (parts.Length == 0) return "Sample" + expectedExtension;
+        if (parts.Length == 0) return $"Sample{expectedExtension}";
 
         var sanitizedParts = new string[parts.Length];
         var validPartCount = 0;
@@ -59,7 +59,7 @@ public static class PathSanitizer
             sanitizedParts[validPartCount++] = SanitizeFileName(part);
         }
 
-        if (validPartCount == 0) return "Sample" + expectedExtension;
+        if (validPartCount == 0) return $"Sample{expectedExtension}";
 
         var finalParts = sanitizedParts[..validPartCount];
         var result = string.Join(Path.DirectorySeparatorChar, finalParts);

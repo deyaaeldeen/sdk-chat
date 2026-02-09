@@ -61,7 +61,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             // Parse the JSON output
             var result = DeserializeResult(output);
 
-            if (result == null)
+            if (result is null)
                 return new UsageIndex { FileCount = 0 };
 
             return new UsageIndex
@@ -263,7 +263,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             var baseName = cls.Base.Split('[')[0];
             if (!derivedByBase.TryGetValue(baseName, out var list))
             {
-                list = new List<ClassInfo>();
+                list = [];
                 derivedByBase[baseName] = list;
             }
             list.Add(cls);

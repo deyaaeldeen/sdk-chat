@@ -88,7 +88,7 @@ public sealed partial class DoctorTool
         Console.WriteLine("SDK Chat Doctor - Dependency Validation");
         Console.WriteLine("========================================\n");
 
-        var standardResults = new List<DependencyStatus>();
+        List<DependencyStatus> standardResults = [];
 
         // Check .NET (always available since we're running on it)
         standardResults.Add(await CheckDotNetAsync(ct));
@@ -407,7 +407,7 @@ public sealed partial class DoctorTool
             ("TypeScript Extractor", "ts_extractor", "TypeScript/JavaScript"),
         };
 
-        var results = new List<ExtractorStatus>();
+        List<ExtractorStatus> results = [];
 
         foreach (var (name, binary, language) in extractors)
         {

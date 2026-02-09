@@ -7,7 +7,7 @@ namespace Microsoft.SdkChat.Helpers;
 public static class ConsoleUx
 {
     private static readonly string[] SpinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
 
     private static bool _supportsAnsi = !Console.IsOutputRedirected &&
         Environment.GetEnvironmentVariable("NO_COLOR") == null;
@@ -124,7 +124,7 @@ public static class ConsoleUx
         }
         else
         {
-            Console.Write("\r" + new string(' ', Console.WindowWidth - 1) + "\r");
+            Console.Write($"\r{new string(' ', Console.WindowWidth - 1)}\r");
         }
     }
 
