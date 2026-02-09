@@ -347,8 +347,11 @@ class Sample
         File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
         File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), "export class Client {}");
 
+        // Use a synchronous IProgress<T> implementation to avoid race conditions.
+        // Progress<T> posts callbacks to the thread pool asynchronously, so messages
+        // may not be delivered by the time assertions run after await.
         var progressMessages = new System.Collections.Concurrent.ConcurrentBag<string>();
-        var progress = new Progress<string>(msg => progressMessages.Add(msg));
+        var progress = new SynchronousProgress<string>(msg => progressMessages.Add(msg));
 
         // Act
         var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, progress, ct: CancellationToken.None);
@@ -430,4 +433,14 @@ client.upload();
     }
 
     #endregion
+
+    /// <summary>
+    /// Synchronous IProgress implementation for tests.
+    /// Unlike <see cref="Progress{T}"/> which posts callbacks to the thread pool
+    /// (causing race conditions in tests), this invokes the callback inline.
+    /// </summary>
+    private sealed class SynchronousProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
+    }
 }

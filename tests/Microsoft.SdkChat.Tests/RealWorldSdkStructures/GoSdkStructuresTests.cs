@@ -11,6 +11,7 @@ namespace Microsoft.SdkChat.Tests.RealWorldSdkStructures;
 /// Tests based on real-world Go SDK repository structures from top GitHub repos.
 /// Each test represents a distinct, deduped pattern found in popular Go SDKs.
 /// </summary>
+[Collection("SdkInfoCache")]
 public class GoSdkStructuresTests : SdkStructureTestBase
 {
     // Pattern 1: Flat module - *.go at root

@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Microsoft.SdkChat.Tests;
 
+[Collection("SdkInfoCache")]
 public class SdkInfoTests : IDisposable
 {
     private readonly string _testRoot;

@@ -16,6 +16,7 @@ namespace Microsoft.SdkChat.Tests.Tools;
 /// Tests for the SampleGeneratorTool CLI entry point.
 /// Covers validation, error handling, dry-run mode, and output behavior.
 /// </summary>
+[Collection("SdkInfoCache")]
 public class SampleGeneratorToolTests : IDisposable
 {
     private readonly string _testRoot;

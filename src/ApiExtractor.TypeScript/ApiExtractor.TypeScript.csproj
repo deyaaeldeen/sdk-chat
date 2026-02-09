@@ -27,12 +27,14 @@
        Uses a dynamic ItemGroup inside a target so the glob is evaluated at execution time,
        AFTER npm run build creates the files (static globs evaluate at project load before build).
        DependsOnTargets ensures npm build runs first so dist/ exists when this target fires,
-       even when a parent project invokes GetCopyToOutputDirectoryItems without building. -->
+       even when a parent project invokes GetCopyToOutputDirectoryItems without building.
+       NOTE: The Condition is on the ItemGroup, NOT the Target, because MSBuild evaluates
+       Target Condition BEFORE DependsOnTargets - putting it on Target would skip npm build
+       in clean CI checkouts where dist/ doesn't exist yet. -->
   <Target Name="AddDistFilesToCopyItems"
           BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems"
-          DependsOnTargets="PreinstallNpmDependencies"
-          Condition="Exists('$(MSBuildProjectDirectory)/dist')">
-    <ItemGroup>
+          DependsOnTargets="PreinstallNpmDependencies">
+    <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/dist')">
       <Content Include="dist/**/*">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </Content>

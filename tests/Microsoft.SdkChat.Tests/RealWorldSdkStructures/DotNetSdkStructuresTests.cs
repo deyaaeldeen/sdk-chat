@@ -11,6 +11,7 @@ namespace Microsoft.SdkChat.Tests.RealWorldSdkStructures;
 /// Tests based on real-world .NET SDK repository structures from top GitHub repos.
 /// Each test represents a distinct, deduped pattern found in popular .NET SDKs.
 /// </summary>
+[Collection("SdkInfoCache")]
 public class DotNetSdkStructuresTests : SdkStructureTestBase
 {
     // Pattern 1: src/{ProjectName}/{ProjectName}.csproj with source files

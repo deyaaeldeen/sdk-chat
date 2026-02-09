@@ -14,6 +14,7 @@ namespace Microsoft.SdkChat.Tests.Mcp;
 /// Comprehensive tests for the MCP Samples tools (two-tool approach).
 /// Tests build_samples_prompt and validate_samples tools.
 /// </summary>
+[Collection("SdkInfoCache")]
 public class SamplesMcpToolsTests : IDisposable
 {
     private readonly string _testRoot;
