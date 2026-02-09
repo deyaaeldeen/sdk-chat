@@ -24,6 +24,12 @@ public class CliFixture : IAsyncLifetime
     private static readonly string RepoRoot = FindRepoRoot();
 
     /// <summary>
+    /// Build configuration to use for <c>dotnet run</c>.
+    /// Auto-detected from the test assembly's output path (Debug or Release).
+    /// </summary>
+    private static readonly string Configuration = DetectConfiguration();
+
+    /// <summary>
     /// Path to the main CLI project.
     /// </summary>
     public string ProjectPath => Path.Combine(RepoRoot, "src", "Microsoft.SdkChat", "Microsoft.SdkChat.csproj");
@@ -85,7 +91,7 @@ public class CliFixture : IAsyncLifetime
         string[] args,
         int timeoutSeconds = 120)
     {
-        var dotnetArgs = new List<string> { "run", "--project", ProjectPath, "--no-build", "--" };
+        var dotnetArgs = new List<string> { "run", "--project", ProjectPath, "--configuration", Configuration, "--no-build", "--" };
         dotnetArgs.AddRange(args);
 
         return await RunProcessAsync("dotnet", [.. dotnetArgs], timeoutSeconds);
@@ -191,5 +197,17 @@ public class CliFixture : IAsyncLifetime
 
         throw new InvalidOperationException(
             "Could not find repository root (sdk-chat.sln) from " + AppContext.BaseDirectory);
+    }
+
+    /// <summary>
+    /// Detects whether this test assembly was built in Debug or Release
+    /// by inspecting <see cref="AppContext.BaseDirectory"/>.
+    /// </summary>
+    private static string DetectConfiguration()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        if (baseDir.Contains("/Release/") || baseDir.Contains("\\Release\\"))
+            return "Release";
+        return "Debug";
     }
 }
