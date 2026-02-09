@@ -28,7 +28,7 @@ public class SdkResources(IPackageInfoService service)
     {
         try
         {
-            var result = await _service.ExtractPublicApiAsync(path, language: null, asJson: false, cancellationToken).ConfigureAwait(false);
+            var result = await _service.ExtractPublicApiAsync(path, language: null, asJson: true, cancellationToken).ConfigureAwait(false);
             
             if (!result.Success)
             {

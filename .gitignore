@@ -36,3 +36,8 @@ temp/
 
 # AOT publish output
 publish/
+# Docker container home directory artifacts
+.cache/
+.dotnet/
+.npm/
+.nuget/
