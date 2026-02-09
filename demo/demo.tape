@@ -9,15 +9,9 @@ Set Height 500
 Set Theme "Dracula"
 Set Padding 20
 Set TypingSpeed 40ms
-
-# Show Docker usage (official method)
-Type "# SDK Chat - Generate SDK samples with AI"
 Enter
 Sleep 500ms
-Type "# Using Docker (official installation method)"
-Enter
-Sleep 500ms
-Type "./scripts/sdk-chat.sh package samples generate ~/openai-dotnet --count 1"
+Type "dotnet run --project src/Microsoft.SdkChat -- package samples generate ~/openai-dotnet --count 1"
 Sleep 300ms
 Enter
 Sleep 30s
@@ -26,7 +20,7 @@ Sleep 30s
 Type "# With OpenAI instead of GitHub Copilot"
 Enter
 Sleep 500ms
-Type "./scripts/sdk-chat.sh package samples generate ~/openai-dotnet --use-openai --load-dotenv --count 1"
+Type "dotnet run --project src/Microsoft.SdkChat -- package samples generate ~/openai-dotnet --use-openai --load-dotenv --count 1"
 Sleep 300ms
 Enter
 Sleep 30s

@@ -52,53 +52,18 @@ The dev container includes: .NET SDK 10, Python 3, Node.js, Go, JBang, VHS, Copi
 |-------|------------|--------|
 | `sdk-chat-dev` | `Dockerfile` | Development and testing |
 | `sdk-chat-demo` | `demo/Dockerfile` | VHS demo recording |
-| `sdk-chat:latest` | `Dockerfile.release` | Production (Native AOT, ~500MB) |
+| `api-extractor-{lang}` | `extractors/{lang}/Dockerfile` | Per-language API extractor fallback |
 
-### Release Container Size Breakdown
+### Running Natively
 
-The release image is ~500 MB. Here's what's inside:
-
-| Component | Size | Location | Description |
-|-----------|------|----------|-------------|
-| `copilot` | 138 MB | `/usr/local/bin/` | GitHub Copilot CLI (Go binary) |
-| `ts_extractor` | 101 MB | `/app/` | TypeScript extractor (bundled Node.js + ts-morph) |
-| `sdk-chat` | 40.5 MB | `/app/` | Main CLI (Native AOT .NET) |
-| `java_extractor` | 36.4 MB | `/app/` | Java extractor (JBang + JavaParser) |
-| `python_extractor` | 8.1 MB | `/app/` | Python extractor (bundled Python + ast) |
-| `go_extractor` | 2.6 MB | `/app/` | Go extractor (native Go binary) |
-| Base image | ~22 MB | | Debian bookworm-slim + glibc |
-| **Total** | **~504 MB** | |
-
-### Docker-in-Docker
-
-The dev container has access to the host's Docker socket, enabling Docker-in-Docker. When testing the release container from inside the dev container:
-
-**Important:** Volume paths must be **host paths**, not container paths.
+The CLI and MCP server run natively on the host without Docker:
 
 ```bash
-# Find your host path mapping
-docker inspect $(hostname) | grep -A 2 '"Source"' | head -5
-# Example output: "Source": "/home/user/sdk-chat" → "Target": "/workspaces/sdk-chat"
-
-# Use the HOST path for volume mounts
-docker run --rm \
-  -e GH_TOKEN="ghp_..." \
-  -v "/home/user/sdk-chat/temp/my-sdk:/sdk" \
-  sdk-chat:latest package sample generate /sdk
+# Run CLI commands directly
+dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/sdk
 ```
 
-### Wrapper Scripts
-
-The wrapper scripts (`scripts/sdk-chat.sh`, `scripts/sdk-chat.ps1`) are designed for use **on the host machine**, not inside the dev container. They handle:
-
-- Automatic path mounting
-- Environment variable passthrough
-- Copilot credentials (`~/.copilot`)
-
-```bash
-# From host machine (outside any container)
-./scripts/sdk-chat.sh package sample generate /path/to/sdk
-```
+Language extractors automatically fall back to Docker when the runtime (Python, Go, Node.js, JBang) isn't installed.
 
 ---
 

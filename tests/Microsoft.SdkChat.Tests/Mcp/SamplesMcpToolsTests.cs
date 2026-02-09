@@ -1,22 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Text.Json;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Mcp;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
-using Microsoft.SdkChat.Tests.Mocks;
 using Xunit;
 
 namespace Microsoft.SdkChat.Tests.Mcp;
 
 /// <summary>
-/// Comprehensive tests for the MCP Samples tools.
+/// Comprehensive tests for the MCP Samples tools (two-tool approach).
+/// Tests build_samples_prompt and validate_samples tools.
 /// </summary>
 public class SamplesMcpToolsTests : IDisposable
 {
     private readonly string _testRoot;
-    private readonly MockMcpSampler _mockSampler;
     private readonly FileHelper _fileHelper;
     private readonly SamplesMcpTools _tool;
 
@@ -25,9 +25,8 @@ public class SamplesMcpToolsTests : IDisposable
         _testRoot = Path.Combine(Path.GetTempPath(), $"McpToolTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testRoot);
 
-        _mockSampler = new MockMcpSampler();
         _fileHelper = new FileHelper();
-        _tool = new SamplesMcpTools(_mockSampler, _fileHelper, new PackageInfoService());
+        _tool = new SamplesMcpTools(_fileHelper, new PackageInfoService());
     }
 
     public void Dispose()
@@ -38,370 +37,446 @@ public class SamplesMcpToolsTests : IDisposable
                 Directory.Delete(_testRoot, recursive: true);
         }
         catch { }
-        SdkInfo.ClearCache(); // Clear SDK detection cache between tests
+        SdkInfo.ClearCache();
         GC.SuppressFinalize(this);
     }
 
-    #region Language Detection Tests
+    /// <summary>
+    /// Deserialize a build_samples_prompt result and assert success.
+    /// </summary>
+    private static SamplesPromptResult ParsePromptResult(string json)
+    {
+        var response = JsonSerializer.Deserialize(json, McpJsonContext.Default.McpResponseSamplesPromptResult);
+        Assert.NotNull(response);
+        Assert.True(response.Success, $"Expected success but got: {json}");
+        Assert.NotNull(response.Data);
+        return response.Data;
+    }
+
+    /// <summary>
+    /// Deserialize a validate_samples result.
+    /// </summary>
+    private static ValidateSamplesResult ParseValidateResult(string json)
+    {
+        var result = JsonSerializer.Deserialize(json, McpJsonContext.Default.ValidateSamplesResult);
+        Assert.NotNull(result);
+        return result;
+    }
+
+    #region Language Detection Tests (build_samples_prompt)
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithDotNetProject_DetectsLanguageAndGenerates()
+    public async Task BuildSamplesPromptAsync_WithDotNetProject_DetectsLanguage()
     {
-        // Arrange
         CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("BasicSample", "A basic sample", "// Hello", "BasicSample.cs"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        Assert.Equal(1, _mockSampler.CallCount);
-        Assert.Contains("C#", _mockSampler.LastSystemPrompt);
+        Assert.Equal("DotNet", result.Language);
+        Assert.Equal(".cs", result.FileExtension);
+        Assert.Contains("C#", result.SystemPrompt);
+        Assert.NotEmpty(result.UserPrompt);
+        Assert.True(result.EstimatedTokens > 0);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithPythonProject_DetectsLanguage()
+    public async Task BuildSamplesPromptAsync_WithPythonProject_DetectsLanguage()
     {
-        // Arrange
         CreatePythonProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("sample", "A sample", "# Hello", "sample.py"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("Python", _mockSampler.LastSystemPrompt);
+        Assert.Equal("Python", result.Language);
+        Assert.Equal(".py", result.FileExtension);
+        Assert.Contains("Python", result.SystemPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithJavaProject_DetectsLanguage()
+    public async Task BuildSamplesPromptAsync_WithJavaProject_DetectsLanguage()
     {
-        // Arrange
         CreateJavaProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "A sample", "class Sample {}", "Sample.java"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("Java", _mockSampler.LastSystemPrompt);
+        Assert.Equal("Java", result.Language);
+        Assert.Equal(".java", result.FileExtension);
+        Assert.Contains("Java", result.SystemPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithTypeScriptProject_DetectsLanguage()
+    public async Task BuildSamplesPromptAsync_WithTypeScriptProject_DetectsLanguage()
     {
-        // Arrange
         CreateTypeScriptProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("sample", "A sample", "// Hello", "sample.ts"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("TypeScript", _mockSampler.LastSystemPrompt);
+        Assert.Equal("TypeScript", result.Language);
+        Assert.Equal(".ts", result.FileExtension);
+        Assert.Contains("TypeScript", result.SystemPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithJavaScriptProject_DetectsLanguage()
+    public async Task BuildSamplesPromptAsync_WithJavaScriptProject_DetectsLanguage()
     {
-        // Arrange
         CreateJavaScriptProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("sample", "A sample", "// Hello", "sample.js"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("JavaScript", _mockSampler.LastSystemPrompt);
+        Assert.Equal("JavaScript", result.Language);
+        Assert.Equal(".js", result.FileExtension);
+        Assert.Contains("JavaScript", result.SystemPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithGoProject_DetectsLanguage()
+    public async Task BuildSamplesPromptAsync_WithGoProject_DetectsLanguage()
     {
-        // Arrange
         CreateGoProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("sample", "A sample", "package main", "sample.go"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("Go", _mockSampler.LastSystemPrompt);
+        Assert.Equal("Go", result.Language);
+        Assert.Equal(".go", result.FileExtension);
+        Assert.Contains("Go", result.SystemPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithUnknownProject_ReturnsError()
+    public async Task BuildSamplesPromptAsync_WithUnknownProject_ReturnsError()
     {
-        // Arrange - empty directory
+        // Empty directory — no project files
+        var json = await _tool.BuildSamplesPromptAsync(_testRoot);
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        Assert.Contains("Error", result);
-        Assert.Contains("Could not detect", result);
-        Assert.Equal(0, _mockSampler.CallCount);
+        Assert.Contains("LANGUAGE_DETECTION_FAILED", json);
     }
 
     #endregion
 
-    #region Output Path Tests
+    #region Prompt Content Tests
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithCustomOutputPath_UsesThatPath()
+    public async Task BuildSamplesPromptAsync_WithCustomPrompt_IncludesInUserPrompt()
     {
-        // Arrange
         CreateDotNetProject();
-        var customOutput = Path.Combine(_testRoot, "custom-output");
-        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "A sample", "// Code", "Sample.cs"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot, outputPath: customOutput);
+        var result = ParsePromptResult(
+            await _tool.BuildSamplesPromptAsync(_testRoot, prompt: "Generate authentication examples"));
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        Assert.Contains(customOutput, result);
-        Assert.True(Directory.Exists(customOutput));
-        Assert.True(File.Exists(Path.Combine(customOutput, "Sample.cs")));
+        Assert.Contains("authentication examples", result.UserPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_CreatesOutputDirectory()
+    public async Task BuildSamplesPromptAsync_WithDefaultCount_UsesDefaultInPrompt()
     {
-        // Arrange
         CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "A sample", "// Code", "Sample.cs"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        var samplesDir = Path.Combine(_testRoot, "examples");
-        Assert.True(Directory.Exists(samplesDir));
-    }
-
-    #endregion
-
-    #region Custom Prompt Tests
-
-    [Fact]
-    public async Task GenerateSamplesAsync_WithCustomPrompt_IncludesInContext()
-    {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("AuthSample", "Auth", "// Auth", "AuthSample.cs"));
-
-        // Act
-        await _tool.GenerateSamplesAsync(_testRoot, prompt: "Generate authentication examples");
-
-        // Assert
-        Assert.Contains("authentication examples", _mockSampler.LastUserPrompt);
+        Assert.Contains("5", result.UserPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithoutCustomPrompt_UsesDefaultPrompt()
+    public async Task BuildSamplesPromptAsync_WithCustomCount_UsesCountInPrompt()
     {
-        // Arrange
         CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "Sample", "// Code", "Sample.cs"));
 
-        // Act
-        await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot, count: 3));
 
-        // Assert - default prompt includes count (5 samples)
-        Assert.Contains("Generate 5 samples", _mockSampler.LastUserPrompt);
+        Assert.Contains("3", result.UserPrompt);
+    }
+
+    [Fact]
+    public async Task BuildSamplesPromptAsync_SystemPromptContainsJsonFormatInstructions()
+    {
+        CreateDotNetProject();
+
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
+
+        Assert.Contains("JSON array", result.SystemPrompt);
+    }
+
+    [Fact]
+    public async Task BuildSamplesPromptAsync_ReturnsSuggestedOutputPath()
+    {
+        CreateDotNetProject();
+
+        var result = ParsePromptResult(await _tool.BuildSamplesPromptAsync(_testRoot));
+
+        Assert.NotNull(result.SuggestedOutputPath);
+        Assert.NotEmpty(result.SuggestedOutputPath);
     }
 
     #endregion
 
-    #region File Path Tests
+    #region Error Handling Tests (build_samples_prompt)
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithSubfolderPath_CreatesSubfolders()
+    public async Task BuildSamplesPromptAsync_WithNonExistentPath_ReturnsError()
     {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("TokenSample", "Auth sample", "// Auth", "auth/TokenSample.cs"));
+        var nonExistentPath = Path.Combine(_testRoot, "does-not-exist");
 
-        // Act
-        await _tool.GenerateSamplesAsync(_testRoot);
+        var json = await _tool.BuildSamplesPromptAsync(nonExistentPath);
 
-        // Assert
-        var samplesDir = Path.Combine(_testRoot, "examples");
-        var authDir = Path.Combine(samplesDir, "auth");
-        Assert.True(Directory.Exists(authDir));
-        Assert.True(File.Exists(Path.Combine(authDir, "TokenSample.cs")));
+        Assert.Contains("PATH_NOT_FOUND", json);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithDeepNestedPath_CreatesAllDirs()
+    public async Task BuildSamplesPromptAsync_WithNullPath_ReturnsError()
     {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "Sample", "// Code", "level1/level2/level3/Sample.cs"));
+        var json = await _tool.BuildSamplesPromptAsync(null!);
 
-        // Act
-        await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        var filePath = Path.Combine(_testRoot, "examples", "level1", "level2", "level3", "Sample.cs");
-        Assert.True(File.Exists(filePath));
+        Assert.Contains("error", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithoutFilePath_UsesNameAsFileName()
+    public async Task BuildSamplesPromptAsync_WithEmptyPath_ReturnsError()
     {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("MySample", "Sample", "// Code", null));
+        var json = await _tool.BuildSamplesPromptAsync("");
 
-        // Act
-        await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        var filePath = Path.Combine(_testRoot, "examples", "MySample.cs");
-        Assert.True(File.Exists(filePath));
+        Assert.Contains("error", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_SanitizesInvalidCharacters()
+    public async Task BuildSamplesPromptAsync_Cancellation_ReturnsError()
     {
-        // Arrange
         CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(CreateSample("Sample:With:Colons", "Sample", "// Code", null));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var json = await _tool.BuildSamplesPromptAsync(_testRoot, cancellationToken: cts.Token);
 
-        // Assert
-        Assert.Contains("Generated 1 sample", result);
-        // File should be created with sanitized name
-        var samplesDir = Path.Combine(_testRoot, "examples");
-        var files = Directory.GetFiles(samplesDir, "*.cs");
-        Assert.Single(files);
+        Assert.Contains("error", json, StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion
 
-    #region Multiple Samples Tests
+    #region ValidateSamples — Success Tests
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithMultipleSamples_GeneratesAll()
+    public void ValidateSamples_WithValidJsonArray_ReturnsSuccess()
     {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(
-            CreateSample("Sample1", "First", "// 1", "Sample1.cs"),
-            CreateSample("Sample2", "Second", "// 2", "Sample2.cs"),
-            CreateSample("Sample3", "Third", "// 3", "Sample3.cs")
-        );
+        var samples = new[]
+        {
+            CreateSample("Sample1", "First", "// Code 1", "Sample1.cs"),
+            CreateSample("Sample2", "Second", "// Code 2", "Sample2.cs")
+        };
+        var json = SerializeSamples(samples);
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
 
-        // Assert
-        Assert.Contains("Generated 3 sample", result);
-        var samplesDir = Path.Combine(_testRoot, "examples");
-        Assert.True(File.Exists(Path.Combine(samplesDir, "Sample1.cs")));
-        Assert.True(File.Exists(Path.Combine(samplesDir, "Sample2.cs")));
-        Assert.True(File.Exists(Path.Combine(samplesDir, "Sample3.cs")));
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Count);
+        Assert.NotNull(result.Samples);
+        Assert.Equal("Sample1", result.Samples[0].Name);
+        Assert.Equal("Sample2", result.Samples[1].Name);
+        Assert.Null(result.CorrectionPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_FiltersEmptyNameSamples()
+    public void ValidateSamples_WithSingleSample_ReturnsSuccess()
     {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(
+        var samples = new[] { CreateSample("OnlySample", "Desc", "// Code", "file.cs") };
+        var json = SerializeSamples(samples);
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.Count);
+    }
+
+    [Fact]
+    public void ValidateSamples_FiltersEmptyNameSamples()
+    {
+        var samples = new[]
+        {
             CreateSample("Good", "Good sample", "// Good", "Good.cs"),
             CreateSample("", "Empty name", "// Empty", null),
             CreateSample("AlsoGood", "Also good", "// Also", "AlsoGood.cs")
-        );
+        };
+        var json = SerializeSamples(samples);
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
 
-        // Assert
-        Assert.Contains("Generated 2 sample", result);
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Count);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_FiltersEmptyCodeSamples()
+    public void ValidateSamples_FiltersEmptyCodeSamples()
     {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(
+        var samples = new[]
+        {
             CreateSample("Good", "Good sample", "// Good", "Good.cs"),
             CreateSample("NoCode", "No code", "", "NoCode.cs"),
             CreateSample("AlsoGood", "Also good", "// Also", "AlsoGood.cs")
-        );
+        };
+        var json = SerializeSamples(samples);
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
 
-        // Assert
-        Assert.Contains("Generated 2 sample", result);
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Count);
+    }
+
+    [Fact]
+    public void ValidateSamples_FiltersWhitespaceNameSamples()
+    {
+        var samples = new[]
+        {
+            CreateSample("  ", "Whitespace name", "// Code", "file.cs"),
+            CreateSample("Good", "Good sample", "// Code", "Good.cs")
+        };
+        var json = SerializeSamples(samples);
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.Count);
+        Assert.Equal("Good", result.Samples![0].Name);
+    }
+
+    [Fact]
+    public void ValidateSamples_FiltersWhitespaceCodeSamples()
+    {
+        var samples = new[]
+        {
+            CreateSample("EmptyCode", "Empty", "   \n\t  ", "empty.cs"),
+            CreateSample("Good", "Good sample", "// Code", "Good.cs")
+        };
+        var json = SerializeSamples(samples);
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.Count);
+    }
+
+    [Fact]
+    public void ValidateSamples_PreservesUnicodeContent()
+    {
+        var unicodeCode = "// 你好世界 🌍 مرحبا العالم\nvar emoji = \"🎉\";";
+        var samples = new[] { CreateSample("Unicode", "Unicode test", unicodeCode, "unicode.cs") };
+        var json = SerializeSamples(samples);
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.Count);
+        Assert.Equal(unicodeCode, result.Samples![0].Code);
+    }
+
+    [Fact]
+    public void ValidateSamples_PreservesSpecialCharactersInCode()
+    {
+        var codeWithSpecialChars = "var x = \"Hello\\nWorld\";\n// Special: @#$%^&*(){}[]|\\:\";<>?,./";
+        var samples = new[] { CreateSample("Special", "Special chars", codeWithSpecialChars, "special.cs") };
+        var json = SerializeSamples(samples);
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.True(result.Success);
+        Assert.Equal(codeWithSpecialChars, result.Samples![0].Code);
+    }
+
+    [Fact]
+    public void ValidateSamples_WithDuplicateNames_KeepsBoth()
+    {
+        var samples = new[]
+        {
+            CreateSample("Sample", "First version", "// First", "Sample.cs"),
+            CreateSample("Sample", "Second version", "// Second", "Sample.cs")
+        };
+        var json = SerializeSamples(samples);
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Count);
+    }
+
+    [Fact]
+    public void ValidateSamples_ReturnsEstimatedResponseTokens()
+    {
+        var samples = new[] { CreateSample("Sample", "Desc", "// Code", "file.cs") };
+        var json = SerializeSamples(samples);
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.True(result.EstimatedResponseTokens > 0);
     }
 
     #endregion
 
-    #region Error Handling Tests
+    #region ValidateSamples — Failure Tests
 
     [Fact]
-    public async Task GenerateSamplesAsync_WhenAiThrows_ReturnsError()
+    public void ValidateSamples_WithInvalidJson_ReturnsErrorAndCorrectionPrompt()
     {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetExceptionToThrow(new InvalidOperationException("AI service failed"));
+        var result = ParseValidateResult(_tool.ValidateSamples("this is not JSON"));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        Assert.Contains("Error", result);
-        Assert.Contains("AI service failed", result);
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.NotNull(result.CorrectionPrompt);
+        Assert.Contains("JSON", result.CorrectionPrompt);
     }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WithNoSamplesGenerated_ReturnsZeroCount()
+    public void ValidateSamples_WithEmptyResponse_ReturnsError()
     {
-        // Arrange
-        CreateDotNetProject();
-        // No samples configured - returns empty
+        var result = ParseValidateResult(_tool.ValidateSamples(""));
 
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        Assert.Contains("Generated 0 sample", result);
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Contains("Empty", result.Error);
+        Assert.NotNull(result.CorrectionPrompt);
     }
 
-    #endregion
+    [Fact]
+    public void ValidateSamples_WithWhitespaceResponse_ReturnsError()
+    {
+        var result = ParseValidateResult(_tool.ValidateSamples("   \n\t  "));
 
-    #region Content Verification Tests
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+    }
 
     [Fact]
-    public async Task GenerateSamplesAsync_WritesCorrectContent()
+    public void ValidateSamples_WithMarkdownCodeFence_ReturnsError()
     {
-        // Arrange
-        CreateDotNetProject();
-        var expectedCode = "// This is the sample code\nConsole.WriteLine(\"Hello, World!\");";
-        _mockSampler.SetSamplesToReturn(CreateSample("HelloWorld", "Hello World sample", expectedCode, "HelloWorld.cs"));
+        // LLM wrapped response in markdown — should fail since ParseJsonArray expects raw JSON
+        var markdown = "```json\n[{\"name\":\"Sample\",\"code\":\"// Code\"}]\n```";
 
-        // Act
-        await _tool.GenerateSamplesAsync(_testRoot);
+        var result = ParseValidateResult(_tool.ValidateSamples(markdown));
 
-        // Assert
-        var filePath = Path.Combine(_testRoot, "examples", "HelloWorld.cs");
-        var actualContent = await File.ReadAllTextAsync(filePath);
-        Assert.Equal(expectedCode, actualContent);
+        Assert.False(result.Success);
+        Assert.NotNull(result.CorrectionPrompt);
+    }
+
+    [Fact]
+    public void ValidateSamples_WithJsonObject_ReturnsError()
+    {
+        // LLM returned a single object instead of an array
+        var json = "{\"name\":\"Sample\",\"code\":\"// Code\"}";
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.CorrectionPrompt);
+    }
+
+    [Fact]
+    public void ValidateSamples_WithAllFilteredOut_ReturnsSuccessWithZero()
+    {
+        // All samples have empty names/code
+        var samples = new[]
+        {
+            CreateSample("", "No name", "// Code", null),
+            CreateSample("NoCode", "No code", "", "file.cs")
+        };
+        var json = SerializeSamples(samples);
+
+        var result = ParseValidateResult(_tool.ValidateSamples(json));
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.Count);
     }
 
     #endregion
@@ -410,6 +485,9 @@ public class SamplesMcpToolsTests : IDisposable
 
     private static GeneratedSample CreateSample(string name, string description, string code, string? filePath) =>
         new() { Name = name, Description = description, Code = code, FilePath = filePath };
+
+    private static string SerializeSamples(params GeneratedSample[] samples) =>
+        JsonSerializer.Serialize(samples.ToList(), AiStreamingJsonContext.CaseInsensitive.ListGeneratedSample);
 
     private void CreateDotNetProject()
     {
@@ -504,216 +582,6 @@ func (c *Client) GetResource(id int) string {
     return ""test""
 }
 ");
-    }
-
-    #endregion
-
-    #region Edge Case and Negative Tests
-
-    [Fact]
-    public async Task GenerateSamplesAsync_WithNonExistentPath_ReturnsError()
-    {
-        // Arrange
-        var nonExistentPath = Path.Combine(_testRoot, "does-not-exist");
-
-        // Act - SdkInfo throws DirectoryNotFoundException, caught and returned as error
-        var result = await _tool.GenerateSamplesAsync(nonExistentPath);
-
-        // Assert
-        Assert.Contains("Error", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_WithNullPath_ReturnsError()
-    {
-        // Act - null path causes exception caught by try-catch
-        var result = await _tool.GenerateSamplesAsync(null!);
-
-        // Assert
-        Assert.Contains("Error", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_WithEmptyPath_ReturnsError()
-    {
-        // Act - empty path causes exception caught by try-catch
-        var result = await _tool.GenerateSamplesAsync("");
-
-        // Assert
-        Assert.Contains("Error", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_WithWhitespaceName_FiltersOut()
-    {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(
-            CreateSample("  ", "Whitespace name", "// Code", "file.cs"),
-            CreateSample("Good", "Good sample", "// Code", "Good.cs")
-        );
-
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert - whitespace names are filtered (Name property is not empty after trim check fails)
-        // Current impl checks IsNullOrEmpty not IsNullOrWhiteSpace, so "  " passes
-        Assert.Contains("sample", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_WithWhitespaceCode_FiltersOut()
-    {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(
-            CreateSample("EmptyCode", "Empty", "   \n\t  ", "empty.cs"),
-            CreateSample("Good", "Good sample", "// Code", "Good.cs")
-        );
-
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert - whitespace code is not filtered by current impl (checks IsNullOrEmpty)
-        Assert.Contains("sample", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_VeryLongFileName_Handles()
-    {
-        // Arrange
-        CreateDotNetProject();
-        var longName = new string('A', 200); // Very long name
-        _mockSampler.SetSamplesToReturn(CreateSample(longName, "Long name", "// Code", null));
-
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert - should complete without error
-        Assert.Contains("Generated 1 sample", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_WithSpecialCharactersInCode_PreservesContent()
-    {
-        // Arrange
-        CreateDotNetProject();
-        var codeWithSpecialChars = "var x = \"Hello\\nWorld\";\n// Special: @#$%^&*(){}[]|\\:\";<>?,./";
-        _mockSampler.SetSamplesToReturn(CreateSample("Special", "Special chars", codeWithSpecialChars, "special.cs"));
-
-        // Act
-        await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        var filePath = Path.Combine(_testRoot, "examples", "special.cs");
-        var content = await File.ReadAllTextAsync(filePath);
-        Assert.Equal(codeWithSpecialChars, content);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_Cancellation_ReturnsError()
-    {
-        // Arrange
-        CreateDotNetProject();
-        var cts = new CancellationTokenSource();
-        cts.Cancel();
-
-        // Act - cancellation results in error string from the catch block
-        var result = await _tool.GenerateSamplesAsync(_testRoot, cancellationToken: cts.Token);
-
-        // Assert - exception is caught and returned as error
-        Assert.Contains("Error", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_TimeoutException_ReturnsError()
-    {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetExceptionToThrow(new TimeoutException("Request timed out"));
-
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        Assert.Contains("Error", result);
-        Assert.Contains("timed out", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_HttpRequestException_ReturnsError()
-    {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetExceptionToThrow(new HttpRequestException("Network error"));
-
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        Assert.Contains("Error", result);
-        Assert.Contains("Network error", result);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_DuplicateFileNames_OverwritesLast()
-    {
-        // Arrange
-        CreateDotNetProject();
-        _mockSampler.SetSamplesToReturn(
-            CreateSample("Sample", "First version", "// First", "Sample.cs"),
-            CreateSample("Sample", "Second version", "// Second", "Sample.cs")
-        );
-
-        // Act
-        var result = await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert - both counted
-        Assert.Contains("Generated 2 sample", result);
-
-        // But file contains last content
-        var filePath = Path.Combine(_testRoot, "examples", "Sample.cs");
-        var content = await File.ReadAllTextAsync(filePath);
-        Assert.Equal("// Second", content);
-    }
-
-    [Fact]
-    public async Task GenerateSamplesAsync_UnicodeContent_Preserved()
-    {
-        // Arrange
-        CreateDotNetProject();
-        var unicodeCode = "// 你好世界 🌍 مرحبا العالم\nvar emoji = \"🎉\";";
-        _mockSampler.SetSamplesToReturn(CreateSample("Unicode", "Unicode test", unicodeCode, "unicode.cs"));
-        // Act
-        await _tool.GenerateSamplesAsync(_testRoot);
-
-        // Assert
-        var filePath = Path.Combine(_testRoot, "examples", "unicode.cs");
-        var content = await File.ReadAllTextAsync(filePath);
-        Assert.Equal(unicodeCode, content);
-    }
-
-    #endregion
-
-    #region Cancellation Tests
-
-    [Fact]
-    public async Task GenerateSamplesAsync_Cancellation_ReturnsErrorMessage()
-    {
-        // Arrange
-        CreateDotNetProject();
-
-        // Set up a mock sampler that delays before returning
-        var delaySampler = MockMcpSamplerFactory.CreateThatThrows(new OperationCanceledException());
-        var tool = new SamplesMcpTools(delaySampler, _fileHelper, new PackageInfoService());
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-
-        // Act - should return error message (MCP tools don't throw, they return strings)
-        var result = await tool.GenerateSamplesAsync(_testRoot, cancellationToken: cts.Token);
-
-        // Assert - result should indicate cancellation error
-        Assert.Contains("Error", result);
     }
 
     #endregion

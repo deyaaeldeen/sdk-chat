@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text.Json.Serialization;
+using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
 
 namespace Microsoft.SdkChat.Mcp;
@@ -40,6 +41,10 @@ internal sealed record McpErrorResponse
 [JsonSerializable(typeof(McpResponse<SamplesFolderResult>))]
 [JsonSerializable(typeof(McpResponse<ApiExtractionResult>))]
 [JsonSerializable(typeof(McpResponse<CoverageAnalysisResult>))]
+[JsonSerializable(typeof(McpResponse<SamplesPromptResult>))]
+[JsonSerializable(typeof(ValidateSamplesResult))]
+[JsonSerializable(typeof(GeneratedSample))]
+[JsonSerializable(typeof(List<GeneratedSample>))]
 internal sealed partial class McpJsonContext : JsonSerializerContext
 {
 }

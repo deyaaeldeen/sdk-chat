@@ -18,7 +18,10 @@ public enum ExtractorMode
     NativeBinary,
 
     /// <summary>Using runtime interpreter/compiler (JIT environment).</summary>
-    RuntimeInterpreter
+    RuntimeInterpreter,
+
+    /// <summary>Using Docker container with precompiled extractors.</summary>
+    Docker
 }
 
 /// <summary>
@@ -29,7 +32,8 @@ public sealed record ExtractorAvailabilityResult(
     ExtractorMode Mode,
     string? ExecutablePath,
     string? UnavailableReason,
-    string? Warning
+    string? Warning,
+    string? DockerImageName = null
 )
 {
     /// <summary>Creates a result for unavailable extractor.</summary>
@@ -43,6 +47,10 @@ public sealed record ExtractorAvailabilityResult(
     /// <summary>Creates a result for runtime interpreter mode.</summary>
     public static ExtractorAvailabilityResult RuntimeInterpreter(string path, string? warning = null) =>
         new(true, ExtractorMode.RuntimeInterpreter, path, null, warning);
+
+    /// <summary>Creates a result for Docker container mode.</summary>
+    public static ExtractorAvailabilityResult Docker(string imageName) =>
+        new(true, ExtractorMode.Docker, null, null, null, imageName);
 }
 
 /// <summary>
@@ -101,7 +109,44 @@ public static class ExtractorAvailability
     /// <summary>
     /// Clears the availability cache. Useful for testing.
     /// </summary>
-    public static void ClearCache() => Cache.Clear();
+    public static void ClearCache()
+    {
+        Cache.Clear();
+        DockerImageCache.Clear();
+        _dockerCliAvailable = null;
+    }
+
+    /// <summary>Cached Docker CLI availability (null = not yet checked).</summary>
+    private static bool? _dockerCliAvailable;
+    private static readonly Lock DockerCliLock = new();
+
+    /// <summary>Cached Docker image availability per image name.</summary>
+    private static readonly ConcurrentDictionary<string, bool> DockerImageCache = new();
+
+    /// <summary>
+    /// Checks if the Docker CLI is available on the host.
+    /// </summary>
+    private static bool IsDockerCliAvailable()
+    {
+        if (_dockerCliAvailable.HasValue)
+            return _dockerCliAvailable.Value;
+
+        lock (DockerCliLock)
+        {
+            if (_dockerCliAvailable.HasValue)
+                return _dockerCliAvailable.Value;
+
+            _dockerCliAvailable = ValidateExecutable("docker", "--version").Success;
+            return _dockerCliAvailable.Value;
+        }
+    }
+
+    /// <summary>
+    /// Checks if a Docker image is available locally.
+    /// </summary>
+    private static bool IsDockerImageAvailable(string imageName) =>
+        DockerImageCache.GetOrAdd(imageName, name =>
+            ValidateExecutable("docker", $"image inspect {name}").Success);
 
     private static ExtractorAvailabilityResult CheckInternal(
         string language,
@@ -138,15 +183,27 @@ public static class ExtractorAvailability
                 runtimeResult.WarningOrError);
         }
 
-        // 3. Neither available - provide helpful error message
+        // 3. Fall back to per-language Docker container
+        var dockerImage = DockerSandbox.GetImageName(language);
+        if (IsDockerCliAvailable() && IsDockerImageAvailable(dockerImage))
+        {
+            return ExtractorAvailabilityResult.Docker(dockerImage);
+        }
+
+        // 4. Neither available - provide helpful error message
         var nativeHint = nativePath != null
             ? $" Native binary found at {nativePath} but failed to execute."
             : "";
 
+        var dockerHint = IsDockerCliAvailable()
+            ? $" Docker image '{dockerImage}' not found — build it with: docker build -f extractors/{language.ToLowerInvariant()}/Dockerfile -t {dockerImage} ."
+            : " Docker not available for container fallback.";
+
         return ExtractorAvailabilityResult.Unavailable(
             $"{language} extractor not available.{nativeHint} " +
             $"Runtime tool '{runtimeToolName}' not found. " +
-            GetInstallHint(language));
+            GetInstallHint(language) +
+            dockerHint);
     }
 
     /// <summary>

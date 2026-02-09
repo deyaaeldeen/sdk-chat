@@ -3,33 +3,99 @@
 
 using System.ComponentModel;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 using Microsoft.SdkChat.Services;
 using Microsoft.SdkChat.Services.Languages.Samples;
 using Microsoft.SdkChat.Telemetry;
-using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace Microsoft.SdkChat.Mcp;
 
 /// <summary>
+/// Result of building a samples prompt. Returned to the client so it can call its own LLM.
+/// </summary>
+public sealed record SamplesPromptResult
+{
+    /// <summary>System prompt for the LLM.</summary>
+    [JsonPropertyName("systemPrompt")]
+    public required string SystemPrompt { get; init; }
+
+    /// <summary>User prompt for the LLM.</summary>
+    [JsonPropertyName("userPrompt")]
+    public required string UserPrompt { get; init; }
+
+    /// <summary>Estimated token count for the prompt.</summary>
+    [JsonPropertyName("estimatedTokens")]
+    public int EstimatedTokens { get; init; }
+
+    /// <summary>Detected SDK language.</summary>
+    [JsonPropertyName("language")]
+    public required string Language { get; init; }
+
+    /// <summary>File extension for the detected language (e.g. ".cs", ".py").</summary>
+    [JsonPropertyName("fileExtension")]
+    public required string FileExtension { get; init; }
+
+    /// <summary>Suggested output path for generated samples.</summary>
+    [JsonPropertyName("suggestedOutputPath")]
+    public required string SuggestedOutputPath { get; init; }
+}
+
+/// <summary>
+/// Result of validating an LLM response containing generated samples.
+/// </summary>
+public sealed record ValidateSamplesResult
+{
+    /// <summary>Whether the response was successfully parsed.</summary>
+    [JsonPropertyName("success")]
+    public bool Success { get; init; }
+
+    /// <summary>Parsed samples (null if parsing failed).</summary>
+    [JsonPropertyName("samples")]
+    public List<GeneratedSample>? Samples { get; init; }
+
+    /// <summary>Number of valid samples.</summary>
+    [JsonPropertyName("count")]
+    public int Count { get; init; }
+
+    /// <summary>Error message if parsing failed.</summary>
+    [JsonPropertyName("error")]
+    public string? Error { get; init; }
+
+    /// <summary>Correction prompt to send to the LLM for retry (set when parsing fails).</summary>
+    [JsonPropertyName("correctionPrompt")]
+    public string? CorrectionPrompt { get; init; }
+
+    /// <summary>Estimated response tokens.</summary>
+    [JsonPropertyName("estimatedResponseTokens")]
+    public int EstimatedResponseTokens { get; init; }
+}
+
+/// <summary>
 /// MCP tools for SDK sample detection and generation.
 /// Entity group: samples
+///
+/// The generation workflow uses two tools instead of one:
+/// 1. build_samples_prompt — analyzes SDK, returns system + user prompt
+/// 2. validate_samples — parses LLM response, returns structured samples
+///
+/// The client orchestrates the LLM call between steps 1 and 2,
+/// giving it full control over model selection, streaming, and file writing.
 /// </summary>
 [McpServerToolType]
-public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper, IPackageInfoService packageInfoService)
+public class SamplesMcpTools(FileHelper fileHelper, IPackageInfoService packageInfoService)
 {
     private readonly IPackageInfoService _infoService = packageInfoService;
     private readonly FileHelper _fileHelper = fileHelper;
-    private readonly IMcpSampler _mcpSampler = mcpSampler;
 
     [McpServerTool(Name = "detect_samples"), Description(
         "Find existing samples/examples folder in an SDK package. " +
         "WHEN TO USE: Before generating samples to check what already exists and avoid duplicates. " +
         "WHAT IT DOES: Searches for common sample directories (samples/, examples/, demo/, quickstarts/) and counts existing files. " +
         "RETURNS: Found samples path, suggested output path, all candidate folders, and whether samples already exist. " +
-        "NEXT STEPS: Use analyze_coverage to see which APIs are already covered, then generate_samples with prompt targeting uncovered APIs.")]
+        "NEXT STEPS: Use analyze_coverage to see which APIs are already covered, then build_samples_prompt to prepare for generation.")]
     public async Task<string> DetectSamplesAsync(
         [Description("Absolute path to SDK root directory.")] string packagePath,
         CancellationToken cancellationToken = default)
@@ -51,25 +117,23 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper, IPac
         }
     }
 
-    [McpServerTool(Name = "generate_samples"), Description(
-        "Generate production-ready SDK code samples using AI via MCP Sampling. " +
+    [McpServerTool(Name = "build_samples_prompt"), Description(
+        "Build an AI prompt for generating SDK code samples. " +
         "WHEN TO USE: To create documentation examples, quickstart code, or usage demonstrations for an SDK. " +
-        "WHAT IT DOES: Extracts the public API, analyzes existing samples to avoid duplicates, builds a prompt, then requests the host LLM to generate idiomatic code samples. " +
+        "WHAT IT DOES: Extracts the public API, analyzes existing samples to avoid duplicates, and builds a system + user prompt optimized for code generation. " +
         "TOKEN EFFICIENCY: Uses ~70% less tokens than raw source by extracting semantic API information. " +
-        "RETURNS: JSON with generated file paths, count, and language. Files are written to the output directory. " +
+        "RETURNS: systemPrompt, userPrompt, estimatedTokens, language, fileExtension, and suggestedOutputPath. " +
         "SUPPORTS: .NET/C#, Python, Java, JavaScript, TypeScript, Go. " +
-        "WORKFLOW: detect_source → analyze_coverage → generate_samples with prompt targeting uncovered APIs.")]
-    public async Task<string> GenerateSamplesAsync(
+        "WORKFLOW: Call this tool → send the returned prompts to your LLM → call validate_samples with the LLM response → write the validated samples to disk.")]
+    public async Task<string> BuildSamplesPromptAsync(
         [Description("Absolute path to SDK root. Must contain project files (.csproj, pyproject.toml, pom.xml, package.json, go.mod).")] string packagePath,
-        [Description("Where to write samples. Default: auto-detected samples/, examples/, or new 'examples' folder.")] string? outputPath = null,
         [Description("Guide the AI: 'streaming examples', 'error handling patterns', 'authentication scenarios', 'async/await usage'.")] string? prompt = null,
         [Description("How many samples to generate. Default: 5.")] int? count = null,
         [Description("Max source context in characters. Default: 512K (128K tokens). Reduce for faster/cheaper generation.")] int? budget = null,
-        [Description("Max tokens for the LLM response. Default: 16000. Increase for more/larger samples.")] int? maxTokens = null,
         [Description("Force language: dotnet, python, java, javascript, typescript, go. Default: auto-detected.")] string? language = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = SdkChatTelemetry.StartMcpTool("generate_samples");
+        using var activity = SdkChatTelemetry.StartMcpTool("build_samples_prompt");
 
         try
         {
@@ -113,154 +177,127 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper, IPac
                 : 0;
 
             // Determine output path
-            var outputFullPath = Path.GetFullPath(outputPath ?? samplesResult.SuggestedSamplesFolder);
+            var suggestedOutputPath = samplesResult.SuggestedSamplesFolder;
 
             // Build prompts
             var sdkName = sourceResult.SdkName ?? Path.GetFileName(packageFullPath);
             var baseSystemPrompt = SampleGeneratorService.BuildSystemPrompt(context, sdkName, sampleCount);
-
-            // Append JSON schema instructions (shared with CLI and ACP)
             var systemPrompt = $"{baseSystemPrompt}\n\n{SampleResponseParser.GetJsonArrayFormatInstructions()}";
 
-            // Build user prompt by streaming context
             var userPrompt = await BuildUserPromptAsync(
                 prompt,
                 sampleCount,
                 existingSampleCount > 0,
                 sourceResult.SourceFolder ?? packageFullPath,
                 samplesResult.SamplesFolder,
-                outputFullPath,
+                suggestedOutputPath,
                 context,
                 contextBudget,
                 cancellationToken).ConfigureAwait(false);
 
-            // Request samples from host LLM via MCP Sampling
-            // Let the host control model parameters (temperature, etc.), but set reasonable token limit for code generation
-            var createMessageRequest = new CreateMessageRequestParams
-            {
-                Messages =
-                [
-                    new SamplingMessage
-                    {
-                        Role = Role.User,
-                        Content = [new TextContentBlock { Text = userPrompt }]
-                    }
-                ],
-                SystemPrompt = systemPrompt,
-                MaxTokens = maxTokens ?? 16000, // Reasonable default for code generation; host can override
-                IncludeContext = ContextInclusion.ThisServer
-            };
-
-            // Request samples with retry on parse failure
-            const int MaxAttempts = SampleResponseParser.MaxRetryAttempts;
-            List<GeneratedSample>? samples = null;
-            string? lastResponseText = null;
-
-            for (var attempt = 1; attempt <= MaxAttempts; attempt++)
-            {
-                var samplingResult = await _mcpSampler.SampleAsync(createMessageRequest, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                lastResponseText = ExtractTextFromSamplingResponse(samplingResult);
-                if (string.IsNullOrWhiteSpace(lastResponseText))
-                    continue;
-
-                try
-                {
-                    samples = SampleResponseParser.ParseJsonArray(lastResponseText);
-                    break; // Parsed successfully
-                }
-                catch (JsonException) when (attempt < MaxAttempts)
-                {
-                    // Retry: replace user message with a correction prompt
-                    createMessageRequest.Messages =
-                    [
-                        new SamplingMessage
-                        {
-                            Role = Role.User,
-                            Content = [new TextContentBlock { Text = userPrompt }]
-                        },
-                        new SamplingMessage
-                        {
-                            Role = Role.Assistant,
-                            Content = [new TextContentBlock { Text = lastResponseText }]
-                        },
-                        new SamplingMessage
-                        {
-                            Role = Role.User,
-                            Content = [new TextContentBlock { Text = SampleResponseParser.CorrectionPrompt }]
-                        }
-                    ];
-                }
-                catch (JsonException)
-                {
-                    // Final attempt failed
-                }
-            }
-
-            if (samples is null)
-            {
-                var errorCode = string.IsNullOrWhiteSpace(lastResponseText) ? "EMPTY_RESPONSE" : "PARSE_ERROR";
-                var errorMessage = string.IsNullOrWhiteSpace(lastResponseText)
-                    ? "No content in LLM response"
-                    : "Could not parse samples from LLM response after retry. Expected JSON array of samples.";
-                return McpToolResult.CreateFailure(errorMessage, errorCode).ToString();
-            }
-
-            // Write samples to disk
-            var writtenFiles = new List<string>();
-            Directory.CreateDirectory(outputFullPath);
-
-            // Normalize output path for containment checks
-            var normalizedOutputPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputFullPath));
-
-            // Filter out samples with missing name or code explicitly
-            var validSamples = samples.Where(s => !string.IsNullOrEmpty(s.Name) && !string.IsNullOrEmpty(s.Code));
-
-            foreach (var sample in validSamples)
-            {
-                var relativePath = !string.IsNullOrEmpty(sample.FilePath)
-                    ? PathSanitizer.SanitizeFilePath(sample.FilePath, context.FileExtension)
-                    : PathSanitizer.SanitizeFileName(sample.Name) + context.FileExtension;
-
-                var filePath = Path.GetFullPath(Path.Combine(outputFullPath, relativePath));
-
-                // Security: ensure path stays within output directory
-                var normalizedFilePath = Path.GetFullPath(filePath);
-                if (!normalizedFilePath.StartsWith(normalizedOutputPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                    && !normalizedFilePath.Equals(normalizedOutputPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var fileDir = Path.GetDirectoryName(filePath);
-                if (!string.IsNullOrEmpty(fileDir))
-                    Directory.CreateDirectory(fileDir);
-
-                await File.WriteAllTextAsync(filePath, sample.Code, cancellationToken).ConfigureAwait(false);
-                writtenFiles.Add(filePath);
-            }
+            var estimatedTokens = (systemPrompt.Length + userPrompt.Length) / 4;
 
             activity?.SetTag("language", effectiveLanguage.Value.ToString());
-            // Estimate token usage from prompt/response lengths (MCP sampling doesn't expose exact counts)
-            var estimatedPromptTokens = (systemPrompt.Length + userPrompt.Length) / 4;
-            var estimatedResponseTokens = (lastResponseText?.Length ?? 0) / 4;
-            SdkChatTelemetry.RecordSampleMetrics(activity, writtenFiles.Count, estimatedPromptTokens, estimatedResponseTokens);
+            activity?.SetTag("estimatedTokens", estimatedTokens);
 
-            return McpToolResult.CreateSuccess(
-                $"Generated {writtenFiles.Count} sample(s) in {outputFullPath}",
-                new ResultData
-                {
-                    Count = writtenFiles.Count,
-                    OutputPath = outputFullPath,
-                    Files = [.. writtenFiles],
-                    Language = effectiveLanguage.Value.ToString()
-                }
-            ).ToString();
+            var result = new SamplesPromptResult
+            {
+                SystemPrompt = systemPrompt,
+                UserPrompt = userPrompt,
+                EstimatedTokens = estimatedTokens,
+                Language = effectiveLanguage.Value.ToString(),
+                FileExtension = context.FileExtension,
+                SuggestedOutputPath = suggestedOutputPath
+            };
+
+            return JsonSerializer.Serialize(
+                new McpResponse<SamplesPromptResult> { Success = true, Data = result },
+                McpJsonContext.Default.McpResponseSamplesPromptResult);
         }
         catch (Exception ex)
         {
             SdkChatTelemetry.RecordError(activity, ex);
-            return McpToolResult.CreateFailure($"Error generating samples: {ex.Message}", ex).ToString();
+            return McpToolResult.CreateFailure($"Error building prompt: {ex.Message}", ex).ToString();
+        }
+    }
+
+    [McpServerTool(Name = "validate_samples"), Description(
+        "Validate and parse an LLM response containing generated SDK samples. " +
+        "WHEN TO USE: After calling your LLM with the prompts from build_samples_prompt. " +
+        "WHAT IT DOES: Parses the LLM response as a JSON array of samples, validates each sample, and records telemetry. " +
+        "RETURNS: On success: parsed samples array with name, description, code, and filePath for each. " +
+        "On failure: error message and a correctionPrompt to send back to the LLM for retry. " +
+        "WORKFLOW: build_samples_prompt → call LLM → validate_samples → if correctionPrompt returned, retry LLM → write samples to disk.")]
+    public string ValidateSamples(
+        [Description("The raw text response from the LLM.")] string llmResponse,
+        [Description("The SDK language (from build_samples_prompt result). Used for telemetry.")] string? language = null)
+    {
+        using var activity = SdkChatTelemetry.StartMcpTool("validate_samples");
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(llmResponse))
+            {
+                return JsonSerializer.Serialize(
+                    new ValidateSamplesResult
+                    {
+                        Success = false,
+                        Error = "Empty LLM response",
+                        CorrectionPrompt = SampleResponseParser.CorrectionPrompt
+                    },
+                    McpJsonContext.Default.ValidateSamplesResult);
+            }
+
+            List<GeneratedSample> samples;
+            try
+            {
+                samples = SampleResponseParser.ParseJsonArray(llmResponse);
+            }
+            catch (JsonException ex)
+            {
+                return JsonSerializer.Serialize(
+                    new ValidateSamplesResult
+                    {
+                        Success = false,
+                        Error = $"Failed to parse LLM response: {ex.Message}",
+                        CorrectionPrompt = SampleResponseParser.CorrectionPrompt,
+                        EstimatedResponseTokens = llmResponse.Length / 4
+                    },
+                    McpJsonContext.Default.ValidateSamplesResult);
+            }
+
+            // Sanitize file paths to prevent traversal attacks and normalize for cross-platform use
+            samples = [.. samples.Select(s => s with
+            {
+                FilePath = s.FilePath is not null
+                    ? PathSanitizer.SanitizeFilePath(s.FilePath, Path.GetExtension(s.FilePath))
+                    : null
+            })];
+
+            // Filter to valid samples only
+            var validSamples = samples
+                .Where(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
+                .ToList();
+
+            var estimatedResponseTokens = llmResponse.Length / 4;
+
+            activity?.SetTag("language", language);
+            SdkChatTelemetry.RecordSampleMetrics(activity, validSamples.Count, 0, estimatedResponseTokens);
+
+            return JsonSerializer.Serialize(
+                new ValidateSamplesResult
+                {
+                    Success = true,
+                    Samples = validSamples,
+                    Count = validSamples.Count,
+                    EstimatedResponseTokens = estimatedResponseTokens
+                },
+                McpJsonContext.Default.ValidateSamplesResult);
+        }
+        catch (Exception ex)
+        {
+            SdkChatTelemetry.RecordError(activity, ex);
+            return McpToolResult.CreateFailure($"Error validating samples: {ex.Message}", ex).ToString();
         }
     }
 
@@ -336,11 +373,4 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper, IPac
 
         return string.Concat(parts);
     }
-
-    private static string ExtractTextFromSamplingResponse(CreateMessageResult result)
-    {
-        var textBlocks = result.Content.OfType<TextContentBlock>();
-        return string.Concat(textBlocks.Select(b => b.Text ?? string.Empty));
-    }
-
 }

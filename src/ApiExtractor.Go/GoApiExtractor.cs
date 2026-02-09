@@ -88,33 +88,44 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
-        string binaryPath;
+        ProcessResult result;
 
         if (availability.Mode == ExtractorMode.NativeBinary)
         {
-            binaryPath = availability.ExecutablePath!;
+            result = await ProcessSandbox.ExecuteAsync(
+                availability.ExecutablePath!,
+                ["--json", rootPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
         }
         else if (availability.Mode == ExtractorMode.RuntimeInterpreter)
         {
-            binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
+            var binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
+            result = await ProcessSandbox.ExecuteAsync(
+                binaryPath,
+                ["--json", rootPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+        }
+        else if (availability.Mode == ExtractorMode.Docker)
+        {
+            result = await DockerSandbox.ExecuteAsync(
+                availability.DockerImageName!,
+                rootPath,
+                ["--json", rootPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
         }
         else
         {
             throw new InvalidOperationException(availability.UnavailableReason ?? "Go extractor not available");
         }
 
-        // Use ProcessSandbox for hardened execution with timeout and output limits
-        var result = await ProcessSandbox.ExecuteAsync(
-            binaryPath,
-            ["--json", rootPath],
-            cancellationToken: ct
-        ).ConfigureAwait(false);
-
         if (!result.Success)
         {
             var errorMsg = result.TimedOut
                 ? $"Go extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Extractor failed: {result.StandardError}";
+                : $"Go extractor failed: {result.StandardError}";
             throw new InvalidOperationException(errorMsg);
         }
 
@@ -133,32 +144,44 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
-        string binaryPath;
+        ProcessResult result;
 
         if (availability.Mode == ExtractorMode.NativeBinary)
         {
-            binaryPath = availability.ExecutablePath!;
+            result = await ProcessSandbox.ExecuteAsync(
+                availability.ExecutablePath!,
+                ["--stub", rootPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
         }
         else if (availability.Mode == ExtractorMode.RuntimeInterpreter)
         {
-            binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
+            var binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
+            result = await ProcessSandbox.ExecuteAsync(
+                binaryPath,
+                ["--stub", rootPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+        }
+        else if (availability.Mode == ExtractorMode.Docker)
+        {
+            result = await DockerSandbox.ExecuteAsync(
+                availability.DockerImageName!,
+                rootPath,
+                ["--stub", rootPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
         }
         else
         {
             throw new InvalidOperationException(availability.UnavailableReason ?? "Go extractor not available");
         }
 
-        var result = await ProcessSandbox.ExecuteAsync(
-            binaryPath,
-            ["--stub", rootPath],
-            cancellationToken: ct
-        ).ConfigureAwait(false);
-
         if (!result.Success)
         {
             var errorMsg = result.TimedOut
                 ? $"Go extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Extractor failed: {result.StandardError}";
+                : $"Go extractor failed: {result.StandardError}";
             throw new InvalidOperationException(errorMsg);
         }
 
@@ -200,11 +223,11 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             Directory.CreateDirectory(cacheDir);
 
             var binaryName = OperatingSystem.IsWindows() ? $"extractor_{hash}.exe" : $"extractor_{hash}";
-            
+
             // SECURITY: Validate binary name to prevent path traversal attacks
             // Even though hash is hex-safe, be defensive against future code changes
             ToolPathResolver.ValidateSafeInput(binaryName, nameof(binaryName), allowPath: false);
-            
+
             var binaryPath = Path.Combine(cacheDir, binaryName);
 
             if (File.Exists(binaryPath))

@@ -6,7 +6,6 @@
 # Shell:  docker run --rm -it -u $(id -u):$(id -g) -v $(pwd):/workspace sdk-chat-dev bash
 # Test:   docker run --rm -u $(id -u):$(id -g) -v $(pwd):/workspace sdk-chat-dev
 #
-# For production: use Dockerfile.release
 # For demo recording: use demo/Dockerfile
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0

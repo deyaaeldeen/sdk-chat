@@ -147,6 +147,26 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             return result.Success ? result.StandardOutput : null;
         }
 
+        if (availability.Mode == ExtractorMode.Docker)
+        {
+            var dockerResult = await DockerSandbox.ExecuteAsync(
+                availability.DockerImageName!,
+                [apiJsonPath, samplesPath],
+                ["--usage", apiJsonPath, samplesPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            if (!dockerResult.Success)
+            {
+                Console.Error.WriteLine(dockerResult.TimedOut
+                    ? $"Java usage analyzer: Docker timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"Java usage analyzer: Docker failed: {dockerResult.StandardError}");
+                return null;
+            }
+
+            return dockerResult.StandardOutput;
+        }
+
         if (availability.Mode != ExtractorMode.RuntimeInterpreter)
             return null;
 

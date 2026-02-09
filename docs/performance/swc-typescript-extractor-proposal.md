@@ -115,7 +115,7 @@ Match the existing JSON output format:
 
 ### Phase 3: Integration (0.5 days)
 
-1. Add Rust build stage to `Dockerfile.release`
+1. Add Rust build stage to `extractors/typescript/Dockerfile`
 2. Update `TypeScriptApiExtractor.cs` to use new binary
 3. Run existing tests to verify compatibility
 
@@ -136,7 +136,7 @@ Keep Bun version as fallback for edge cases:
 
 ## Build Dependencies
 
-Add to `Dockerfile.release`:
+Add to `extractors/typescript/Dockerfile`:
 
 ```dockerfile
 # Stage: Build TypeScript extractor (Rust/SWC)

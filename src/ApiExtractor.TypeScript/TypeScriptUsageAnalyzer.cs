@@ -147,6 +147,26 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             return result.StandardOutput;
         }
 
+        if (availability.Mode == ExtractorMode.Docker)
+        {
+            var dockerResult = await DockerSandbox.ExecuteAsync(
+                availability.DockerImageName!,
+                [apiJsonPath, samplesPath],
+                ["--usage", apiJsonPath, samplesPath],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            if (!dockerResult.Success)
+            {
+                Console.Error.WriteLine(dockerResult.TimedOut
+                    ? $"TypeScript usage analyzer: Docker timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"TypeScript usage analyzer: Docker failed: {dockerResult.StandardError}");
+                return null;
+            }
+
+            return dockerResult.StandardOutput;
+        }
+
         if (availability.Mode != ExtractorMode.RuntimeInterpreter)
             return null;
 

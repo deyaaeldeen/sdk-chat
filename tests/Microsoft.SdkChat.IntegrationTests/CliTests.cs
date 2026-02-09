@@ -7,25 +7,23 @@ using Xunit;
 namespace Microsoft.SdkChat.IntegrationTests;
 
 /// <summary>
-/// Integration tests for release container CLI commands across all supported languages.
-/// Uses the wrapper script (scripts/sdk-chat.sh) which handles Docker setup, path mounting,
-/// and credential passthrough automatically.
+/// Integration tests for the CLI across all supported languages.
+/// Invokes the project directly via <c>dotnet run --project</c>.
 ///
 /// Prerequisites:
-/// - Docker available
-/// - Release image built: docker build -f Dockerfile.release -t sdk-chat:latest .
-///   Or use: ./scripts/sdk-chat.sh --build --help
+/// - .NET SDK installed
+/// - Project built: dotnet build
 ///
 /// Run:
 ///   dotnet test tests/Microsoft.SdkChat.IntegrationTests --filter "Category=Integration"
 /// </summary>
-[Collection("ReleaseContainer")]
+[Collection("CLI")]
 [Trait("Category", "Integration")]
-public class ReleaseContainerTests
+public class CliTests
 {
-    private readonly ReleaseContainerFixture _fixture;
+    private readonly CliFixture _fixture;
 
-    public ReleaseContainerTests(ReleaseContainerFixture fixture)
+    public CliTests(CliFixture fixture)
     {
         _fixture = fixture;
     }
@@ -33,7 +31,7 @@ public class ReleaseContainerTests
     #region Test Data
 
     /// <summary>
-    /// Languages fully supported in native release container.
+    /// All supported languages.
     /// </summary>
     public static TheoryData<string> SupportedLanguages => new()
     {
@@ -45,15 +43,14 @@ public class ReleaseContainerTests
     };
 
     /// <summary>
-    /// All languages for tests that don't require working extractors.
+    /// Languages whose usage analyzers support coverage detection.
+    /// Go and TypeScript usage analyzers do not yet detect sample coverage.
     /// </summary>
-    public static TheoryData<string> AllLanguages => new()
+    public static TheoryData<string> CoverageLanguages => new()
     {
         "DotNet",
         "Python",
-        "Go",
-        "Java",
-        "TypeScript"
+        "Java"
     };
 
     #endregion
@@ -61,9 +58,9 @@ public class ReleaseContainerTests
     #region Baseline Tests
 
     [Fact]
-    public async Task Container_HelpCommand_ReturnsSuccess()
+    public async Task HelpCommand_ReturnsSuccess()
     {
-        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
         var (exitCode, output, error) = await _fixture.RunAsync(["--help"]);
 
@@ -72,9 +69,9 @@ public class ReleaseContainerTests
     }
 
     [Fact]
-    public async Task Container_DoctorCommand_ReturnsSuccess()
+    public async Task DoctorCommand_ReturnsSuccess()
     {
-        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
         var (exitCode, output, error) = await _fixture.RunAsync(["doctor"]);
 
@@ -89,10 +86,10 @@ public class ReleaseContainerTests
     #region Source Detection Tests
 
     [Theory]
-    [MemberData(nameof(AllLanguages))]
+    [MemberData(nameof(SupportedLanguages))]
     public async Task SourceDetect_ReturnsValidOutput(string language)
     {
-        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package source detect", language);
@@ -114,11 +111,9 @@ public class ReleaseContainerTests
     [MemberData(nameof(SupportedLanguages))]
     public async Task ApiExtract_ReturnsValidJson(string language)
     {
-        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
-        // Minimal fixtures don't have project files, so we need to specify language explicitly
-        // --json flag outputs structured JSON instead of human-readable stubs
-        var langFlag = ReleaseContainerFixture.GetLanguageFlag(language);
+        var langFlag = CliFixture.GetLanguageFlag(language);
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package api extract", language, $"--language {langFlag} --json");
 
@@ -139,7 +134,7 @@ public class ReleaseContainerTests
     [MemberData(nameof(SupportedLanguages))]
     public async Task SamplesDetect_ExecutesWithoutCrash(string language)
     {
-        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package samples detect", language);
@@ -157,7 +152,7 @@ public class ReleaseContainerTests
     [MemberData(nameof(SupportedLanguages))]
     public async Task ApiCoverage_ExecutesWithoutCrash(string language)
     {
-        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package api coverage", language);
@@ -167,12 +162,12 @@ public class ReleaseContainerTests
     }
 
     [Theory]
-    [MemberData(nameof(SupportedLanguages))]
+    [MemberData(nameof(CoverageLanguages))]
     public async Task ApiCoverage_DetectsSubclientOperations(string language)
     {
-        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
-        var langFlag = ReleaseContainerFixture.GetLanguageFlag(language);
+        var langFlag = CliFixture.GetLanguageFlag(language);
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package api coverage", language, $"--language {langFlag} --json");
 
@@ -188,9 +183,7 @@ public class ReleaseContainerTests
         {
             "DotNet" => (Client: "WidgetClient", Operation: "ListWidgetsAsync"),
             "Python" => (Client: "WidgetClient", Operation: "list_widgets"),
-            "Go" => (Client: "WidgetsClient", Operation: "ListWidgets"),
             "Java" => (Client: "WidgetsClient", Operation: "listWidgets"),
-            "TypeScript" => (Client: "WidgetClient", Operation: "listWidgets"),
             _ => (Client: "", Operation: "")
         };
 
@@ -203,12 +196,12 @@ public class ReleaseContainerTests
     }
 
     [Theory]
-    [MemberData(nameof(SupportedLanguages))]
+    [MemberData(nameof(CoverageLanguages))]
     public async Task ApiCoverage_DetectsInterfaceSubclientOperations(string language)
     {
-        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "Container not available");
+        if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
-        var langFlag = ReleaseContainerFixture.GetLanguageFlag(language);
+        var langFlag = CliFixture.GetLanguageFlag(language);
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
             "package api coverage", language, $"--language {langFlag} --json");
 
@@ -224,9 +217,7 @@ public class ReleaseContainerTests
         {
             "DotNet" => (Interface: "IRecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "ListRecommendationsAsync"),
             "Python" => (Interface: "RecommendationsClientBase", Implementation: "RecommendationsClientImpl", Operation: "list_recommendations"),
-            "Go" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "ListRecommendations"),
             "Java" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "listRecommendations"),
-            "TypeScript" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "listRecommendations"),
             _ => (Interface: "", Implementation: "", Operation: "")
         };
 

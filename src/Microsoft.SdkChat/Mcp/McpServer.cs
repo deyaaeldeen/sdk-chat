@@ -91,7 +91,8 @@ public static class McpServer
         Justification = "ValidationContext uses reflection for DisplayNameAttribute; SdkChatOptions is a known type")]
     private static void ConfigureLoggingAndServices(ILoggingBuilder logging, IServiceCollection services, string logLevel, bool useOpenAi)
     {
-        logging.AddConsole().SetMinimumLevel(ParseLogLevel(logLevel));
+        logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace)
+               .SetMinimumLevel(ParseLogLevel(logLevel));
 
         var options = SdkChatOptions.FromEnvironment();
         if (useOpenAi) options.UseOpenAi = true;
@@ -112,16 +113,6 @@ public static class McpServer
         services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
         services.AddSingleton<FileHelper>();
         services.AddSingleton<IPackageInfoService, PackageInfoService>();
-        
-        // Register IMcpSampler - the actual McpServer instance will be injected at runtime by the MCP framework
-        // This factory creates a wrapper that delegates to the McpServer
-        services.AddScoped<IMcpSampler>(sp =>
-        {
-            // The McpServer instance is provided by the MCP framework during tool execution
-            // We retrieve it from the service provider where the framework has registered it
-            var mcpServer = sp.GetRequiredService<ModelContextProtocol.Server.McpServer>();
-            return new McpServerSampler(mcpServer);
-        });
     }
 
     private static LogLevel ParseLogLevel(string level) => level.ToLowerInvariant() switch

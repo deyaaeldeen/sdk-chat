@@ -24,7 +24,7 @@
 
   <!--
     Note: Test fixtures are referenced from ApiExtractor.Tests/TestFixtures at runtime.
-    The wrapper script (scripts/sdk-chat.sh) mounts them automatically.
+    The fixture locates the project and runs it via `dotnet run`.
   -->
 
 </Project>

@@ -38,3 +38,21 @@ public class LanguageContextFixture
 {
     // Empty fixture - used only to control parallelization
 }
+
+/// <summary>
+/// Collection for tests that modify DockerSandbox global state (environment variables).
+/// Tests in this collection run sequentially.
+/// </summary>
+[CollectionDefinition("DockerSandbox", DisableParallelization = true)]
+public class DockerSandboxCollection
+{
+}
+
+/// <summary>
+/// Collection for tests that modify ExtractorAvailability global state (caches, environment variables).
+/// Tests in this collection run sequentially.
+/// </summary>
+[CollectionDefinition("ExtractorAvailability", DisableParallelization = true)]
+public class ExtractorAvailabilityCollection
+{
+}
