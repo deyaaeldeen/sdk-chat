@@ -16,7 +16,7 @@ namespace Microsoft.SdkChat.Tests.Mcp;
 public class SamplesMcpToolsTests : IDisposable
 {
     private readonly string _testRoot;
-    private readonly MockAiService _mockAiService;
+    private readonly MockMcpSampler _mockSampler;
     private readonly FileHelper _fileHelper;
     private readonly SamplesMcpTools _tool;
 
@@ -25,9 +25,9 @@ public class SamplesMcpToolsTests : IDisposable
         _testRoot = Path.Combine(Path.GetTempPath(), $"McpToolTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testRoot);
 
-        _mockAiService = new MockAiService();
+        _mockSampler = new MockMcpSampler();
         _fileHelper = new FileHelper();
-        _tool = new SamplesMcpTools(_mockAiService, _fileHelper);
+        _tool = new SamplesMcpTools(_mockSampler, _fileHelper, new PackageInfoService());
     }
 
     public void Dispose()
@@ -49,15 +49,15 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("BasicSample", "A basic sample", "// Hello", "BasicSample.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("BasicSample", "A basic sample", "// Hello", "BasicSample.cs"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
 
         // Assert
         Assert.Contains("Generated 1 sample", result);
-        Assert.Equal(1, _mockAiService.CallCount);
-        Assert.Contains("C#", _mockAiService.LastSystemPrompt);
+        Assert.Equal(1, _mockSampler.CallCount);
+        Assert.Contains("C#", _mockSampler.LastSystemPrompt);
     }
 
     [Fact]
@@ -65,14 +65,14 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreatePythonProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("sample", "A sample", "# Hello", "sample.py"));
+        _mockSampler.SetSamplesToReturn(CreateSample("sample", "A sample", "# Hello", "sample.py"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
 
         // Assert
         Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("Python", _mockAiService.LastSystemPrompt);
+        Assert.Contains("Python", _mockSampler.LastSystemPrompt);
     }
 
     [Fact]
@@ -80,14 +80,14 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateJavaProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("Sample", "A sample", "class Sample {}", "Sample.java"));
+        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "A sample", "class Sample {}", "Sample.java"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
 
         // Assert
         Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("Java", _mockAiService.LastSystemPrompt);
+        Assert.Contains("Java", _mockSampler.LastSystemPrompt);
     }
 
     [Fact]
@@ -95,14 +95,14 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateTypeScriptProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("sample", "A sample", "// Hello", "sample.ts"));
+        _mockSampler.SetSamplesToReturn(CreateSample("sample", "A sample", "// Hello", "sample.ts"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
 
         // Assert
         Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("TypeScript", _mockAiService.LastSystemPrompt);
+        Assert.Contains("TypeScript", _mockSampler.LastSystemPrompt);
     }
 
     [Fact]
@@ -110,14 +110,14 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateJavaScriptProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("sample", "A sample", "// Hello", "sample.js"));
+        _mockSampler.SetSamplesToReturn(CreateSample("sample", "A sample", "// Hello", "sample.js"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
 
         // Assert
         Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("JavaScript", _mockAiService.LastSystemPrompt);
+        Assert.Contains("JavaScript", _mockSampler.LastSystemPrompt);
     }
 
     [Fact]
@@ -125,14 +125,14 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateGoProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("sample", "A sample", "package main", "sample.go"));
+        _mockSampler.SetSamplesToReturn(CreateSample("sample", "A sample", "package main", "sample.go"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
 
         // Assert
         Assert.Contains("Generated 1 sample", result);
-        Assert.Contains("Go", _mockAiService.LastSystemPrompt);
+        Assert.Contains("Go", _mockSampler.LastSystemPrompt);
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class SamplesMcpToolsTests : IDisposable
         // Assert
         Assert.Contains("Error", result);
         Assert.Contains("Could not detect", result);
-        Assert.Equal(0, _mockAiService.CallCount);
+        Assert.Equal(0, _mockSampler.CallCount);
     }
 
     #endregion
@@ -159,7 +159,7 @@ public class SamplesMcpToolsTests : IDisposable
         // Arrange
         CreateDotNetProject();
         var customOutput = Path.Combine(_testRoot, "custom-output");
-        _mockAiService.SetSamplesToReturn(CreateSample("Sample", "A sample", "// Code", "Sample.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "A sample", "// Code", "Sample.cs"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot, outputPath: customOutput);
@@ -176,7 +176,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("Sample", "A sample", "// Code", "Sample.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "A sample", "// Code", "Sample.cs"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
@@ -196,13 +196,13 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("AuthSample", "Auth", "// Auth", "AuthSample.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("AuthSample", "Auth", "// Auth", "AuthSample.cs"));
 
         // Act
         await _tool.GenerateSamplesAsync(_testRoot, prompt: "Generate authentication examples");
 
         // Assert
-        Assert.Contains("authentication examples", _mockAiService.LastUserPrompt);
+        Assert.Contains("authentication examples", _mockSampler.LastUserPrompt);
     }
 
     [Fact]
@@ -210,13 +210,13 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("Sample", "Sample", "// Code", "Sample.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "Sample", "// Code", "Sample.cs"));
 
         // Act
         await _tool.GenerateSamplesAsync(_testRoot);
 
         // Assert - default prompt includes count (5 samples)
-        Assert.Contains("Generate 5 samples", _mockAiService.LastUserPrompt);
+        Assert.Contains("Generate 5 samples", _mockSampler.LastUserPrompt);
     }
 
     #endregion
@@ -228,7 +228,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("TokenSample", "Auth sample", "// Auth", "auth/TokenSample.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("TokenSample", "Auth sample", "// Auth", "auth/TokenSample.cs"));
 
         // Act
         await _tool.GenerateSamplesAsync(_testRoot);
@@ -245,7 +245,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("Sample", "Sample", "// Code", "level1/level2/level3/Sample.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("Sample", "Sample", "// Code", "level1/level2/level3/Sample.cs"));
 
         // Act
         await _tool.GenerateSamplesAsync(_testRoot);
@@ -260,7 +260,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("MySample", "Sample", "// Code", null));
+        _mockSampler.SetSamplesToReturn(CreateSample("MySample", "Sample", "// Code", null));
 
         // Act
         await _tool.GenerateSamplesAsync(_testRoot);
@@ -275,7 +275,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(CreateSample("Sample:With:Colons", "Sample", "// Code", null));
+        _mockSampler.SetSamplesToReturn(CreateSample("Sample:With:Colons", "Sample", "// Code", null));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
@@ -297,7 +297,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(
+        _mockSampler.SetSamplesToReturn(
             CreateSample("Sample1", "First", "// 1", "Sample1.cs"),
             CreateSample("Sample2", "Second", "// 2", "Sample2.cs"),
             CreateSample("Sample3", "Third", "// 3", "Sample3.cs")
@@ -319,7 +319,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(
+        _mockSampler.SetSamplesToReturn(
             CreateSample("Good", "Good sample", "// Good", "Good.cs"),
             CreateSample("", "Empty name", "// Empty", null),
             CreateSample("AlsoGood", "Also good", "// Also", "AlsoGood.cs")
@@ -337,7 +337,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(
+        _mockSampler.SetSamplesToReturn(
             CreateSample("Good", "Good sample", "// Good", "Good.cs"),
             CreateSample("NoCode", "No code", "", "NoCode.cs"),
             CreateSample("AlsoGood", "Also good", "// Also", "AlsoGood.cs")
@@ -359,7 +359,7 @@ public class SamplesMcpToolsTests : IDisposable
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetExceptionToThrow(new InvalidOperationException("AI service failed"));
+        _mockSampler.SetExceptionToThrow(new InvalidOperationException("AI service failed"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
@@ -393,7 +393,7 @@ public class SamplesMcpToolsTests : IDisposable
         // Arrange
         CreateDotNetProject();
         var expectedCode = "// This is the sample code\nConsole.WriteLine(\"Hello, World!\");";
-        _mockAiService.SetSamplesToReturn(CreateSample("HelloWorld", "Hello World sample", expectedCode, "HelloWorld.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("HelloWorld", "Hello World sample", expectedCode, "HelloWorld.cs"));
 
         // Act
         await _tool.GenerateSamplesAsync(_testRoot);
@@ -436,7 +436,7 @@ public class Client
         File.WriteAllText(Path.Combine(srcDir, "client.py"), @"
 class Client:
     '''Test client for API operations.'''
-    
+
     def get_resource(self, id: int) -> str:
         '''Gets a resource by ID.'''
         return 'test'
@@ -548,7 +548,7 @@ func (c *Client) GetResource(id int) string {
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(
+        _mockSampler.SetSamplesToReturn(
             CreateSample("  ", "Whitespace name", "// Code", "file.cs"),
             CreateSample("Good", "Good sample", "// Code", "Good.cs")
         );
@@ -566,7 +566,7 @@ func (c *Client) GetResource(id int) string {
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(
+        _mockSampler.SetSamplesToReturn(
             CreateSample("EmptyCode", "Empty", "   \n\t  ", "empty.cs"),
             CreateSample("Good", "Good sample", "// Code", "Good.cs")
         );
@@ -584,7 +584,7 @@ func (c *Client) GetResource(id int) string {
         // Arrange
         CreateDotNetProject();
         var longName = new string('A', 200); // Very long name
-        _mockAiService.SetSamplesToReturn(CreateSample(longName, "Long name", "// Code", null));
+        _mockSampler.SetSamplesToReturn(CreateSample(longName, "Long name", "// Code", null));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
@@ -599,7 +599,7 @@ func (c *Client) GetResource(id int) string {
         // Arrange
         CreateDotNetProject();
         var codeWithSpecialChars = "var x = \"Hello\\nWorld\";\n// Special: @#$%^&*(){}[]|\\:\";<>?,./";
-        _mockAiService.SetSamplesToReturn(CreateSample("Special", "Special chars", codeWithSpecialChars, "special.cs"));
+        _mockSampler.SetSamplesToReturn(CreateSample("Special", "Special chars", codeWithSpecialChars, "special.cs"));
 
         // Act
         await _tool.GenerateSamplesAsync(_testRoot);
@@ -630,7 +630,7 @@ func (c *Client) GetResource(id int) string {
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetExceptionToThrow(new TimeoutException("Request timed out"));
+        _mockSampler.SetExceptionToThrow(new TimeoutException("Request timed out"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
@@ -645,7 +645,7 @@ func (c *Client) GetResource(id int) string {
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetExceptionToThrow(new HttpRequestException("Network error"));
+        _mockSampler.SetExceptionToThrow(new HttpRequestException("Network error"));
 
         // Act
         var result = await _tool.GenerateSamplesAsync(_testRoot);
@@ -660,7 +660,7 @@ func (c *Client) GetResource(id int) string {
     {
         // Arrange
         CreateDotNetProject();
-        _mockAiService.SetSamplesToReturn(
+        _mockSampler.SetSamplesToReturn(
             CreateSample("Sample", "First version", "// First", "Sample.cs"),
             CreateSample("Sample", "Second version", "// Second", "Sample.cs")
         );
@@ -683,8 +683,7 @@ func (c *Client) GetResource(id int) string {
         // Arrange
         CreateDotNetProject();
         var unicodeCode = "// 你好世界 🌍 مرحبا العالم\nvar emoji = \"🎉\";";
-        _mockAiService.SetSamplesToReturn(CreateSample("Unicode", "Unicode test", unicodeCode, "unicode.cs"));
-
+        _mockSampler.SetSamplesToReturn(CreateSample("Unicode", "Unicode test", unicodeCode, "unicode.cs"));
         // Act
         await _tool.GenerateSamplesAsync(_testRoot);
 
@@ -704,9 +703,9 @@ func (c *Client) GetResource(id int) string {
         // Arrange
         CreateDotNetProject();
 
-        // Set up a mock that delays before returning samples
-        var delaySamples = new DelaySamplesMockAiService(delay: TimeSpan.FromSeconds(5));
-        var tool = new SamplesMcpTools(delaySamples, _fileHelper);
+        // Set up a mock sampler that delays before returning
+        var delaySampler = MockMcpSamplerFactory.CreateThatThrows(new OperationCanceledException());
+        var tool = new SamplesMcpTools(delaySampler, _fileHelper, new PackageInfoService());
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
@@ -715,42 +714,6 @@ func (c *Client) GetResource(id int) string {
 
         // Assert - result should indicate cancellation error
         Assert.Contains("Error", result);
-    }
-
-    /// <summary>
-    /// Mock AI service that delays before returning samples - used for cancellation testing.
-    /// </summary>
-    private sealed class DelaySamplesMockAiService : IAiService
-    {
-        private readonly TimeSpan _delay;
-
-        public DelaySamplesMockAiService(TimeSpan delay) => _delay = delay;
-
-        public bool IsUsingOpenAi => false;
-        public string GetEffectiveModel(string? modelOverride = null) => "mock";
-
-        public async IAsyncEnumerable<T> StreamItemsAsync<T>(
-            string systemPrompt,
-            IAsyncEnumerable<string> userPromptStream,
-            System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> jsonTypeInfo,
-            string? model = null,
-            ContextInfo? contextInfo = null,
-            AiPromptReadyCallback? onPromptReady = null,
-            AiStreamCompleteCallback? onStreamComplete = null,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            // Materialize prompt
-            await foreach (var _ in userPromptStream.WithCancellation(cancellationToken))
-            {
-            }
-
-            // Long delay that should be cancelled
-            await Task.Delay(_delay, cancellationToken);
-
-            yield break;
-        }
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     #endregion

@@ -324,13 +324,12 @@ public sealed class SampleGeneratorAgent(
         List<GeneratedSample> samples;
         try
         {
-            samples = JsonSerializer.Deserialize(userInput, AiStreamingJsonContext.CaseInsensitive.ListGeneratedSample)
-                ?? throw new JsonException("Null result");
+            samples = SampleResponseParser.ParseJsonArray(userInput);
         }
         catch (JsonException ex)
         {
             await SendTextAsync(connection, request.SessionId, $"❌ Invalid JSON: {ex.Message}\n", ct);
-            await SendTextAsync(connection, request.SessionId, "Expected: [{\"name\":\"...\",\"code\":\"...\",\"filePath\":\"...\"}]\n", ct);
+            await SendTextAsync(connection, request.SessionId, $"{SampleResponseParser.CorrectionPrompt}\n", ct);
             return new PromptResponse { StopReason = StopReason.EndTurn };
         }
 

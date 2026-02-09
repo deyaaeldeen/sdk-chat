@@ -13,9 +13,9 @@ namespace Microsoft.SdkChat.Mcp;
 /// Provides read-only access to SDK API surface, coverage, and source information.
 /// </summary>
 [McpServerResourceType]
-public class SdkResources
+public class SdkResources(IPackageInfoService service)
 {
-    private readonly PackageInfoService _service = new();
+    private readonly IPackageInfoService _service = service;
 
     [McpServerResource(UriTemplate = "sdk://{path}/api"), Description(
         "Public API surface of the SDK package. " +

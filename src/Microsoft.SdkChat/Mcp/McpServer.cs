@@ -111,6 +111,7 @@ public static class McpServer
         services.AddSingleton<AiService>();
         services.AddSingleton<IAiService>(sp => sp.GetRequiredService<AiService>());
         services.AddSingleton<FileHelper>();
+        services.AddSingleton<IPackageInfoService, PackageInfoService>();
         
         // Register IMcpSampler - the actual McpServer instance will be injected at runtime by the MCP framework
         // This factory creates a wrapper that delegates to the McpServer

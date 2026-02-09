@@ -18,9 +18,9 @@ namespace Microsoft.SdkChat.Mcp;
 /// Entity group: samples
 /// </summary>
 [McpServerToolType]
-public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
+public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper, IPackageInfoService packageInfoService)
 {
-    private readonly PackageInfoService _infoService = new();
+    private readonly IPackageInfoService _infoService = packageInfoService;
     private readonly FileHelper _fileHelper = fileHelper;
     private readonly IMcpSampler _mcpSampler = mcpSampler;
 
@@ -65,6 +65,7 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
         [Description("Guide the AI: 'streaming examples', 'error handling patterns', 'authentication scenarios', 'async/await usage'.")] string? prompt = null,
         [Description("How many samples to generate. Default: 5.")] int? count = null,
         [Description("Max source context in characters. Default: 512K (128K tokens). Reduce for faster/cheaper generation.")] int? budget = null,
+        [Description("Max tokens for the LLM response. Default: 16000. Increase for more/larger samples.")] int? maxTokens = null,
         [Description("Force language: dotnet, python, java, javascript, typescript, go. Default: auto-detected.")] string? language = null,
         CancellationToken cancellationToken = default)
     {
@@ -106,7 +107,7 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
             }
 
             // Create language context
-            var context = CreateLanguageContext(effectiveLanguage.Value);
+            var context = SampleGeneratorService.CreateLanguageContextForLanguage(effectiveLanguage.Value, _fileHelper);
             var existingSampleCount = samplesResult.SamplesFolder is not null && Directory.Exists(samplesResult.SamplesFolder)
                 ? SdkInfo.CountFilesSafely(samplesResult.SamplesFolder, $"*{context.FileExtension}")
                 : 0;
@@ -116,7 +117,10 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
 
             // Build prompts
             var sdkName = sourceResult.SdkName ?? Path.GetFileName(packageFullPath);
-            var systemPrompt = BuildSystemPrompt(context, sdkName, sampleCount);
+            var baseSystemPrompt = SampleGeneratorService.BuildSystemPrompt(context, sdkName, sampleCount);
+
+            // Append JSON schema instructions (shared with CLI and ACP)
+            var systemPrompt = $"{baseSystemPrompt}\n\n{SampleResponseParser.GetJsonArrayFormatInstructions()}";
 
             // Build user prompt by streaming context
             var userPrompt = await BuildUserPromptAsync(
@@ -143,40 +147,63 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
                     }
                 ],
                 SystemPrompt = systemPrompt,
-                MaxTokens = 16000, // Reasonable default for code generation; host can override if needed
+                MaxTokens = maxTokens ?? 16000, // Reasonable default for code generation; host can override
                 IncludeContext = ContextInclusion.ThisServer
             };
 
-            var samplingResult = await _mcpSampler.SampleAsync(createMessageRequest, cancellationToken: cancellationToken).ConfigureAwait(false);
+            // Request samples with retry on parse failure
+            const int MaxAttempts = SampleResponseParser.MaxRetryAttempts;
+            List<GeneratedSample>? samples = null;
+            string? lastResponseText = null;
 
-            // Parse LLM response to extract generated samples
-            var responseText = ExtractTextFromSamplingResponse(samplingResult);
-            if (string.IsNullOrWhiteSpace(responseText))
+            for (var attempt = 1; attempt <= MaxAttempts; attempt++)
             {
-                return McpToolResult.CreateFailure(
-                    "No content in LLM response",
-                    "EMPTY_RESPONSE"
-                ).ToString();
-            }
+                var samplingResult = await _mcpSampler.SampleAsync(createMessageRequest, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            // Try to parse as JSON array of samples
-            List<GeneratedSample> samples;
-            try
-            {
-                samples = JsonSerializer.Deserialize(responseText, AiStreamingJsonContext.CaseInsensitive.ListGeneratedSample)
-                    ?? throw new JsonException("Null result");
-            }
-            catch (JsonException)
-            {
-                // If direct JSON parsing fails, try to extract JSON from markdown code blocks
-                samples = TryExtractSamplesFromMarkdown(responseText);
-                if (samples.Count == 0)
+                lastResponseText = ExtractTextFromSamplingResponse(samplingResult);
+                if (string.IsNullOrWhiteSpace(lastResponseText))
+                    continue;
+
+                try
                 {
-                    return McpToolResult.CreateFailure(
-                        "Could not parse samples from LLM response. Expected JSON array of samples.",
-                        "PARSE_ERROR"
-                    ).ToString();
+                    samples = SampleResponseParser.ParseJsonArray(lastResponseText);
+                    break; // Parsed successfully
                 }
+                catch (JsonException) when (attempt < MaxAttempts)
+                {
+                    // Retry: replace user message with a correction prompt
+                    createMessageRequest.Messages =
+                    [
+                        new SamplingMessage
+                        {
+                            Role = Role.User,
+                            Content = [new TextContentBlock { Text = userPrompt }]
+                        },
+                        new SamplingMessage
+                        {
+                            Role = Role.Assistant,
+                            Content = [new TextContentBlock { Text = lastResponseText }]
+                        },
+                        new SamplingMessage
+                        {
+                            Role = Role.User,
+                            Content = [new TextContentBlock { Text = SampleResponseParser.CorrectionPrompt }]
+                        }
+                    ];
+                }
+                catch (JsonException)
+                {
+                    // Final attempt failed
+                }
+            }
+
+            if (samples is null)
+            {
+                var errorCode = string.IsNullOrWhiteSpace(lastResponseText) ? "EMPTY_RESPONSE" : "PARSE_ERROR";
+                var errorMessage = string.IsNullOrWhiteSpace(lastResponseText)
+                    ? "No content in LLM response"
+                    : "Could not parse samples from LLM response after retry. Expected JSON array of samples.";
+                return McpToolResult.CreateFailure(errorMessage, errorCode).ToString();
             }
 
             // Write samples to disk
@@ -214,7 +241,10 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
             }
 
             activity?.SetTag("language", effectiveLanguage.Value.ToString());
-            SdkChatTelemetry.RecordSampleMetrics(activity, writtenFiles.Count, 0, 0);
+            // Estimate token usage from prompt/response lengths (MCP sampling doesn't expose exact counts)
+            var estimatedPromptTokens = (systemPrompt.Length + userPrompt.Length) / 4;
+            var estimatedResponseTokens = (lastResponseText?.Length ?? 0) / 4;
+            SdkChatTelemetry.RecordSampleMetrics(activity, writtenFiles.Count, estimatedPromptTokens, estimatedResponseTokens);
 
             return McpToolResult.CreateSuccess(
                 $"Generated {writtenFiles.Count} sample(s) in {outputFullPath}",
@@ -234,20 +264,6 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
         }
     }
 
-    private SampleLanguageContext CreateLanguageContext(SdkLanguage language) => language switch
-    {
-        SdkLanguage.DotNet => new DotNetSampleLanguageContext(_fileHelper),
-        SdkLanguage.Python => new PythonSampleLanguageContext(_fileHelper),
-        SdkLanguage.JavaScript => new JavaScriptSampleLanguageContext(_fileHelper),
-        SdkLanguage.TypeScript => new TypeScriptSampleLanguageContext(_fileHelper),
-        SdkLanguage.Java => new JavaSampleLanguageContext(_fileHelper),
-        SdkLanguage.Go => new GoSampleLanguageContext(_fileHelper),
-        _ => throw new NotSupportedException($"Language {language} not supported")
-    };
-
-    private static string BuildSystemPrompt(SampleLanguageContext context, string sdkName, int count) =>
-        $"Generate {count} runnable SDK samples for the '{sdkName}' SDK. {context.GetInstructions()}";
-
     private static async Task<string> BuildUserPromptAsync(
         string? customPrompt,
         int count,
@@ -264,7 +280,7 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
         var parts = new List<string>();
 
         // Prefix
-        var prefix = GetUserPromptPrefix(customPrompt, count, hasExistingSamples);
+        var prefix = SampleGeneratorService.GetUserPromptPrefix(customPrompt, count, hasExistingSamples);
         budgetTracker.TryConsume(prefix.Length);
         parts.Add(prefix);
 
@@ -321,52 +337,10 @@ public class SamplesMcpTools(IMcpSampler mcpSampler, FileHelper fileHelper)
         return string.Concat(parts);
     }
 
-    private static string GetUserPromptPrefix(string? customPrompt, int count, bool hasExistingSamples)
-    {
-        if (!string.IsNullOrEmpty(customPrompt))
-        {
-            var dupeWarning = hasExistingSamples ? " Avoid duplicating <existing-samples>." : "";
-            return $"{customPrompt}{dupeWarning} Generate {count} samples.\n\n";
-        }
-
-        return hasExistingSamples
-            ? $"Generate {count} NEW samples for uncovered APIs. Avoid duplicating <existing-samples>.\n\n"
-            : $"Generate {count} samples covering: init/auth, CRUD, async, error handling, advanced features.\n\n";
-    }
-
     private static string ExtractTextFromSamplingResponse(CreateMessageResult result)
     {
         var textBlocks = result.Content.OfType<TextContentBlock>();
         return string.Concat(textBlocks.Select(b => b.Text ?? string.Empty));
     }
 
-    private static List<GeneratedSample> TryExtractSamplesFromMarkdown(string responseText)
-    {
-        // Try to find JSON array in markdown code blocks (```json ... ```)
-        var jsonBlockStart = responseText.IndexOf("```json", StringComparison.OrdinalIgnoreCase);
-        if (jsonBlockStart == -1)
-        {
-            jsonBlockStart = responseText.IndexOf("```", StringComparison.Ordinal);
-        }
-
-        if (jsonBlockStart != -1)
-        {
-            var jsonStart = responseText.IndexOf('\n', jsonBlockStart) + 1;
-            var jsonEnd = responseText.IndexOf("```", jsonStart, StringComparison.Ordinal);
-            if (jsonEnd > jsonStart)
-            {
-                var jsonContent = responseText[jsonStart..jsonEnd].Trim();
-                try
-                {
-                    return JsonSerializer.Deserialize(jsonContent, AiStreamingJsonContext.CaseInsensitive.ListGeneratedSample) ?? [];
-                }
-                catch
-                {
-                    // Ignore and return empty
-                }
-            }
-        }
-
-        return [];
-    }
 }

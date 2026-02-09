@@ -20,7 +20,7 @@ public static class MockMcpSamplerFactory
     {
         var samplesList = samples.ToList();
         var samplesJson = JsonSerializer.Serialize(samplesList, AiStreamingJsonContext.CaseInsensitive.ListGeneratedSample);
-        
+
         var result = new CreateMessageResult
         {
             Content = [new TextContentBlock { Text = samplesJson }],
@@ -41,11 +41,20 @@ public static class MockMcpSamplerFactory
 }
 
 /// <summary>
-/// Fake MCP sampler for testing.
+/// Fake MCP sampler for testing. Captures request params for assertion.
 /// </summary>
 public class FakeMcpSampler : IMcpSampler
 {
     private readonly Func<CreateMessageRequestParams, CancellationToken, ValueTask<CreateMessageResult>> _sampleFunc;
+
+    /// <summary>Last system prompt passed to SampleAsync.</summary>
+    public string? LastSystemPrompt { get; private set; }
+
+    /// <summary>Last user prompt text passed to SampleAsync.</summary>
+    public string? LastUserPrompt { get; private set; }
+
+    /// <summary>Number of times SampleAsync was called.</summary>
+    public int CallCount { get; private set; }
 
     public FakeMcpSampler(Func<CreateMessageRequestParams, CancellationToken, ValueTask<CreateMessageResult>> sampleFunc)
     {
@@ -54,6 +63,74 @@ public class FakeMcpSampler : IMcpSampler
 
     public ValueTask<CreateMessageResult> SampleAsync(CreateMessageRequestParams request, CancellationToken cancellationToken = default)
     {
+        CallCount++;
+        LastSystemPrompt = request.SystemPrompt;
+        LastUserPrompt = string.Concat(
+            request.Messages
+                .SelectMany(m => m.Content.OfType<TextContentBlock>())
+                .Select(b => b.Text ?? string.Empty));
         return _sampleFunc(request, cancellationToken);
+    }
+}
+
+/// <summary>
+/// Mock MCP sampler that captures the request and returns configured samples.
+/// Replaces MockAiService for SamplesMcpTools tests.
+/// </summary>
+public class MockMcpSampler : IMcpSampler
+{
+    private readonly List<object> _samplesToReturn = [];
+    private Exception? _exceptionToThrow;
+
+    /// <summary>Last system prompt passed to SampleAsync.</summary>
+    public string? LastSystemPrompt { get; private set; }
+
+    /// <summary>Last user prompt text passed to SampleAsync.</summary>
+    public string? LastUserPrompt { get; private set; }
+
+    /// <summary>Number of times SampleAsync was called.</summary>
+    public int CallCount { get; private set; }
+
+    /// <summary>
+    /// Configure samples to return when SampleAsync is called.
+    /// </summary>
+    public void SetSamplesToReturn(params GeneratedSample[] samples)
+    {
+        _samplesToReturn.Clear();
+        _samplesToReturn.AddRange(samples);
+    }
+
+    /// <summary>
+    /// Configure an exception to throw.
+    /// </summary>
+    public void SetExceptionToThrow(Exception ex)
+    {
+        _exceptionToThrow = ex;
+    }
+
+    public ValueTask<CreateMessageResult> SampleAsync(CreateMessageRequestParams request, CancellationToken cancellationToken = default)
+    {
+        CallCount++;
+        LastSystemPrompt = request.SystemPrompt;
+        LastUserPrompt = string.Concat(
+            request.Messages
+                .SelectMany(m => m.Content.OfType<TextContentBlock>())
+                .Select(b => b.Text ?? string.Empty));
+
+        if (_exceptionToThrow != null)
+            return ValueTask.FromException<CreateMessageResult>(_exceptionToThrow);
+
+        var samplesJson = JsonSerializer.Serialize(
+            _samplesToReturn.Cast<GeneratedSample>().ToList(),
+            AiStreamingJsonContext.CaseInsensitive.ListGeneratedSample);
+
+        var result = new CreateMessageResult
+        {
+            Content = [new TextContentBlock { Text = samplesJson }],
+            Role = Role.Assistant,
+            Model = "mock-model"
+        };
+
+        return ValueTask.FromResult(result);
     }
 }
