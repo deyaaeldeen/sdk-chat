@@ -10,7 +10,7 @@ namespace Microsoft.SdkChat.Services;
 /// <summary>
 /// Centralized, hardened process execution service.
 /// All external process invocations MUST go through this service.
-/// 
+///
 /// Security features:
 /// - Enforced timeouts (no runaway processes)
 /// - Argument sanitization
@@ -80,10 +80,11 @@ public sealed class ProcessSandboxService
         }
 
         var startTime = Stopwatch.GetTimestamp();
+        Process? process = null;
 
         try
         {
-            using var process = Process.Start(psi);
+            process = Process.Start(psi);
             if (process == null)
             {
                 _logger.LogError("Failed to start process: {FileName}", fileName);
@@ -119,6 +120,9 @@ public sealed class ProcessSandboxService
 
             activity?.SetTag("process.timed_out", true);
 
+            // Kill the entire process tree to prevent orphaned child processes
+            try { process?.Kill(entireProcessTree: true); } catch { /* best-effort */ }
+
             return ProcessResult.Failed(-1, "", $"Process timed out after {effectiveTimeout.TotalSeconds}s", elapsed, timedOut: true);
         }
         catch (Exception ex)
@@ -130,6 +134,10 @@ public sealed class ProcessSandboxService
             activity?.SetTag("error.message", ex.Message);
 
             return ProcessResult.Failed(-1, "", ex.Message, elapsed);
+        }
+        finally
+        {
+            process?.Dispose();
         }
     }
 

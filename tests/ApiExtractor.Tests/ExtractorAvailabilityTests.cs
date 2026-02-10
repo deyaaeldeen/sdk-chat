@@ -259,6 +259,8 @@ public class ExtractorAvailabilityTests : IDisposable
         // to force unavailable state through all 3 tiers
         var envVar = $"{DockerSandbox.ImageEnvVarPrefix}PYTHON";
         var origImage = Environment.GetEnvironmentVariable(envVar);
+        var origBypass = Environment.GetEnvironmentVariable("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY");
+        Environment.SetEnvironmentVariable("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY", "true");
         Environment.SetEnvironmentVariable(envVar, "nonexistent_image_for_test:v999");
         ExtractorAvailability.ClearCache();
 
@@ -281,6 +283,7 @@ public class ExtractorAvailabilityTests : IDisposable
         finally
         {
             Environment.SetEnvironmentVariable(envVar, origImage);
+            Environment.SetEnvironmentVariable("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY", origBypass);
             ExtractorAvailability.ClearCache();
         }
     }

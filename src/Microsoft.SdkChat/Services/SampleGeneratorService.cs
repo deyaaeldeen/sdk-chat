@@ -230,8 +230,11 @@ public class SampleGeneratorService(
                         {
                             throw; // Propagate cancellation
                         }
-                        catch (Exception)
+                        catch (Exception ex)
                         {
+                            // Log the root cause so users get actionable info (permissions, disk full, path too long)
+                            System.Diagnostics.Trace.TraceWarning(
+                                "Failed to write sample file '{0}': {1}", filePath, ex.Message);
                             failedFiles.Add(filePath);
                         }
                     }

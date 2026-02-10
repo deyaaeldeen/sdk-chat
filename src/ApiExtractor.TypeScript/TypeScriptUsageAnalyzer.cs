@@ -275,11 +275,14 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         }
 
         var referencedBy = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var refs in references.Values)
+        foreach (var (typeName, refs) in references)
         {
             foreach (var target in refs)
             {
-                referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
+                if (!string.Equals(target, typeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
+                }
             }
         }
 

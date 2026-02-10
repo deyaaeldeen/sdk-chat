@@ -2144,9 +2144,11 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
     }
 
     const referencedBy = new Map<string, number>();
-    for (const refs of references.values()) {
+    for (const [typeName, refs] of references) {
         for (const target of refs) {
-            referencedBy.set(target, (referencedBy.get(target) ?? 0) + 1);
+            if (target !== typeName) { // Skip self-references
+                referencedBy.set(target, (referencedBy.get(target) ?? 0) + 1);
+            }
         }
     }
 
@@ -2262,8 +2264,24 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
     // Build set of known client type names for local type inference
     const clientNames = new Set(clientMethods.keys());
 
+    // Expand clientNames to include container types — reachable classes that
+    // have properties pointing to client types (e.g., EmptyClient with widgets: WidgetClient)
+    const allReachableClasses = allClasses.filter(cls => reachable.has(cls.name.split("<")[0]));
+    for (const cls of allReachableClasses) {
+        const name = cls.name.split("<")[0];
+        if (clientNames.has(name)) continue;
+        for (const prop of cls.properties || []) {
+            const propType = prop.type.split("<")[0].trim();
+            if (clientMethods.has(propType)) {
+                clientNames.add(name);
+                break;
+            }
+        }
+    }
+
     // Build property type map from API data for precise subclient resolution
-    const propertyTypeMap = buildPropertyTypeMap(usageClasses, usageInterfaces, clientMethods);
+    // Use all reachable classes (not just usageClasses) so container types are included
+    const propertyTypeMap = buildPropertyTypeMap(allReachableClasses, usageInterfaces, clientMethods);
 
     // Build method and function return type maps from API data for precise factory/getter resolution
     const methodReturnTypeMap = buildMethodReturnTypeMap(usageClasses, usageInterfaces, clientMethods);
@@ -2309,13 +2327,30 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
                                 }
                             }
                         } else if (Node.isPropertyAccessExpression(receiver)) {
-                            // this.client.method() or obj.client.method()
+                            // Strategy 1c: Field access — obj.field.method()
                             const propName = receiver.getName();
-                            const varType = varTypes.get(propName);
-                            if (varType && clientMethods.has(varType)) {
-                                const methods = clientMethods.get(varType)!;
-                                if (methods.has(methodName)) {
-                                    resolvedClient = varType;
+                            const propExpr = receiver.getExpression();
+                            if (Node.isIdentifier(propExpr)) {
+                                const objType = varTypes.get(propExpr.getText());
+                                if (objType) {
+                                    const propKey = `${objType.split("<")[0]}.${propName}`;
+                                    const fieldType = propertyTypeMap.get(propKey);
+                                    if (fieldType && clientMethods.has(fieldType)) {
+                                        const methods = clientMethods.get(fieldType)!;
+                                        if (methods.has(methodName)) {
+                                            resolvedClient = fieldType;
+                                        }
+                                    }
+                                }
+                            }
+                            // Fallback: check varTypes for the property name directly
+                            if (!resolvedClient) {
+                                const varType = varTypes.get(propName);
+                                if (varType && clientMethods.has(varType)) {
+                                    const methods = clientMethods.get(varType)!;
+                                    if (methods.has(methodName)) {
+                                        resolvedClient = varType;
+                                    }
                                 }
                             }
                         } else if (Node.isCallExpression(receiver)) {

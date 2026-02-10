@@ -353,15 +353,40 @@ public class AiDebugLogger
             await writer.WriteLineAsync();
             await writer.WriteLineAsync("```");
 
-            // Stream from temp file in chunks — never load the full response into memory
+            // Stream from temp file in chunks — never load the full response into memory.
+            // Use a sliding overlap to prevent secrets straddling chunk boundaries from
+            // escaping the scrubber. The overlap size matches the longest plausible secret.
             const int ReadBufferSize = 8192;
+            const int MaxSecretLength = 128; // covers GitHub tokens (~40), OpenAI keys (~51)
             var buffer = new char[ReadBufferSize];
             using var reader = new StreamReader(session.ResponseChunkFile, Encoding.UTF8);
             int charsRead;
+            string pending = ""; // carries the last MaxSecretLength chars between iterations
             while ((charsRead = await reader.ReadAsync(buffer, 0, buffer.Length)) > 0)
             {
-                var chunk = new string(buffer, 0, charsRead);
-                await writer.WriteAsync(SensitiveDataScrubber.Scrub(chunk));
+                // Prepend the overlap from the previous iteration so boundary-spanning
+                // secrets are visible to the scrubber as a single contiguous string.
+                var combined = pending + new string(buffer, 0, charsRead);
+                var scrubbed = SensitiveDataScrubber.Scrub(combined);
+
+                // Write everything except the last MaxSecretLength chars.
+                // Those chars become the overlap for the next iteration.
+                if (scrubbed.Length > MaxSecretLength)
+                {
+                    await writer.WriteAsync(scrubbed[..^MaxSecretLength]);
+                    pending = combined[^MaxSecretLength..];
+                }
+                else
+                {
+                    // Entire scrubbed output fits in the overlap — carry it all forward
+                    pending = combined;
+                }
+            }
+
+            // Flush the final overlap — no more chunks coming, so scrub and write all of it.
+            if (pending.Length > 0)
+            {
+                await writer.WriteAsync(SensitiveDataScrubber.Scrub(pending));
             }
 
             await writer.WriteLineAsync();

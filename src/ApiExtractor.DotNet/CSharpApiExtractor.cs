@@ -70,12 +70,13 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         var files = Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories)
             .Where(f =>
             {
-                // Only filter bin/obj directories that are INSIDE the rootPath
+                // Filter out build output, version control, and common non-source directories
+                // to avoid scanning .git, node_modules, etc. in monorepo layouts.
                 var relativePath = Path.GetRelativePath(rootPath, f);
-                return !relativePath.Contains("/obj/") && !relativePath.Contains("\\obj\\")
-                    && !relativePath.Contains("/bin/") && !relativePath.Contains("\\bin\\")
-                    && !relativePath.StartsWith("obj/") && !relativePath.StartsWith("obj\\")
-                    && !relativePath.StartsWith("bin/") && !relativePath.StartsWith("bin\\");
+                return !ContainsSegment(relativePath, "obj")
+                    && !ContainsSegment(relativePath, "bin")
+                    && !ContainsSegment(relativePath, ".git")
+                    && !ContainsSegment(relativePath, "node_modules");
             })
             .ToList();
 
@@ -1116,5 +1117,16 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
                   ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
         return csproj != null ? Path.GetFileNameWithoutExtension(csproj) : Path.GetFileName(rootPath);
+    }
+
+    /// <summary>
+    /// Returns true if the relative path contains a directory segment matching <paramref name="segment"/>.
+    /// Handles both / and \ separators and leading segments.
+    /// </summary>
+    private static bool ContainsSegment(string relativePath, string segment)
+    {
+        return relativePath.Contains($"/{segment}/") || relativePath.Contains($"\\{segment}\\")
+            || relativePath.StartsWith($"{segment}/") || relativePath.StartsWith($"{segment}\\")
+            || relativePath.Contains($"/{segment}\\") || relativePath.Contains($"\\{segment}/");
     }
 }

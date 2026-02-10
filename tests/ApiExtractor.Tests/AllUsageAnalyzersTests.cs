@@ -193,6 +193,150 @@ public class AllUsageAnalyzersTests : IDisposable
         };
     }
 
+    [Fact]
+    public async Task CSharp_EmptyContainerClient_SubclientOperationsDetected()
+    {
+        // Container has no methods, only a property pointing to subclient
+        var apiIndex = CreateCSharpApiIndexWithProperties(
+            ("ContainerClient", [], [("Widgets", "WidgetClient")]),
+            ("WidgetClient", ["ListWidgets", "GetWidget"], []));
+
+        await WriteFileAsync("sample.cs", """
+            var client = new ContainerClient();
+            var widgets = client.Widgets;
+            widgets.ListWidgets();
+            // GetWidget not called
+            """);
+
+        var result = await _csharpAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        // ContainerClient has no methods so it shouldn't appear in operations
+        Assert.DoesNotContain(result.CoveredOperations, o => o.ClientType == "ContainerClient");
+        Assert.DoesNotContain(result.UncoveredOperations, o => o.ClientType == "ContainerClient");
+        // Subclient operations are tracked
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "WidgetClient" && o.Operation == "ListWidgets");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "WidgetClient" && o.Operation == "GetWidget");
+    }
+
+    [Fact]
+    public async Task CSharp_InterfaceSubclient_CoverageDetected()
+    {
+        // Property typed as interface, implementation class has the methods
+        var apiIndex = CreateCSharpApiIndexFull(
+            ("MainClient", "class", [], [("Service", "IServiceClient")], null),
+            ("IServiceClient", "interface", ["Process", "Validate"], [], null),
+            ("ServiceClientImpl", "class", ["Process", "Validate"], [], ["IServiceClient"]));
+
+        await WriteFileAsync("sample.cs", """
+            var client = new MainClient();
+            var svc = client.Service;
+            svc.Process();
+            // Validate not called
+            """);
+
+        var result = await _csharpAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "Process");
+        Assert.Contains(result.UncoveredOperations, o => o.Operation == "Validate");
+    }
+
+    [Fact]
+    public async Task CSharp_DirectPropertyChain_NoIntermediateVariable()
+    {
+        // client.Widgets.ListWidgets() without intermediate variable assignment
+        var apiIndex = CreateCSharpApiIndexWithProperties(
+            ("MainClient", ["GetResource"], [("Widgets", "WidgetClient")]),
+            ("WidgetClient", ["ListWidgets", "GetWidget"], []));
+
+        await WriteFileAsync("sample.cs", """
+            var client = new MainClient();
+            client.Widgets.ListWidgets();
+            // GetWidget not called via chain
+            """);
+
+        var result = await _csharpAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "WidgetClient" && o.Operation == "ListWidgets");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "WidgetClient" && o.Operation == "GetWidget");
+    }
+
+    [Fact]
+    public async Task CSharp_SelfReferencingType_StillDetectedAsRoot()
+    {
+        // A type where one method returns itself (fluent API pattern)
+        // EntryPoint=true ensures self-referencing doesn't prevent root detection
+        var apiIndex = new DotNet.ApiIndex
+        {
+            Package = "TestSdk",
+            Namespaces =
+            [
+                new DotNet.NamespaceInfo
+                {
+                    Name = "TestSdk",
+                    Types =
+                    [
+                        new DotNet.TypeInfo
+                        {
+                            Name = "FluentClient",
+                            Kind = "class",
+                            EntryPoint = true,
+                            Members =
+                            [
+                                new DotNet.MemberInfo { Name = "Send", Kind = "method", Signature = "void Send()" },
+                                new DotNet.MemberInfo { Name = "WithRetry", Kind = "method", Signature = "FluentClient WithRetry()" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        await WriteFileAsync("sample.cs", """
+            var client = new FluentClient();
+            client.Send();
+            """);
+
+        var result = await _csharpAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        // Self-referencing type should still be detected
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "FluentClient" && o.Operation == "Send");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "FluentClient" && o.Operation == "WithRetry");
+    }
+
+    private static DotNet.ApiIndex CreateCSharpApiIndexFull(
+        params (string TypeName, string Kind, string[] Methods, (string Name, string ReturnType)[] Properties, string[]? Interfaces)[] types)
+    {
+        return new DotNet.ApiIndex
+        {
+            Package = "TestSdk",
+            Namespaces =
+            [
+                new DotNet.NamespaceInfo
+                {
+                    Name = "TestSdk",
+                    Types = types.Select(t => new DotNet.TypeInfo
+                    {
+                        Name = t.TypeName,
+                        Kind = t.Kind,
+                        EntryPoint = true,
+                        Interfaces = t.Interfaces?.ToList(),
+                        Members = t.Methods.Select(m => new DotNet.MemberInfo
+                        {
+                            Name = m,
+                            Kind = "method",
+                            Signature = $"void {m}()"
+                        }).Concat(t.Properties.Select(p => new DotNet.MemberInfo
+                        {
+                            Name = p.Name,
+                            Kind = "property",
+                            Signature = $"{p.ReturnType} {p.Name} {{ get; }}"
+                        })).ToList()
+                    }).ToList()
+                }
+            ]
+        };
+    }
+
     #endregion
 
     #region Python Usage Analyzer Tests
@@ -311,6 +455,162 @@ client.send()
                             IsClassMethod: null,
                             IsStaticMethod: null
                         )).ToList()
+                    }).ToList(),
+                    Functions: functions.Select(f => new Python.FunctionInfo
+                    {
+                        Name = f.FuncName,
+                        Signature = f.Sig.Replace($"def {f.FuncName}", "").Trim()
+                    }).ToList()
+                )
+            ]
+        );
+    }
+
+    [Fact]
+    public async Task Python_EmptyContainerClient_SubclientOperationsDetected()
+    {
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
+
+        var apiIndex = CreatePythonApiIndexWithProperties(
+            classes:
+            [
+                ("ContainerClient", [], [("widgets", "WidgetClient")], null),
+                ("WidgetClient", ["list_widgets", "get_widget"], [], null)
+            ],
+            functions: []);
+
+        await WriteFileAsync("sample.py", """
+client = ContainerClient()
+widgets = client.widgets
+widgets.list_widgets()
+# get_widget not called
+""");
+
+        var result = await _pythonAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.DoesNotContain(result.CoveredOperations, o => o.ClientType == "ContainerClient");
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "WidgetClient" && o.Operation == "list_widgets");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "WidgetClient" && o.Operation == "get_widget");
+    }
+
+    [Fact]
+    public async Task Python_InheritedSubclient_CoverageDetected()
+    {
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
+
+        // Python uses inheritance (Base) instead of interfaces
+        var apiIndex = CreatePythonApiIndexWithProperties(
+            classes:
+            [
+                ("MainClient", [], [("service", "ServiceBase")], null),
+                ("ServiceBase", ["process", "validate"], [], null),
+                ("ServiceImpl", ["process", "validate"], [], "ServiceBase")
+            ],
+            functions: []);
+
+        await WriteFileAsync("sample.py", """
+client = MainClient()
+svc = client.service
+svc.process()
+# validate not called
+""");
+
+        var result = await _pythonAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "process");
+        Assert.Contains(result.UncoveredOperations, o => o.Operation == "validate");
+    }
+
+    [Fact]
+    public async Task Python_DirectPropertyChain_NoIntermediateVariable()
+    {
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
+
+        var apiIndex = CreatePythonApiIndexWithProperties(
+            classes:
+            [
+                ("MainClient", ["get_resource"], [("widgets", "WidgetClient")], null),
+                ("WidgetClient", ["list_widgets", "get_widget"], [], null)
+            ],
+            functions: []);
+
+        await WriteFileAsync("sample.py", """
+client = MainClient()
+client.widgets.list_widgets()
+# get_widget not called
+""");
+
+        var result = await _pythonAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "list_widgets");
+    }
+
+    [Fact]
+    public async Task Python_SelfReferencingType_StillDetectedAsRoot()
+    {
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
+
+        // Single type with method returning itself - fallback ensures it's a root
+        var apiIndex = new Python.ApiIndex(
+            Package: "test_sdk",
+            Modules:
+            [
+                new Python.ModuleInfo(
+                    Name: "test_sdk",
+                    Classes:
+                    [
+                        new Python.ClassInfo
+                        {
+                            Name = "FluentClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new Python.MethodInfo(Name: "send", Signature: "(self)", Doc: null, IsAsync: null, IsClassMethod: null, IsStaticMethod: null),
+                                new Python.MethodInfo(Name: "with_retry", Signature: "(self)", Doc: null, IsAsync: null, IsClassMethod: null, IsStaticMethod: null, Ret: "FluentClient")
+                            ]
+                        }
+                    ],
+                    Functions: []
+                )
+            ]
+        );
+
+        await WriteFileAsync("sample.py", """
+client = FluentClient()
+client.send()
+""");
+
+        var result = await _pythonAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "FluentClient" && o.Operation == "send");
+    }
+
+    private static Python.ApiIndex CreatePythonApiIndexWithProperties(
+        (string ClassName, string[] Methods, (string Name, string? Type)[] Properties, string? Base)[] classes,
+        (string FuncName, string Sig)[] functions)
+    {
+        return new Python.ApiIndex(
+            Package: "test_sdk",
+            Modules:
+            [
+                new Python.ModuleInfo(
+                    Name: "test_sdk",
+                    Classes: classes.Select(c => new Python.ClassInfo
+                    {
+                        Name = c.ClassName,
+                        EntryPoint = true,
+                        Base = c.Base,
+                        Methods = c.Methods.Select(m => new Python.MethodInfo(
+                            Name: m,
+                            Signature: "(self)",
+                            Doc: null,
+                            IsAsync: null,
+                            IsClassMethod: null,
+                            IsStaticMethod: null
+                        )).ToList(),
+                        Properties = c.Properties.Length > 0
+                            ? c.Properties.Select(p => new Python.PropertyInfo(p.Name, p.Type, null)).ToList()
+                            : null
                     }).ToList(),
                     Functions: functions.Select(f => new Python.FunctionInfo
                     {
@@ -480,6 +780,206 @@ client.send()
         };
     }
 
+    [Fact]
+    public async Task TypeScript_EmptyContainerClient_SubclientOperationsDetected()
+    {
+        if (!_tsAnalyzer.IsAvailable()) Assert.Skip("Node.js not available");
+
+        var apiIndex = CreateTypeScriptApiIndexWithProperties(
+            classes:
+            [
+                ("ContainerClient", [], [("widgets", "WidgetClient")]),
+                ("WidgetClient", ["listWidgets", "getWidget"], [])
+            ],
+            functions: []);
+
+        await WriteFileAsync("sample.ts", """
+            const client = new ContainerClient();
+            const widgets = client.widgets;
+            widgets.listWidgets();
+            // getWidget not called
+            """);
+
+        var result = await _tsAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.DoesNotContain(result.CoveredOperations, o => o.ClientType == "ContainerClient");
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "WidgetClient" && o.Operation == "listWidgets");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "WidgetClient" && o.Operation == "getWidget");
+    }
+
+    [Fact]
+    public async Task TypeScript_InterfaceSubclient_CoverageDetected()
+    {
+        if (!_tsAnalyzer.IsAvailable()) Assert.Skip("Node.js not available");
+
+        // Property typed as interface, implementation has the methods
+        var apiIndex = CreateTypeScriptApiIndexFull(
+            classes:
+            [
+                ("MainClient", [], [("service", "IServiceClient")], null),
+                ("ServiceClientImpl", ["process", "validate"], [], ["IServiceClient"])
+            ],
+            interfaces: [("IServiceClient", ["process", "validate"])],
+            functions: []);
+
+        await WriteFileAsync("sample.ts", """
+            const client = new MainClient();
+            const svc = client.service;
+            svc.process();
+            // validate not called
+            """);
+
+        var result = await _tsAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "process");
+        Assert.Contains(result.UncoveredOperations, o => o.Operation == "validate");
+    }
+
+    [Fact]
+    public async Task TypeScript_DirectPropertyChain_NoIntermediateVariable()
+    {
+        if (!_tsAnalyzer.IsAvailable()) Assert.Skip("Node.js not available");
+
+        var apiIndex = CreateTypeScriptApiIndexWithProperties(
+            classes:
+            [
+                ("MainClient", ["getResource"], [("widgets", "WidgetClient")]),
+                ("WidgetClient", ["listWidgets", "getWidget"], [])
+            ],
+            functions: []);
+
+        await WriteFileAsync("sample.ts", """
+            const client = new MainClient();
+            client.widgets.listWidgets();
+            // getWidget not called
+            """);
+
+        var result = await _tsAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "listWidgets");
+    }
+
+    [Fact]
+    public async Task TypeScript_SelfReferencingType_StillDetectedAsRoot()
+    {
+        if (!_tsAnalyzer.IsAvailable()) Assert.Skip("Node.js not available");
+
+        // Two independent types: FluentClient references itself via withRetry return type
+        // Self-ref exclusion ensures FluentClient is still detected as a root
+        var apiIndex = new TypeScript.ApiIndex
+        {
+            Package = "test-sdk",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "FluentClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new TypeScript.MethodInfo { Name = "send", Sig = "()" },
+                                new TypeScript.MethodInfo { Name = "withRetry", Sig = "()", Ret = "FluentClient" }
+                            ]
+                        },
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "IndependentClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new TypeScript.MethodInfo { Name = "process", Sig = "()" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        await WriteFileAsync("sample.ts", """
+            const client = new FluentClient();
+            client.send();
+            const other = new IndependentClient();
+            other.process();
+            """);
+
+        var result = await _tsAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        // Both types should have their operations detected
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "FluentClient" && o.Operation == "send");
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "IndependentClient" && o.Operation == "process");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "FluentClient" && o.Operation == "withRetry");
+    }
+
+    private static TypeScript.ApiIndex CreateTypeScriptApiIndexFull(
+        (string ClassName, string[] Methods, (string Name, string Type)[] Properties, string[]? Implements)[] classes,
+        (string InterfaceName, string[] Methods)[] interfaces,
+        (string FuncName, string Sig)[] functions)
+    {
+        return new TypeScript.ApiIndex
+        {
+            Package = "test-sdk",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes = classes.Select(c => new TypeScript.ClassInfo
+                    {
+                        Name = c.ClassName,
+                        EntryPoint = true,
+                        Implements = c.Implements?.ToList(),
+                        Methods = c.Methods.Select(m => new TypeScript.MethodInfo
+                        {
+                            Name = m,
+                            Sig = "()"
+                        }).ToList(),
+                        Properties = c.Properties.Length > 0
+                            ? c.Properties.Select(p => new TypeScript.PropertyInfo
+                            {
+                                Name = p.Name,
+                                Type = p.Type
+                            }).ToList()
+                            : null
+                    }).ToList(),
+                    Interfaces = interfaces.Length > 0
+                        ? interfaces.Select(i => new TypeScript.InterfaceInfo
+                        {
+                            Name = i.InterfaceName,
+                            EntryPoint = true,
+                            Methods = i.Methods.Select(m => new TypeScript.MethodInfo
+                            {
+                                Name = m,
+                                Sig = "()"
+                            }).ToList()
+                        }).ToList()
+                        : null,
+                    Functions = functions.Select(f =>
+                    {
+                        string? ret = null;
+                        var colonIdx = f.Sig.LastIndexOf(')');
+                        if (colonIdx >= 0)
+                        {
+                            var afterParen = f.Sig[(colonIdx + 1)..].Trim();
+                            if (afterParen.StartsWith(':'))
+                                ret = afterParen[1..].Trim();
+                        }
+                        return new TypeScript.FunctionInfo
+                        {
+                            Name = f.FuncName,
+                            Sig = f.Sig,
+                            Ret = ret
+                        };
+                    }).ToList()
+                }
+            ]
+        };
+    }
+
     #endregion
 
     #region Java Usage Analyzer Tests
@@ -606,6 +1106,168 @@ client.send()
                             Name = m,
                             Sig = "()"
                         }).ToList()
+                    }).ToList(),
+                    Interfaces = interfaces.Select(i => new Java.ClassInfo
+                    {
+                        Name = i.InterfaceName,
+                        EntryPoint = true,
+                        Methods = i.Methods.Select(m => new Java.MethodInfo
+                        {
+                            Name = m,
+                            Sig = "()"
+                        }).ToList()
+                    }).ToList()
+                }
+            ]
+        };
+    }
+
+    [Fact]
+    public async Task Java_EmptyContainerClient_SubclientOperationsDetected()
+    {
+        if (!_javaAnalyzer.IsAvailable()) Assert.Skip("JBang not available");
+
+        var apiIndex = CreateJavaApiIndexFull(
+            classes:
+            [
+                ("ContainerClient", [], [("widgetsClient", "WidgetsClient")], []),
+                ("WidgetsClient", [("listWidgets", null), ("getWidget", null)], [], [])
+            ],
+            interfaces: []);
+
+        await WriteFileAsync("Sample.java", """
+            public class Sample {
+                public static void main(String[] args) {
+                    ContainerClient client = new ContainerClient();
+                    WidgetsClient widgets = client.widgetsClient;
+                    widgets.listWidgets();
+                    // getWidget not called
+                }
+            }
+            """);
+
+        var result = await _javaAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.DoesNotContain(result.CoveredOperations, o => o.ClientType == "ContainerClient");
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "WidgetsClient" && o.Operation == "listWidgets");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "WidgetsClient" && o.Operation == "getWidget");
+    }
+
+    [Fact]
+    public async Task Java_InterfaceSubclient_CoverageDetected()
+    {
+        if (!_javaAnalyzer.IsAvailable()) Assert.Skip("JBang not available");
+
+        var apiIndex = CreateJavaApiIndexFull(
+            classes:
+            [
+                ("MainClient", [], [("service", "IServiceClient")], []),
+                ("ServiceClientImpl", [("process", null), ("validate", null)], [], ["IServiceClient"])
+            ],
+            interfaces: [("IServiceClient", ["process", "validate"])]);
+
+        await WriteFileAsync("Sample.java", """
+            public class Sample {
+                public static void main(String[] args) {
+                    MainClient client = new MainClient();
+                    IServiceClient svc = client.service;
+                    svc.process();
+                    // validate not called
+                }
+            }
+            """);
+
+        var result = await _javaAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "process");
+        Assert.Contains(result.UncoveredOperations, o => o.Operation == "validate");
+    }
+
+    [Fact]
+    public async Task Java_ChainedMethodCall_NoIntermediateVariable()
+    {
+        if (!_javaAnalyzer.IsAvailable()) Assert.Skip("JBang not available");
+
+        // client.getWidgets().listWidgets() without intermediate variable
+        var apiIndex = CreateJavaApiIndexFull(
+            classes:
+            [
+                ("MainClient", [("getWidgets", "WidgetsClient")], [], []),
+                ("WidgetsClient", [("listWidgets", null), ("getWidget", null)], [], [])
+            ],
+            interfaces: []);
+
+        await WriteFileAsync("Sample.java", """
+            public class Sample {
+                public static void main(String[] args) {
+                    MainClient client = new MainClient();
+                    client.getWidgets().listWidgets();
+                    // getWidget not called
+                }
+            }
+            """);
+
+        var result = await _javaAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "listWidgets");
+    }
+
+    [Fact]
+    public async Task Java_SelfReferencingType_StillDetectedAsRoot()
+    {
+        if (!_javaAnalyzer.IsAvailable()) Assert.Skip("JBang not available");
+
+        // Single type with method returning itself - fallback ensures it's a root
+        var apiIndex = CreateJavaApiIndexFull(
+            classes: [("FluentClient", [("send", null), ("withRetry", "FluentClient")], [], [])],
+            interfaces: []);
+
+        await WriteFileAsync("Sample.java", """
+            public class Sample {
+                public static void main(String[] args) {
+                    FluentClient client = new FluentClient();
+                    client.send();
+                }
+            }
+            """);
+
+        var result = await _javaAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "FluentClient" && o.Operation == "send");
+    }
+
+    private static Java.ApiIndex CreateJavaApiIndexFull(
+        (string ClassName, (string Name, string? Ret)[] Methods, (string Name, string Type)[] Fields, string[] Implements)[] classes,
+        (string InterfaceName, string[] Methods)[] interfaces)
+    {
+        return new Java.ApiIndex
+        {
+            Package = "com.test.sdk",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.test.sdk",
+                    Classes = classes.Select(c => new Java.ClassInfo
+                    {
+                        Name = c.ClassName,
+                        EntryPoint = true,
+                        Methods = c.Methods.Select(m => new Java.MethodInfo
+                        {
+                            Name = m.Name,
+                            Sig = "()",
+                            Ret = m.Ret
+                        }).ToList(),
+                        Fields = c.Fields.Length > 0
+                            ? c.Fields.Select(f => new Java.FieldInfo
+                            {
+                                Name = f.Name,
+                                Type = f.Type
+                            }).ToList()
+                            : null,
+                        Implements = c.Implements.Length > 0
+                            ? c.Implements.ToList()
+                            : null
                     }).ToList(),
                     Interfaces = interfaces.Select(i => new Java.ClassInfo
                     {
@@ -800,6 +1462,188 @@ client.send()
                         {
                             ret = sig[(parenClose + 1)..].Trim();
                         }
+                        return new Go.FuncApi
+                        {
+                            Name = f.FuncName,
+                            Sig = sig,
+                            Ret = ret
+                        };
+                    }).ToList(),
+                    Interfaces = interfaces?.Select(i => new Go.IfaceApi
+                    {
+                        Name = i.InterfaceName,
+                        Methods = i.Methods.Select(m => new Go.FuncApi
+                        {
+                            Name = m,
+                            Sig = "()"
+                        }).ToList()
+                    }).ToList()
+                }
+            ]
+        };
+    }
+
+    [Fact]
+    public async Task Go_EmptyContainerClient_SubclientOperationsDetected()
+    {
+        if (!_goAnalyzer.IsAvailable()) Assert.Skip("Go not available");
+
+        var apiIndex = CreateGoApiIndexFull(
+            structs:
+            [
+                ("ContainerClient", [], [("Widgets", "*WidgetsClient")]),
+                ("WidgetsClient", [("ListWidgets", (string?)null), ("GetWidget", (string?)null)], [])
+            ],
+            functions: []);
+
+        await WriteFileAsync("sample.go", """
+            package main
+
+            func main() {
+                client := &ContainerClient{}
+                client.Widgets.ListWidgets()
+                // GetWidget not called
+            }
+            """);
+
+        var result = await _goAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.DoesNotContain(result.CoveredOperations, o => o.ClientType == "ContainerClient");
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "WidgetsClient" && o.Operation == "ListWidgets");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "WidgetsClient" && o.Operation == "GetWidget");
+    }
+
+    [Fact]
+    public async Task Go_InterfaceSubclient_CoverageDetected()
+    {
+        if (!_goAnalyzer.IsAvailable()) Assert.Skip("Go not available");
+
+        // Field typed as interface, implementation struct has the methods (duck typing)
+        var apiIndex = CreateGoApiIndexFull(
+            structs:
+            [
+                ("MainClient", [], [("Service", "ServiceClient")]),
+                ("ServiceClientImpl", [("Process", (string?)null), ("Validate", (string?)null)], [])
+            ],
+            functions: [],
+            interfaces: [("ServiceClient", ["Process", "Validate"])]);
+
+        await WriteFileAsync("sample.go", """
+            package main
+
+            func main() {
+                client := &MainClient{}
+                client.Service.Process()
+            }
+            """);
+
+        var result = await _goAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "Process");
+        Assert.Contains(result.UncoveredOperations, o => o.Operation == "Validate");
+    }
+
+    [Fact]
+    public async Task Go_DirectFieldChain_NoIntermediateVariable()
+    {
+        if (!_goAnalyzer.IsAvailable()) Assert.Skip("Go not available");
+
+        // client.Widgets.ListWidgets() without intermediate variable (Strategy 1c)
+        var apiIndex = CreateGoApiIndexFull(
+            structs:
+            [
+                ("MainClient", [("GetResource", (string?)null)], [("Widgets", "*WidgetsClient")]),
+                ("WidgetsClient", [("ListWidgets", (string?)null), ("GetWidget", (string?)null)], [])
+            ],
+            functions: []);
+
+        await WriteFileAsync("sample.go", """
+            package main
+
+            func main() {
+                client := &MainClient{}
+                client.Widgets.ListWidgets()
+                // GetWidget not called via chain
+            }
+            """);
+
+        var result = await _goAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "ListWidgets");
+    }
+
+    [Fact]
+    public async Task Go_SelfReferencingType_StillDetectedAsRoot()
+    {
+        if (!_goAnalyzer.IsAvailable()) Assert.Skip("Go not available");
+
+        // Two independent types: FluentClient references itself via WithRetry return type
+        // Self-ref exclusion ensures FluentClient is still detected as a root
+        var apiIndex = CreateGoApiIndexWithMethodRets(
+            structs:
+            [
+                ("FluentClient", [("Send", (string?)null), ("WithRetry", "*FluentClient")]),
+                ("IndependentClient", [("Process", (string?)null)])
+            ],
+            functions: []);
+
+        await WriteFileAsync("sample.go", """
+            package main
+
+            func main() {
+                client := &FluentClient{}
+                client.Send()
+                other := &IndependentClient{}
+                other.Process()
+            }
+            """);
+
+        var result = await _goAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        // Both types should have their operations detected
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "FluentClient" && o.Operation == "Send");
+        Assert.Contains(result.CoveredOperations, o => o.ClientType == "IndependentClient" && o.Operation == "Process");
+        Assert.Contains(result.UncoveredOperations, o => o.ClientType == "FluentClient" && o.Operation == "WithRetry");
+    }
+
+    private static Go.ApiIndex CreateGoApiIndexFull(
+        (string StructName, (string Name, string? Ret)[] Methods, (string Name, string Type)[] Fields)[] structs,
+        (string FuncName, string Sig)[] functions,
+        (string InterfaceName, string[] Methods)[]? interfaces = null)
+    {
+        return new Go.ApiIndex
+        {
+            Package = "testsdk",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "testsdk",
+                    Structs = structs.Select(s => new Go.StructApi
+                    {
+                        Name = s.StructName,
+                        EntryPoint = true,
+                        Methods = s.Methods.Select(m => new Go.FuncApi
+                        {
+                            Name = m.Name,
+                            Sig = "()",
+                            Ret = m.Ret
+                        }).ToList(),
+                        Fields = s.Fields.Length > 0
+                            ? s.Fields.Select(f => new Go.FieldApi
+                            {
+                                Name = f.Name,
+                                Type = f.Type
+                            }).ToList()
+                            : null
+                    }).ToList(),
+                    Functions = functions.Select(f =>
+                    {
+                        var sig = f.Sig.Replace($"func {f.FuncName}", "").Trim();
+                        string? ret = null;
+                        var parenClose = sig.LastIndexOf(')');
+                        if (parenClose >= 0 && parenClose < sig.Length - 1)
+                            ret = sig[(parenClose + 1)..].Trim();
                         return new Go.FuncApi
                         {
                             Name = f.FuncName,

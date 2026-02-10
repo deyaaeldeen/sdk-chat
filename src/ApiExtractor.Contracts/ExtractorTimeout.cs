@@ -27,12 +27,18 @@ public static class ExtractorTimeout
     /// </summary>
     public static TimeSpan Value => _lazy.Value;
 
+    /// <summary>
+    /// Maximum allowed timeout in seconds (1 hour). Prevents env var misconfiguration
+    /// from allowing external processes to run indefinitely.
+    /// </summary>
+    public const int MaxSeconds = 3600;
+
     private static TimeSpan ResolveTimeout()
     {
         var envValue = Environment.GetEnvironmentVariable(EnvVarName);
         if (int.TryParse(envValue, out var seconds) && seconds > 0)
         {
-            return TimeSpan.FromSeconds(seconds);
+            return TimeSpan.FromSeconds(Math.Min(seconds, MaxSeconds));
         }
         return TimeSpan.FromSeconds(DefaultSeconds);
     }

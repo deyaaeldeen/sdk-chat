@@ -99,10 +99,11 @@ public static class ProcessSandbox
         }
 
         var startTime = Stopwatch.GetTimestamp();
+        Process? process = null;
 
         try
         {
-            using var process = Process.Start(psi);
+            process = Process.Start(psi);
             if (process is null)
             {
                 return ProcessResult.Failed(-1, "", $"Failed to start process: {fileName}");
@@ -131,6 +132,10 @@ public static class ProcessSandbox
             var elapsed = Stopwatch.GetElapsedTime(startTime);
             activity?.SetTag("process.timed_out", true);
 
+            // Kill the entire process tree to prevent orphaned child processes
+            // from accumulating indefinitely after repeated timeouts.
+            KillProcess(process);
+
             return ProcessResult.Failed(-1, "", $"Process timed out after {effectiveTimeout.TotalSeconds}s", elapsed, timedOut: true);
         }
         catch (Exception ex)
@@ -140,6 +145,29 @@ public static class ProcessSandbox
             activity?.SetTag("error.message", ex.Message);
 
             return ProcessResult.Failed(-1, "", ex.Message, elapsed);
+        }
+        finally
+        {
+            process?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Best-effort kill of a process and its entire process tree.
+    /// Swallows all exceptions — the process may have already exited.
+    /// </summary>
+    private static void KillProcess(Process? process)
+    {
+        if (process is null) return;
+
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Best-effort: process may have already exited, or we may lack permissions.
+            // Swallow and let the finally block Dispose the handle.
         }
     }
 

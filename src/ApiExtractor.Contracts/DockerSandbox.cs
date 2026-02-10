@@ -24,14 +24,54 @@ public static class DockerSandbox
     public const string ImageEnvVarPrefix = "SDK_CHAT_DOCKER_IMAGE_";
 
     /// <summary>
+    /// Allowed Docker registry prefixes for image overrides.
+    /// Only images from these registries (or unqualified local images) are accepted.
+    /// Set SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY=true to bypass (dev/CI only).
+    /// </summary>
+    private static readonly string[] AllowedRegistryPrefixes =
+    [
+        "mcr.microsoft.com/",
+        "ghcr.io/microsoft/",
+        "ghcr.io/azure/",
+        "api-extractor-"  // default unqualified local images
+    ];
+
+    /// <summary>
     /// Default Docker image name pattern: api-extractor-{language}:latest
     /// </summary>
     public static string GetImageName(string language)
     {
         var envVar = $"{ImageEnvVarPrefix}{language.ToUpperInvariant()}";
-        return Environment.GetEnvironmentVariable(envVar) is { Length: > 0 } env
+        var image = Environment.GetEnvironmentVariable(envVar) is { Length: > 0 } env
             ? env
             : $"api-extractor-{language.ToLowerInvariant()}:latest";
+
+        ValidateImageSource(image, envVar);
+        return image;
+    }
+
+    /// <summary>
+    /// Validates that a Docker image reference comes from a trusted registry.
+    /// Rejects images from untrusted sources to prevent supply-chain attacks
+    /// via malicious container images mounted with host source code.
+    /// </summary>
+    internal static void ValidateImageSource(string image, string? sourceEnvVar = null)
+    {
+        // Allow bypass for development/CI environments
+        if (string.Equals(Environment.GetEnvironmentVariable("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY"), "true", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        foreach (var prefix in AllowedRegistryPrefixes)
+        {
+            if (image.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+
+        var source = sourceEnvVar is not null ? $" (from {sourceEnvVar})" : "";
+        throw new InvalidOperationException(
+            $"Untrusted Docker image source '{image}'{source}. " +
+            $"Only images from [{string.Join(", ", AllowedRegistryPrefixes)}] are allowed. " +
+            "Set SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY=true to bypass this check.");
     }
 
     /// <summary>

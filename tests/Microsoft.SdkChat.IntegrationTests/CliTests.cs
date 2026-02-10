@@ -44,13 +44,14 @@ public class CliTests
 
     /// <summary>
     /// Languages whose usage analyzers support coverage detection.
-    /// Go and TypeScript usage analyzers do not yet detect sample coverage.
     /// </summary>
     public static TheoryData<string> CoverageLanguages => new()
     {
         "DotNet",
         "Python",
-        "Java"
+        "Go",
+        "Java",
+        "TypeScript"
     };
 
     #endregion
@@ -183,7 +184,9 @@ public class CliTests
         {
             "DotNet" => (Client: "WidgetClient", Operation: "ListWidgetsAsync"),
             "Python" => (Client: "WidgetClient", Operation: "list_widgets"),
+            "Go" => (Client: "WidgetsClient", Operation: "ListWidgets"),
             "Java" => (Client: "WidgetsClient", Operation: "listWidgets"),
+            "TypeScript" => (Client: "WidgetClient", Operation: "listWidgets"),
             _ => (Client: "", Operation: "")
         };
 
@@ -217,7 +220,9 @@ public class CliTests
         {
             "DotNet" => (Interface: "IRecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "ListRecommendationsAsync"),
             "Python" => (Interface: "RecommendationsClientBase", Implementation: "RecommendationsClientImpl", Operation: "list_recommendations"),
+            "Go" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "ListRecommendations"),
             "Java" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "listRecommendations"),
+            "TypeScript" => (Interface: "RecommendationsClient", Implementation: "RecommendationsClientImpl", Operation: "listRecommendations"),
             _ => (Interface: "", Implementation: "", Operation: "")
         };
 

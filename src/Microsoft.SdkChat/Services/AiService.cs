@@ -32,6 +32,10 @@ public class AiService : IAiService
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, string> SchemaCache = new();
 
+    // Secrets consumed once at construction so they don't linger on the options object
+    private readonly string? _apiKey;
+    private readonly string? _githubToken;
+
     private int _disposed;
     private CopilotClient? _copilotClient;
 
@@ -44,12 +48,18 @@ public class AiService : IAiService
             _options);
         _requestTimeout = _options.RequestTimeout;
 
-        // Initialize rate limiter for concurrent request throttling
+        // Consume secrets once and clear them from the options heap
+        _apiKey = _options.ConsumeApiKey();
+        _githubToken = _options.ConsumeGitHubToken();
+
+        // Initialize rate limiter for concurrent request throttling.
+        // High queue limit: let the limiter hold requests rather than rejecting them,
+        // so bulk generation (many files) doesn't crash the 16th request.
         _rateLimiter = new ConcurrencyLimiter(new ConcurrencyLimiterOptions
         {
             PermitLimit = MaxConcurrentRequests,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-            QueueLimit = 10
+            QueueLimit = 1000
         });
 
         _logger.LogDebug("AiService initialized with {Provider} provider, timeout {Timeout}s",
@@ -87,7 +97,8 @@ public class AiService : IAiService
 
         // Materialize the streamed prompt (APIs require full prompt upfront).
         // Hard cap prevents unbounded memory growth from runaway prompt streams.
-        const int MaxPromptChars = 10 * 1024 * 1024; // 10M chars (~2.5M tokens)
+        // Aligned with real model context limits (~250k tokens safe buffer).
+        const int MaxPromptChars = 1 * 1024 * 1024; // 1M chars (~250k tokens)
         var promptBuilder = new StringBuilder();
         await foreach (var chunk in userPromptStream.WithCancellation(cancellationToken))
         {
@@ -313,7 +324,7 @@ public class AiService : IAiService
             _logger.LogDebug("Using Copilot CLI at: {CliPath}", cliPath);
 
             // Token is optional - CLI handles auth via ~/.copilot if not provided
-            var githubToken = _options.GitHubToken;
+            var githubToken = _githubToken;
 
             _copilotClient = new CopilotClient(new CopilotClientOptions
             {
@@ -377,7 +388,7 @@ public class AiService : IAiService
         ProviderConfig? providerConfig = null;
         if (_options.UseOpenAi)
         {
-            if (string.IsNullOrWhiteSpace(_options.ApiKey))
+            if (string.IsNullOrWhiteSpace(_apiKey))
             {
                 throw new InvalidOperationException(
                     "OPENAI_API_KEY environment variable is required when using OpenAI mode. " +
@@ -392,7 +403,7 @@ public class AiService : IAiService
             {
                 Type = "openai",
                 BaseUrl = baseUrl,
-                ApiKey = _options.ApiKey
+                ApiKey = _apiKey
             };
         }
 

@@ -299,9 +299,11 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 	}
 
 	referencedBy := make(map[string]int)
-	for _, refs := range references {
+	for typeName, refs := range references {
 		for ref := range refs {
-			referencedBy[ref] = referencedBy[ref] + 1
+			if ref != typeName { // Skip self-references
+				referencedBy[ref] = referencedBy[ref] + 1
+			}
 		}
 	}
 
@@ -381,9 +383,13 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 	}
 
 	usageStructs := []StructApi{}
+	allReachableStructs := []StructApi{}
 	for _, s := range allStructs {
-		if reachable[s.Name] && len(s.Methods) > 0 {
-			usageStructs = append(usageStructs, s)
+		if reachable[s.Name] {
+			allReachableStructs = append(allReachableStructs, s)
+			if len(s.Methods) > 0 {
+				usageStructs = append(usageStructs, s)
+			}
 		}
 	}
 
@@ -433,10 +439,25 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 		clientNames[name] = true
 	}
 
+	// Expand clientNames to include container types — structs that
+	// have fields pointing to client types (e.g., EmptyClient with Widgets field)
+	for _, s := range allReachableStructs {
+		if clientNames[s.Name] {
+			continue
+		}
+		for _, f := range s.Fields {
+			fieldType := strings.TrimPrefix(f.Type, "*")
+			if clientNames[fieldType] {
+				clientNames[s.Name] = true
+				break
+			}
+		}
+	}
+
 	// Build method and function return type maps from API data for precise factory/getter resolution
 	methodReturnTypeMap := buildMethodReturnTypeMap(usageStructs, usageInterfaces, clientNames)
 	functionReturnTypeMap := buildFunctionReturnTypeMap(&apiIndex, clientNames)
-	fieldTypeMap := buildFieldTypeMap(usageStructs, clientNames)
+	fieldTypeMap := buildFieldTypeMap(allReachableStructs, clientNames)
 
 	// Find Go files in samples path
 	absPath, _ := filepath.Abs(samplesPath)
@@ -528,6 +549,24 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 												resolvedClient = retType
 											}
 										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Strategy 1c: Field access — receiver.Field.Method()
+			if resolvedClient == "" {
+				if innerSel, ok := sel.X.(*ast.SelectorExpr); ok {
+					if ident, ok := innerSel.X.(*ast.Ident); ok {
+						if receiverType, exists := varTypes[ident.Name]; exists {
+							fieldKey := receiverType + "." + innerSel.Sel.Name
+							if fieldType, exists := fieldTypeMap[fieldKey]; exists {
+								if methods, ok := clientMethods[fieldType]; ok {
+									if _, hasMethod := methods[methodName]; hasMethod {
+										resolvedClient = fieldType
 									}
 								}
 							}

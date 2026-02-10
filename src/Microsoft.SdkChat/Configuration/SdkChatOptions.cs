@@ -51,6 +51,8 @@ public sealed class SdkChatOptions : IValidatableObject
     /// <summary>
     /// API key for OpenAI-compatible endpoint.
     /// Environment: OPENAI_API_KEY
+    /// Note: Consumers should read this value once and avoid long-lived references.
+    /// The value is cleared after initial consumption via <see cref="ConsumeApiKey"/>.
     /// </summary>
     public string? ApiKey { get; set; }
 
@@ -93,8 +95,32 @@ public sealed class SdkChatOptions : IValidatableObject
     /// <summary>
     /// GitHub token for authentication.
     /// Environment: GH_TOKEN or GITHUB_TOKEN
+    /// Note: Consumers should read this value once and avoid long-lived references.
+    /// The value is cleared after initial consumption via <see cref="ConsumeGitHubToken"/>.
     /// </summary>
     public string? GitHubToken { get; set; }
+
+    /// <summary>
+    /// Reads and clears <see cref="ApiKey"/> so it does not persist on the managed heap.
+    /// This is a one-shot read; subsequent calls return null.
+    /// </summary>
+    public string? ConsumeApiKey()
+    {
+        var key = ApiKey;
+        ApiKey = null;
+        return key;
+    }
+
+    /// <summary>
+    /// Reads and clears <see cref="GitHubToken"/> so it does not persist on the managed heap.
+    /// This is a one-shot read; subsequent calls return null.
+    /// </summary>
+    public string? ConsumeGitHubToken()
+    {
+        var token = GitHubToken;
+        GitHubToken = null;
+        return token;
+    }
 
     /// <summary>
     /// Get the default model for the current provider.

@@ -380,7 +380,10 @@ public sealed class SampleGeneratorAgent(
 
         await SendTextAsync(connection, request.SessionId, $"\n✅ Done! Wrote {writtenFiles.Count} sample(s) to {outputFolder}\n", ct);
 
-        SdkChatTelemetry.RecordSampleMetrics(SdkChatTelemetry.StartAcpSession(session.SessionId, "samples"), writtenFiles.Count, 0, 0);
+        using (var metricsActivity = SdkChatTelemetry.StartAcpSession(session.SessionId, "samples"))
+        {
+            SdkChatTelemetry.RecordSampleMetrics(metricsActivity, writtenFiles.Count, 0, 0);
+        }
         logger.LogInformation("Wrote {Count} samples to {Path}", writtenFiles.Count, outputFolder);
 
         session.Phase = SessionPhase.Complete;
