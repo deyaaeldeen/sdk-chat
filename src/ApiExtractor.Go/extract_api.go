@@ -677,19 +677,23 @@ func analyzeUsage(apiJsonFile, samplesPath string) {
 func getReferencedTypes(s StructApi, allTypeNames map[string]bool) map[string]bool {
 	refs := make(map[string]bool)
 
+	// Tokenize all method signatures and return types
+	tokens := make(map[string]bool)
 	for _, m := range s.Methods {
-		for typeName := range allTypeNames {
-			if strings.Contains(m.Sig, typeName) || (m.Ret != "" && strings.Contains(m.Ret, typeName)) {
-				refs[typeName] = true
-			}
+		tokenizeInto(m.Sig, tokens)
+		if m.Ret != "" {
+			tokenizeInto(m.Ret, tokens)
 		}
 	}
 
 	for _, f := range s.Fields {
-		for typeName := range allTypeNames {
-			if strings.Contains(f.Type, typeName) {
-				refs[typeName] = true
-			}
+		tokenizeInto(f.Type, tokens)
+	}
+
+	// Intersect with known type names
+	for token := range tokens {
+		if allTypeNames[token] {
+			refs[token] = true
 		}
 	}
 
@@ -699,15 +703,40 @@ func getReferencedTypes(s StructApi, allTypeNames map[string]bool) map[string]bo
 func getReferencedTypesForInterface(i IfaceApi, allTypeNames map[string]bool) map[string]bool {
 	refs := make(map[string]bool)
 
+	tokens := make(map[string]bool)
 	for _, m := range i.Methods {
-		for typeName := range allTypeNames {
-			if strings.Contains(m.Sig, typeName) || (m.Ret != "" && strings.Contains(m.Ret, typeName)) {
-				refs[typeName] = true
-			}
+		tokenizeInto(m.Sig, tokens)
+		if m.Ret != "" {
+			tokenizeInto(m.Ret, tokens)
+		}
+	}
+
+	for token := range tokens {
+		if allTypeNames[token] {
+			refs[token] = true
 		}
 	}
 
 	return refs
+}
+
+// tokenizeInto extracts identifier tokens (runs of letters, digits, underscores)
+// from a signature string and adds them to the tokens map.
+func tokenizeInto(sig string, tokens map[string]bool) {
+	start := -1
+	for i, ch := range sig {
+		isIdChar := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') || ch == '_'
+		if isIdChar && start < 0 {
+			start = i
+		} else if !isIdChar && start >= 0 {
+			tokens[sig[start:i]] = true
+			start = -1
+		}
+	}
+	if start >= 0 {
+		tokens[sig[start:]] = true
+	}
 }
 
 // =============================================================================

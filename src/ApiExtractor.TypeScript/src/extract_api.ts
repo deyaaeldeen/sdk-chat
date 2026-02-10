@@ -2499,19 +2499,21 @@ function getReferencedTypes(cls: ClassInfo, allTypeNames: Set<string>): Set<stri
         }
     }
 
+    // Tokenize all method signatures + return types + property types
+    const tokens = new Set<string>();
     for (const method of cls.methods || []) {
-        for (const typeName of allTypeNames) {
-            if (method.sig.includes(typeName) || (method.ret?.includes(typeName) ?? false)) {
-                refs.add(typeName);
-            }
-        }
+        tokenizeInto(method.sig, tokens);
+        if (method.ret) tokenizeInto(method.ret, tokens);
     }
 
     for (const prop of cls.properties || []) {
-        for (const typeName of allTypeNames) {
-            if (prop.type.includes(typeName)) {
-                refs.add(typeName);
-            }
+        tokenizeInto(prop.type, tokens);
+    }
+
+    // Intersect with known type names
+    for (const token of tokens) {
+        if (allTypeNames.has(token)) {
+            refs.add(token);
         }
     }
 
@@ -2531,23 +2533,45 @@ function getReferencedTypesForInterface(iface: InterfaceInfo, allTypeNames: Set<
         }
     }
 
+    const tokens = new Set<string>();
     for (const method of iface.methods || []) {
-        for (const typeName of allTypeNames) {
-            if (method.sig.includes(typeName) || (method.ret?.includes(typeName) ?? false)) {
-                refs.add(typeName);
-            }
-        }
+        tokenizeInto(method.sig, tokens);
+        if (method.ret) tokenizeInto(method.ret, tokens);
     }
 
     for (const prop of iface.properties || []) {
-        for (const typeName of allTypeNames) {
-            if (prop.type.includes(typeName)) {
-                refs.add(typeName);
-            }
+        tokenizeInto(prop.type, tokens);
+    }
+
+    for (const token of tokens) {
+        if (allTypeNames.has(token)) {
+            refs.add(token);
         }
     }
 
     return refs;
+}
+
+/**
+ * Extracts identifier tokens (runs of letters, digits, underscores) from a
+ * signature string and adds them to the tokens set.
+ */
+function tokenizeInto(sig: string, tokens: Set<string>): void {
+    let start = -1;
+    for (let i = 0; i <= sig.length; i++) {
+        const ch = i < sig.length ? sig.charCodeAt(i) : 0;
+        const isIdChar =
+            (ch >= 65 && ch <= 90) || // A-Z
+            (ch >= 97 && ch <= 122) || // a-z
+            (ch >= 48 && ch <= 57) || // 0-9
+            ch === 95; // _
+        if (isIdChar && start < 0) {
+            start = i;
+        } else if (!isIdChar && start >= 0) {
+            tokens.add(sig.slice(start, i));
+            start = -1;
+        }
+    }
 }
 
 function detectPatterns(sourceFile: SourceFile, patterns: Set<string>): void {

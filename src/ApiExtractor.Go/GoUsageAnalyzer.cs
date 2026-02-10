@@ -351,19 +351,15 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
     private static HashSet<string> GetReferencedTypes(IfaceApi iface, HashSet<string> allTypeNames)
     {
-        var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> tokens = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (var method in iface.Methods ?? [])
         {
-            foreach (var typeName in allTypeNames)
-            {
-                if (method.Sig.Contains(typeName) || (method.Ret?.Contains(typeName) ?? false))
-                {
-                    refs.Add(typeName);
-                }
-            }
+            SignatureTokenizer.TokenizeInto(method.Sig, tokens);
+            SignatureTokenizer.TokenizeInto(method.Ret, tokens);
         }
 
-        return refs;
+        tokens.IntersectWith(allTypeNames);
+        return tokens;
     }
 }

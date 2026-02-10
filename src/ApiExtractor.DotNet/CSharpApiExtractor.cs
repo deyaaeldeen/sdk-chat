@@ -1104,7 +1104,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         return string.IsNullOrWhiteSpace(text) ? null : text.Length > 150 ? text[..147] + "..." : text;
     }
 
-    private bool IsPublic(BaseTypeDeclarationSyntax t) => t.Modifiers.Any(SyntaxKind.PublicKeyword);
+    private static bool IsPublic(BaseTypeDeclarationSyntax t) => t.Modifiers.Any(SyntaxKind.PublicKeyword);
     /// <summary>
     /// Interface members are implicitly public in C# (no explicit modifier needed).
     /// For classes/structs, the public keyword is required.

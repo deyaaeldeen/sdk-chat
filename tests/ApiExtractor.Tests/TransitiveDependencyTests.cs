@@ -69,7 +69,7 @@ public class TransitiveDependencyTests
         {
             var code = """
                 namespace TestPkg;
-                
+
                 // References Azure.Core types
                 public class MyClient
                 {
@@ -168,7 +168,7 @@ public class TransitiveDependencyTests
     public async Task TypeScript_Extract_IncludesDependenciesProperty()
     {
         var extractor = new TypeScriptApiExtractor();
-        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
+        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason ?? "TypeScript extractor not available");
 
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "TypeScript"));
 
@@ -251,7 +251,7 @@ public class TransitiveDependencyTests
     public async Task Python_Extract_IncludesDependenciesProperty()
     {
         var extractor = new PythonApiExtractor();
-        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
+        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason ?? "Python extractor not available");
 
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Python"));
 
@@ -298,7 +298,7 @@ public class TransitiveDependencyTests
     public async Task Go_Extract_IncludesDependenciesProperty()
     {
         var extractor = new GoApiExtractor();
-        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
+        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason ?? "Go extractor not available");
 
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Go"));
 
@@ -386,7 +386,7 @@ public class TransitiveDependencyTests
     public async Task Java_Extract_IncludesDependenciesProperty()
     {
         var extractor = new JavaApiExtractor();
-        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason);
+        if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason ?? "Java extractor not available");
 
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "Java"));
 

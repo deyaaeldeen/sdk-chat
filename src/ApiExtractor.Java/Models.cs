@@ -142,41 +142,37 @@ public sealed record ClassInfo
     /// <summary>Gets type names referenced in method signatures.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        HashSet<string> refs = [];
+        // Collect all identifier tokens from this type's signatures — O(total chars)
+        HashSet<string> tokens = [];
 
         if (!string.IsNullOrEmpty(Extends))
         {
             var baseName = Extends.Split('<')[0];
             if (allTypeNames.Contains(baseName))
-                refs.Add(baseName);
+                tokens.Add(baseName);
         }
 
         foreach (var iface in Implements ?? [])
         {
             var ifaceName = iface.Split('<')[0];
             if (allTypeNames.Contains(ifaceName))
-                refs.Add(ifaceName);
+                tokens.Add(ifaceName);
         }
 
         foreach (var method in Methods ?? [])
         {
-            foreach (var typeName in allTypeNames)
-            {
-                if (method.Sig.Contains(typeName) || (method.Ret?.Contains(typeName) ?? false))
-                    refs.Add(typeName);
-            }
+            SignatureTokenizer.TokenizeInto(method.Sig, tokens);
+            SignatureTokenizer.TokenizeInto(method.Ret, tokens);
         }
 
         foreach (var field in Fields ?? [])
         {
-            foreach (var typeName in allTypeNames)
-            {
-                if (field.Type.Contains(typeName))
-                    refs.Add(typeName);
-            }
+            SignatureTokenizer.TokenizeInto(field.Type, tokens);
         }
 
-        return refs;
+        // Intersect with known type names — O(min(|tokens|, |allTypeNames|))
+        tokens.IntersectWith(allTypeNames);
+        return tokens;
     }
 }
 

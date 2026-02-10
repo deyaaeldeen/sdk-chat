@@ -141,27 +141,23 @@ public sealed record StructApi
     /// <summary>Gets type names referenced in method signatures and fields.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        HashSet<string> refs = [];
+        // Collect all identifier tokens from this type's signatures — O(total chars)
+        HashSet<string> tokens = [];
 
         foreach (var method in Methods ?? [])
         {
-            foreach (var typeName in allTypeNames)
-            {
-                if (method.Sig.Contains(typeName) || (method.Ret?.Contains(typeName) ?? false))
-                    refs.Add(typeName);
-            }
+            SignatureTokenizer.TokenizeInto(method.Sig, tokens);
+            SignatureTokenizer.TokenizeInto(method.Ret, tokens);
         }
 
         foreach (var field in Fields ?? [])
         {
-            foreach (var typeName in allTypeNames)
-            {
-                if (field.Type.Contains(typeName))
-                    refs.Add(typeName);
-            }
+            SignatureTokenizer.TokenizeInto(field.Type, tokens);
         }
 
-        return refs;
+        // Intersect with known type names — O(min(|tokens|, |allTypeNames|))
+        tokens.IntersectWith(allTypeNames);
+        return tokens;
     }
 }
 

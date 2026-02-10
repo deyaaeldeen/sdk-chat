@@ -188,32 +188,31 @@ public record TypeInfo
     /// </summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        HashSet<string> refs = [];
+        // Collect all identifier tokens from this type's signatures — O(total chars)
+        HashSet<string> tokens = [];
 
         if (!string.IsNullOrEmpty(Base))
         {
             var baseName = Base.Split('<')[0];
             if (allTypeNames.Contains(baseName))
-                refs.Add(baseName);
+                tokens.Add(baseName);
         }
 
         foreach (var iface in Interfaces ?? [])
         {
             var ifaceName = iface.Split('<')[0];
             if (allTypeNames.Contains(ifaceName))
-                refs.Add(ifaceName);
+                tokens.Add(ifaceName);
         }
 
         foreach (var member in Members ?? [])
         {
-            foreach (var typeName in allTypeNames)
-            {
-                if (member.Signature.Contains(typeName))
-                    refs.Add(typeName);
-            }
+            SignatureTokenizer.TokenizeInto(member.Signature, tokens);
         }
 
-        return refs;
+        // Intersect with known type names — O(min(|tokens|, |allTypeNames|))
+        tokens.IntersectWith(allTypeNames);
+        return tokens;
     }
 }
 

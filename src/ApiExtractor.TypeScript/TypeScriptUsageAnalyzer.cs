@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using ApiExtractor.Contracts;
@@ -177,28 +176,16 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
         }
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = availability.ExecutablePath!,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = scriptDir
-        };
-        psi.ArgumentList.Add(scriptPath);
-        psi.ArgumentList.Add("--usage");
-        psi.ArgumentList.Add(apiJsonPath);
-        psi.ArgumentList.Add(samplesPath);
+        // Route through ProcessSandbox for timeout enforcement, output size limits,
+        // and hardened execution — consistent with all other extractors
+        var runtimeResult = await ProcessSandbox.ExecuteAsync(
+            availability.ExecutablePath!,
+            [scriptPath, "--usage", apiJsonPath, samplesPath],
+            workingDirectory: scriptDir,
+            cancellationToken: ct
+        ).ConfigureAwait(false);
 
-        using var process = Process.Start(psi);
-        if (process is null)
-            return null;
-
-        var output = await process.StandardOutput.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-
-        return process.ExitCode == 0 ? output : null;
+        return runtimeResult.Success ? runtimeResult.StandardOutput : null;
     }
 
     // AOT-safe deserialization using source-generated context
@@ -374,7 +361,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
     private static HashSet<string> GetReferencedTypes(InterfaceInfo iface, HashSet<string> allTypeNames)
     {
-        HashSet<string> refs = [];
+        HashSet<string> tokens = [];
 
         if (!string.IsNullOrEmpty(iface.Extends))
         {
@@ -384,33 +371,23 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 var baseName = baseEntry.Trim().Split('<')[0];
                 if (allTypeNames.Contains(baseName))
                 {
-                    refs.Add(baseName);
+                    tokens.Add(baseName);
                 }
             }
         }
 
         foreach (var method in iface.Methods ?? [])
         {
-            foreach (var typeName in allTypeNames)
-            {
-                if (method.Sig.Contains(typeName) || (method.Ret?.Contains(typeName) ?? false))
-                {
-                    refs.Add(typeName);
-                }
-            }
+            SignatureTokenizer.TokenizeInto(method.Sig, tokens);
+            SignatureTokenizer.TokenizeInto(method.Ret, tokens);
         }
 
         foreach (var prop in iface.Properties ?? [])
         {
-            foreach (var typeName in allTypeNames)
-            {
-                if (prop.Type.Contains(typeName))
-                {
-                    refs.Add(typeName);
-                }
-            }
+            SignatureTokenizer.TokenizeInto(prop.Type, tokens);
         }
 
-        return refs;
+        tokens.IntersectWith(allTypeNames);
+        return tokens;
     }
 }
