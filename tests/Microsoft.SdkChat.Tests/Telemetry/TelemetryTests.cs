@@ -118,12 +118,12 @@ public class SdkChatTelemetryTests : IDisposable
     [Fact]
     public void StartMcpTool_CreatesActivityWithToolName()
     {
-        using var activity = SdkChatTelemetry.StartMcpTool("generate_samples");
+        using var activity = SdkChatTelemetry.StartMcpTool("build_samples_prompt");
 
         Assert.NotNull(activity);
-        Assert.Equal("mcp.tool.generate_samples", activity.OperationName);
+        Assert.Equal("mcp.tool.build_samples_prompt", activity.OperationName);
         Assert.Equal(ActivityKind.Server, activity.Kind);
-        Assert.Equal("generate_samples", activity.GetTagItem("mcp.tool"));
+        Assert.Equal("build_samples_prompt", activity.GetTagItem("mcp.tool"));
     }
 
     [Fact]

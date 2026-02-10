@@ -7,26 +7,32 @@ using Xunit;
 namespace Microsoft.SdkChat.IntegrationTests;
 
 /// <summary>
-/// Collection for release container integration tests.
-/// Tests can run in parallel since each invokes the wrapper script independently.
+/// Collection for CLI integration tests.
+/// Tests can run in parallel since each invokes the CLI independently.
 /// </summary>
-[CollectionDefinition("ReleaseContainer")]
-public class ReleaseContainerCollection : ICollectionFixture<ReleaseContainerFixture>
+[CollectionDefinition("CLI")]
+public class CliCollection : ICollectionFixture<CliFixture>
 {
 }
 
 /// <summary>
-/// Fixture for running integration tests using the release container via wrapper script.
-/// Uses scripts/sdk-chat.sh which handles image building, path mounting, and credentials.
+/// Fixture for running integration tests by invoking the CLI project directly
+/// via <c>dotnet run --project</c>.
 /// </summary>
-public class ReleaseContainerFixture : IAsyncLifetime
+public class CliFixture : IAsyncLifetime
 {
     private static readonly string RepoRoot = FindRepoRoot();
 
     /// <summary>
-    /// Path to the wrapper script that handles all Docker setup.
+    /// Build configuration to use for <c>dotnet run</c>.
+    /// Auto-detected from the test assembly's output path (Debug or Release).
     /// </summary>
-    public string WrapperScript => Path.Combine(RepoRoot, "scripts", "sdk-chat.sh");
+    private static readonly string Configuration = DetectConfiguration();
+
+    /// <summary>
+    /// Path to the main CLI project.
+    /// </summary>
+    public string ProjectPath => Path.Combine(RepoRoot, "src", "Microsoft.SdkChat", "Microsoft.SdkChat.csproj");
 
     /// <summary>
     /// Path to test fixtures (shared with ApiExtractor.Tests).
@@ -34,7 +40,7 @@ public class ReleaseContainerFixture : IAsyncLifetime
     public string FixturesPath => Path.Combine(RepoRoot, "tests", "ApiExtractor.Tests", "TestFixtures");
 
     /// <summary>
-    /// Whether the test environment is available (Docker + script exists).
+    /// Whether the test environment is available (dotnet SDK + fixtures).
     /// </summary>
     public bool IsAvailable { get; private set; }
 
@@ -45,28 +51,19 @@ public class ReleaseContainerFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        // Check wrapper script exists
-        if (!File.Exists(WrapperScript))
+        // Check dotnet CLI is available
+        var dotnetCheck = await RunProcessAsync("dotnet", ["--version"], timeoutSeconds: 10);
+        if (dotnetCheck.ExitCode != 0)
         {
-            SkipReason = $"Wrapper script not found: {WrapperScript}";
+            SkipReason = "dotnet CLI not available";
             IsAvailable = false;
             return;
         }
 
-        // Check Docker is available
-        var dockerCheck = await RunProcessAsync("docker", ["info"], timeoutSeconds: 10);
-        if (dockerCheck.ExitCode != 0)
+        // Check project file exists
+        if (!File.Exists(ProjectPath))
         {
-            SkipReason = "Docker not available";
-            IsAvailable = false;
-            return;
-        }
-
-        // Check release image exists (or suggest building)
-        var imageCheck = await RunProcessAsync("docker", ["image", "inspect", "sdk-chat:latest"], timeoutSeconds: 10);
-        if (imageCheck.ExitCode != 0)
-        {
-            SkipReason = "Release image not found. Run: ./scripts/sdk-chat.sh --build --help";
+            SkipReason = $"CLI project not found: {ProjectPath}";
             IsAvailable = false;
             return;
         }
@@ -85,7 +82,7 @@ public class ReleaseContainerFixture : IAsyncLifetime
     public ValueTask DisposeAsync() => default;
 
     /// <summary>
-    /// Runs a command using the wrapper script, which handles Docker setup.
+    /// Runs the CLI via <c>dotnet run --project ... --no-build -- [args]</c>.
     /// </summary>
     /// <param name="args">Arguments to pass to sdk-chat CLI.</param>
     /// <param name="timeoutSeconds">Timeout in seconds.</param>
@@ -94,11 +91,10 @@ public class ReleaseContainerFixture : IAsyncLifetime
         string[] args,
         int timeoutSeconds = 120)
     {
-        // Use bash to run the wrapper script
-        var scriptArgs = new List<string> { WrapperScript };
-        scriptArgs.AddRange(args);
+        var dotnetArgs = new List<string> { "run", "--project", ProjectPath, "--configuration", Configuration, "--no-build", "--" };
+        dotnetArgs.AddRange(args);
 
-        return await RunProcessAsync("bash", [.. scriptArgs], timeoutSeconds);
+        return await RunProcessAsync("dotnet", [.. dotnetArgs], timeoutSeconds);
     }
 
     /// <summary>
@@ -198,7 +194,20 @@ public class ReleaseContainerFixture : IAsyncLifetime
             }
             dir = dir.Parent;
         }
-        // Fallback: walk up from test project
-        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+
+        throw new InvalidOperationException(
+            "Could not find repository root (sdk-chat.sln) from " + AppContext.BaseDirectory);
+    }
+
+    /// <summary>
+    /// Detects whether this test assembly was built in Debug or Release
+    /// by inspecting <see cref="AppContext.BaseDirectory"/>.
+    /// </summary>
+    private static string DetectConfiguration()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        if (baseDir.Contains("/Release/") || baseDir.Contains("\\Release\\"))
+            return "Release";
+        return "Debug";
     }
 }

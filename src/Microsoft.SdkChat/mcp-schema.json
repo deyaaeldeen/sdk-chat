@@ -89,18 +89,14 @@
       }
     },
     {
-      "name": "generate_samples",
-      "description": "Generate production-ready SDK samples using AI. WHEN TO USE: To create documentation examples. WORKFLOW: detect_source → analyze_coverage → generate_samples targeting gaps.",
+      "name": "build_samples_prompt",
+      "description": "Build an AI prompt for generating SDK code samples. WHEN TO USE: To create documentation examples. WORKFLOW: Call this → send prompts to LLM → call validate_samples → write samples to disk.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "packagePath": {
             "type": "string",
             "description": "Absolute path to SDK root directory"
-          },
-          "outputPath": {
-            "type": "string",
-            "description": "Output directory (default: auto-detected samples/ or examples/)"
           },
           "prompt": {
             "type": "string",
@@ -114,16 +110,30 @@
             "type": "integer",
             "description": "Max context chars (default: 512K). Reduce for faster generation."
           },
-          "model": {
-            "type": "string",
-            "description": "AI model override"
-          },
           "language": {
             "type": "string",
             "description": "Force language: dotnet, python, java, javascript, typescript, go"
           }
         },
         "required": ["packagePath"]
+      }
+    },
+    {
+      "name": "validate_samples",
+      "description": "Validate and parse an LLM response containing generated SDK samples. WHEN TO USE: After calling your LLM with prompts from build_samples_prompt. RETURNS: Parsed samples or error with correction prompt for retry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "llmResponse": {
+            "type": "string",
+            "description": "The raw text response from the LLM"
+          },
+          "language": {
+            "type": "string",
+            "description": "The SDK language (from build_samples_prompt result). Used for telemetry."
+          }
+        },
+        "required": ["llmResponse"]
       }
     }
   ],

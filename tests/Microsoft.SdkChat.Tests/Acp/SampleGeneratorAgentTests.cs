@@ -25,6 +25,7 @@ namespace Microsoft.SdkChat.Tests.Acp;
 /// 2. Returns prompts to client for AI generation
 /// 3. Receives samples from client and writes to disk
 /// </summary>
+[Collection("SdkInfoCache")]
 public class SampleGeneratorAgentTests : IDisposable
 {
     private readonly string _testRoot;

@@ -11,6 +11,7 @@ namespace Microsoft.SdkChat.Tests.RealWorldSdkStructures;
 /// Tests based on real-world TypeScript/JavaScript SDK repository structures from top GitHub repos.
 /// Each test represents a distinct, deduped pattern found in popular TypeScript/JavaScript SDKs.
 /// </summary>
+[Collection("SdkInfoCache")]
 public class TypeScriptSdkStructuresTests : SdkStructureTestBase
 {
     // Pattern 1: src/*.ts with tsconfig.json

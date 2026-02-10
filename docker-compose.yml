@@ -15,9 +15,6 @@
 #
 # Mount your SDK:
 #   SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package sample generate /sdk
-#
-# Build first:
-#   docker build -f Dockerfile.release -t sdk-chat:latest .
 
 services:
   # Main CLI service - mount SDK via SDK_PATH env var

@@ -201,7 +201,7 @@ public class AiService : IAiService
         Justification = "Schema generation uses reflection; types are preserved via JsonSerializable attribute on source-generated contexts")]
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL2067:UnrecognizedReflectionPattern",
         Justification = "Schema generation lambda preserves type metadata via caller's JsonSerializable context")]
-    private static string GenerateJsonSchema(
+    internal static string GenerateJsonSchema(
         [System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
     {
         return SchemaCache.GetOrAdd(type, static t =>

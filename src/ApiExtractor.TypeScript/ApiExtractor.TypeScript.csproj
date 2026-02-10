@@ -11,18 +11,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Update="extract_api.mjs">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="package.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="package-lock.json" Condition="Exists('package-lock.json')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="dist/**/*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>dist/%(RecursiveDir)%(Filename)%(Extension)</Link>
     </None>
   </ItemGroup>
 
@@ -30,14 +23,32 @@
     <ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
   </ItemGroup>
 
+  <!-- Make dist/ files transit to dependent projects (SdkChat, tests, etc.).
+       Uses a dynamic ItemGroup inside a target so the glob is evaluated at execution time,
+       AFTER npm run build creates the files (static globs evaluate at project load before build).
+       DependsOnTargets ensures npm build runs first so dist/ exists when this target fires,
+       even when a parent project invokes GetCopyToOutputDirectoryItems without building.
+       NOTE: The Condition is on the ItemGroup, NOT the Target, because MSBuild evaluates
+       Target Condition BEFORE DependsOnTargets - putting it on Target would skip npm build
+       in clean CI checkouts where dist/ doesn't exist yet. -->
+  <Target Name="AddDistFilesToCopyItems"
+          BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems"
+          DependsOnTargets="PreinstallNpmDependencies">
+    <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/dist')">
+      <Content Include="dist/**/*">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+    </ItemGroup>
+  </Target>
+
   <!-- Pre-install npm dependencies during build for faster cold starts -->
-  <Target Name="PreinstallNpmDependencies" 
-          BeforeTargets="Build" 
+  <Target Name="PreinstallNpmDependencies"
+          BeforeTargets="Build"
           Condition="'$(PreinstallNpmDependencies)' == 'true'">
-    
+
     <!-- Check if npm is available -->
-    <Exec Command="npm --version" 
-          IgnoreExitCode="true" 
+    <Exec Command="npm --version"
+          IgnoreExitCode="true"
           StandardOutputImportance="low"
           StandardErrorImportance="low"
           ConsoleToMSBuild="true">
@@ -45,21 +56,21 @@
     </Exec>
 
     <!-- Run npm install if npm is available and node_modules doesn't exist -->
-    <Message Importance="high" 
-             Text="Installing npm dependencies for TypeScript extractor..." 
+    <Message Importance="high"
+             Text="Installing npm dependencies for TypeScript extractor..."
              Condition="'$(NpmExitCode)' == '0' and !Exists('$(MSBuildProjectDirectory)/node_modules')" />
-    
+
     <!-- Install in source directory first (needed for package-lock.json resolution) -->
     <Exec Command="npm install --silent"
           WorkingDirectory="$(MSBuildProjectDirectory)"
-          Condition="'$(NpmExitCode)' == '0' and !Exists('$(MSBuildProjectDirectory)/node_modules')" 
+          Condition="'$(NpmExitCode)' == '0' and !Exists('$(MSBuildProjectDirectory)/node_modules')"
           StandardOutputImportance="low" />
 
     <!-- Build TypeScript source to dist folder -->
-    <Message Importance="high" 
-             Text="Building TypeScript extractor..." 
+    <Message Importance="high"
+             Text="Building TypeScript extractor..."
              Condition="'$(NpmExitCode)' == '0'" />
-    
+
     <Exec Command="npm run build"
           WorkingDirectory="$(MSBuildProjectDirectory)"
           Condition="'$(NpmExitCode)' == '0'"
@@ -71,18 +82,18 @@
           Condition="'$(NpmExitCode)' == '0' and Exists('$(MSBuildProjectDirectory)/node_modules') and $([MSBuild]::IsOSPlatform('Windows'))"
           StandardOutputImportance="low"
           IgnoreExitCode="true" />
-    
+
     <Exec Command="cp -r node_modules &quot;$(OutputPath)&quot;"
           WorkingDirectory="$(MSBuildProjectDirectory)"
           Condition="'$(NpmExitCode)' == '0' and Exists('$(MSBuildProjectDirectory)/node_modules') and !$([MSBuild]::IsOSPlatform('Windows')) and !Exists('$(OutputPath)node_modules')"
           StandardOutputImportance="low" />
 
-    <Message Importance="normal" 
-             Text="npm dependencies installed successfully." 
+    <Message Importance="normal"
+             Text="npm dependencies installed successfully."
              Condition="'$(NpmExitCode)' == '0' and Exists('$(OutputPath)node_modules')" />
-    
-    <Message Importance="normal" 
-             Text="npm not found - dependencies will be installed on first use." 
+
+    <Message Importance="normal"
+             Text="npm not found - dependencies will be installed on first use."
              Condition="'$(NpmExitCode)' != '0'" />
   </Target>
 

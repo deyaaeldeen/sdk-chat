@@ -2,11 +2,8 @@
   "servers": {
     "sdk-chat": {
       "type": "stdio",
-      "command": "${workspaceFolder}/scripts/sdk-chat.sh",
-      "args": ["mcp"],
-      "env": {
-        "SDK_WORKSPACE": "${workspaceFolder}"
-      }
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/src/Microsoft.SdkChat", "--", "mcp"]
     }
   }
 }

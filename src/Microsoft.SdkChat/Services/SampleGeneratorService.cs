@@ -273,7 +273,13 @@ public class SampleGeneratorService(
         }
     }
 
-    private SampleLanguageContext CreateLanguageContext(SdkLanguage language) => language switch
+    private SampleLanguageContext CreateLanguageContext(SdkLanguage language) => CreateLanguageContextForLanguage(language, fileHelper);
+
+    /// <summary>
+    /// Creates a language context for the specified SDK language.
+    /// Shared between SampleGeneratorService and SamplesMcpTools.
+    /// </summary>
+    internal static SampleLanguageContext CreateLanguageContextForLanguage(SdkLanguage language, FileHelper fileHelper) => language switch
     {
         SdkLanguage.DotNet => new DotNetSampleLanguageContext(fileHelper),
         SdkLanguage.Python => new PythonSampleLanguageContext(fileHelper),
@@ -284,10 +290,10 @@ public class SampleGeneratorService(
         _ => throw new NotSupportedException($"Language {language} not supported")
     };
 
-    private static string BuildSystemPrompt(SampleLanguageContext context, string sdkName, int count) =>
+    internal static string BuildSystemPrompt(SampleLanguageContext context, string sdkName, int count) =>
         $"Generate {count} runnable SDK samples for the '{sdkName}' SDK. {context.GetInstructions()}";
 
-    private static string GetUserPromptPrefix(string? customPrompt, int count, bool hasExistingSamples)
+    internal static string GetUserPromptPrefix(string? customPrompt, int count, bool hasExistingSamples)
     {
         if (!string.IsNullOrEmpty(customPrompt))
         {

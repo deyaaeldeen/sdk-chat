@@ -20,3 +20,13 @@ public class ConsoleOutputCollection : ICollectionFixture<ConsoleOutputFixture>
 public class ConsoleOutputFixture
 {
 }
+
+/// <summary>
+/// Collection for tests that depend on the SdkInfo static cache.
+/// Tests in this collection run sequentially to avoid race conditions
+/// caused by concurrent ClearCache() calls from parallel test classes.
+/// </summary>
+[CollectionDefinition("SdkInfoCache", DisableParallelization = true)]
+public class SdkInfoCacheCollection
+{
+}

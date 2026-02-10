@@ -2,7 +2,9 @@
 # Used for: VHS demo recording with Docker-in-Docker
 #
 # Build:  docker build -f demo/Dockerfile -t sdk-chat-demo .
-# Record: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace -w /workspace -e GH_TOKEN sdk-chat-demo
+# Record: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace -w /workspace \
+#           -v ~/.copilot:/root/.copilot:ro -v ~/.config/github-copilot:/root/.config/github-copilot:ro \
+#           -e GH_TOKEN sdk-chat-demo
 
 FROM ubuntu:24.04
 
@@ -22,6 +24,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
 
+# Install .NET SDK 10.0 (needed by the CLI)
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet \
+    && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+    && rm /tmp/dotnet-install.sh
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+
 # Install Chrome for VHS headless rendering
 RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o /tmp/chrome.deb \
     && (dpkg -i /tmp/chrome.deb || apt-get install -fy) \
@@ -37,6 +46,9 @@ RUN git clone --depth 1 https://github.com/openai/openai-dotnet /root/openai-dot
 # Create scripts directory
 RUN mkdir -p /root/scripts
 
+# Install GitHub Copilot CLI
+RUN curl -fsSL https://gh.io/copilot-install | bash
+
 # Environment
 ENV VHS_NO_SANDBOX=true
 
@@ -46,6 +58,6 @@ WORKDIR /workspace
 COPY demo/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Copilot auth dirs are mounted at runtime (-v ~/.copilot:/root/.copilot:ro etc.)
 # VHS needs root for Chrome sandbox
-# Default: run entrypoint which builds and records
 ENTRYPOINT ["/entrypoint.sh"]

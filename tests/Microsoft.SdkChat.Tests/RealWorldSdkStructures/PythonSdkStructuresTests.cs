@@ -11,6 +11,7 @@ namespace Microsoft.SdkChat.Tests.RealWorldSdkStructures;
 /// Tests based on real-world Python SDK repository structures from top GitHub repos.
 /// Each test represents a distinct, deduped pattern found in popular Python SDKs.
 /// </summary>
+[Collection("SdkInfoCache")]
 public class PythonSdkStructuresTests : SdkStructureTestBase
 {
     // Pattern 1: Package folder at root with __init__.py

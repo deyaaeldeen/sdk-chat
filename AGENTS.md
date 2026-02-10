@@ -35,69 +35,17 @@ docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet 
 |-------|------------|--------|
 | `sdk-chat-dev` | `Dockerfile` | Development, testing |
 | `sdk-chat-demo` | `demo/Dockerfile` | VHS demo recording |
-| `sdk-chat:latest` | `Dockerfile.release` | Production (Native AOT, ~500MB) |
+| `api-extractor-{lang}` | `extractors/{lang}/Dockerfile` | Per-language API extractor fallback |
 
-### AOT Publishing
+### Running
 
-The release Dockerfile produces a native AOT binary with glibc-linked extractors:
-
-```bash
-docker build -f Dockerfile.release -t sdk-chat:latest .
-
-# Test it
-docker run --rm sdk-chat:latest --help
-```
-
-> **Important:** After making code changes, you must rebuild the release image before running integration tests or the release container. The release image is a self-contained AOT binary that doesn't mount source code.
+The CLI and MCP server run natively on the host via `dotnet run`.
+Docker is only used as a fallback for language extractors when the runtime isn't installed.
 
 ```bash
-# Rebuild after code changes
-docker build -f Dockerfile.release -t sdk-chat:latest .
-
-# Generate samples with GitHub token (recommended)
-# Note: -u flag ensures correct file ownership
-docker run --rm -u $(id -u):$(id -g) \
-  -e GH_TOKEN="ghp_..." \
-  -v "$HOME:$HOME" \
-  -e "HOME=$HOME" \
-  sdk-chat:latest package samples generate /path/to/sdk
-
-# Or with Docker Compose
-GH_TOKEN="ghp_..." SDK_PATH=/path/to/sdk docker compose run --rm sdk-chat package samples generate /sdk
+# Run directly
+dotnet run --project src/Microsoft.SdkChat -- package samples generate /path/to/sdk
 ```
-
-### Wrapper Scripts (Host Only)
-
-The wrapper scripts in `scripts/` are designed for use **on the host machine**, not inside containers. They handle:
-- User ID mapping (`-u $(id -u):$(id -g)`) for correct file permissions
-- Home directory mounting for path transparency
-- Copilot credentials mounting at user's home (not `/root`)
-- Workspace mounting for MCP via `SDK_WORKSPACE` env var
-
-```bash
-# From host machine (not inside dev container)
-./scripts/sdk-chat.sh package samples generate /path/to/sdk
-```
-
-### Docker-in-Docker (Dev Container)
-
-When testing the release container from inside the dev container, you must use **host paths**, not container paths:
-
-```bash
-# Inside dev container, paths are mapped:
-#   Container: /workspaces/sdk-chat → Host: /home/<user>/sdk-chat
-
-# Find your host path
-docker inspect $(hostname) | grep -A 2 'workspaces/sdk-chat'
-
-# Use the HOST path when mounting volumes
-docker run --rm \
-  -e GH_TOKEN="ghp_..." \
-  -v "/home/<user>/sdk-chat/temp/openai-dotnet:/sdk" \
-  sdk-chat:latest package samples generate /sdk --dry-run
-```
-
-> **Why?** The Docker socket is shared, so `docker run` commands execute on the host. Paths passed to `-v` must exist on the host, not inside the dev container.
 
 ## Structure
 
@@ -197,8 +145,7 @@ dotnet test --filter "DisplayName~streaming"
 # Run from host (uses container)
 docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet test
 
-# Integration tests (run on host, not inside dev container)
-# These tests invoke the release container themselves.
+# Integration tests (invoke CLI directly via dotnet run)
 dotnet test tests/Microsoft.SdkChat.IntegrationTests --filter "Category=Integration"
 ```
 

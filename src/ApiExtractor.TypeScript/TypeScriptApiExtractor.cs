@@ -111,6 +111,32 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
         }
 
+        if (availability.Mode == ExtractorMode.Docker)
+        {
+            // Fall back to Docker container with precompiled extractor
+            var dockerResult = await DockerSandbox.ExecuteAsync(
+                availability.DockerImageName!,
+                rootPath,
+                [rootPath, "--json"],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            if (!dockerResult.Success)
+            {
+                var errorMsg = dockerResult.TimedOut
+                    ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"TypeScript extractor failed: {dockerResult.StandardError}";
+                throw new InvalidOperationException(errorMsg);
+            }
+
+            if (string.IsNullOrWhiteSpace(dockerResult.StandardOutput))
+            {
+                return null;
+            }
+
+            return JsonSerializer.Deserialize(dockerResult.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+        }
+
         if (availability.Mode != ExtractorMode.RuntimeInterpreter)
         {
             throw new InvalidOperationException(availability.UnavailableReason ?? "TypeScript extractor not available");
@@ -177,6 +203,27 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             }
 
             return result.StandardOutput;
+        }
+
+        if (availability.Mode == ExtractorMode.Docker)
+        {
+            // Fall back to Docker container with precompiled extractor
+            var dockerResult = await DockerSandbox.ExecuteAsync(
+                availability.DockerImageName!,
+                rootPath,
+                [rootPath, "--stub"],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+
+            if (!dockerResult.Success)
+            {
+                var errorMsg = dockerResult.TimedOut
+                    ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"TypeScript extractor failed: {dockerResult.StandardError}";
+                throw new InvalidOperationException(errorMsg);
+            }
+
+            return dockerResult.StandardOutput;
         }
 
         if (availability.Mode != ExtractorMode.RuntimeInterpreter)

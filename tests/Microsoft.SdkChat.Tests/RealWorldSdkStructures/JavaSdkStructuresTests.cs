@@ -11,6 +11,7 @@ namespace Microsoft.SdkChat.Tests.RealWorldSdkStructures;
 /// Tests based on real-world Java SDK repository structures from top GitHub repos.
 /// Each test represents a distinct, deduped pattern found in popular Java SDKs.
 /// </summary>
+[Collection("SdkInfoCache")]
 public class JavaSdkStructuresTests : SdkStructureTestBase
 {
     // Pattern 1: Maven standard layout - src/main/java

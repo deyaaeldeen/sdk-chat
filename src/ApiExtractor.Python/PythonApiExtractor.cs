@@ -109,6 +109,16 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 cancellationToken: ct
             ).ConfigureAwait(false);
         }
+        else if (availability.Mode == ExtractorMode.Docker)
+        {
+            // Fall back to Docker container with precompiled extractor
+            result = await DockerSandbox.ExecuteAsync(
+                availability.DockerImageName!,
+                rootPath,
+                [rootPath, "--json"],
+                cancellationToken: ct
+            ).ConfigureAwait(false);
+        }
         else
         {
             throw new InvalidOperationException(availability.UnavailableReason ?? "Python extractor not available");
@@ -118,9 +128,10 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
         if (!result.Success)
         {
+            var modeHint = availability.Mode == ExtractorMode.Docker ? " (docker)" : "";
             var errorMsg = result.TimedOut
-                ? $"Python extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Python extractor failed: {result.StandardError}";
+                ? $"Python extractor{modeHint} timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Python extractor{modeHint} failed: {result.StandardError}";
             ExtractorTelemetry.RecordResult(activity, false, error: errorMsg);
             throw new InvalidOperationException(errorMsg);
         }

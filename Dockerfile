@@ -6,7 +6,6 @@
 # Shell:  docker run --rm -it -u $(id -u):$(id -g) -v $(pwd):/workspace sdk-chat-dev bash
 # Test:   docker run --rm -u $(id -u):$(id -g) -v $(pwd):/workspace sdk-chat-dev
 #
-# For production: use Dockerfile.release
 # For demo recording: use demo/Dockerfile
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0
@@ -24,11 +23,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     docker.io \
     # Python extractor
     python3 python3-pip \
-    # TypeScript/JavaScript extractor
-    nodejs npm \
     # Go extractor
     golang-go \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Volta and Node.js 20+ (system nodejs is too old for ESM / ts-morph)
+ENV VOLTA_HOME=/opt/volta
+RUN curl https://get.volta.sh | bash -s -- --skip-setup && \
+    /opt/volta/bin/volta install node@22 && \
+    chmod -R a+rx /opt/volta
+ENV PATH="$VOLTA_HOME/bin:$PATH"
 
 # Install JBang for Java extractor
 ENV JBANG_DIR=/opt/jbang

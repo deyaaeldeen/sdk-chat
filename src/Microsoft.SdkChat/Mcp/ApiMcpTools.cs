@@ -62,7 +62,7 @@ public class ApiMcpTools
         "WHEN TO USE: To identify documentation gaps and prioritize which samples to create. " +
         "WHAT IT DOES: Compares the public API surface against existing sample code to find which methods/operations are demonstrated and which are not. " +
         "RETURNS: Coverage percentage, list of covered operations (with file:line references), and uncovered operations (with signatures). " +
-        "WORKFLOW: Run this → note uncovered operations → use generate_samples with a prompt targeting the gaps.")]
+        "WORKFLOW: Run this → note uncovered operations → use build_samples_prompt with a prompt targeting the gaps.")]
     public async Task<string> AnalyzeCoverageAsync(
         [Description("Absolute path to SDK root directory.")] string packagePath,
         [Description("Path to samples/tests folder. If omitted, auto-detected from samples/, examples/, demo/, etc.")] string? samplesPath = null,
