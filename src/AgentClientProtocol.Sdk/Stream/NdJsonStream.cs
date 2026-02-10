@@ -58,7 +58,8 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
             if (line == null) return null; // End of stream
             if (string.IsNullOrWhiteSpace(line)) continue; // Skip empty lines
 
-            _logger?.LogTrace("ACP recv: {Message}", line);
+            if (_logger?.IsEnabled(LogLevel.Trace) == true)
+                _logger.LogTrace("ACP recv: {Message}", line);
 
             try
             {
@@ -103,7 +104,8 @@ public class NdJsonStream : IAcpStream, IAsyncDisposable
         await _writeLock.WaitAsync(ct);
         try
         {
-            _logger?.LogTrace("ACP send: {Message}", json);
+            if (_logger?.IsEnabled(LogLevel.Trace) == true)
+                _logger.LogTrace("ACP send: {Message}", json);
             await _output.WriteLineAsync(json);
         }
         finally
