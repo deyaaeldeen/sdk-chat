@@ -312,6 +312,15 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         HashSet<string> seenOperations,
         ApiIndex apiIndex)
     {
+        // Build a quick lookup from "TypeName.MethodName" → full signature from API index
+        // so uncovered operations get real parameter signatures instead of "method(...)" placeholders.
+        var signatureLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ns in apiIndex.Namespaces ?? [])
+            foreach (var type in ns.Types ?? [])
+                foreach (var member in type.Members ?? [])
+                    if (member.Kind == "method")
+                        signatureLookup.TryAdd($"{type.Name}.{member.Name}", member.Signature);
+
         // Build bidirectional interface ↔ implementation mapping
         var interfaceToImpls = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var implToInterfaces = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -370,11 +379,12 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
                 if (!coveredViaRelated)
                 {
+                    var sigKey = $"{clientType}.{method}";
                     uncovered.Add(new UncoveredOperation
                     {
                         ClientType = clientType,
                         Operation = method,
-                        Signature = $"{method}(...)"
+                        Signature = signatureLookup.TryGetValue(sigKey, out var realSig) ? realSig : $"{method}(...)"
                     });
                 }
             }

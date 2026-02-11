@@ -184,4 +184,85 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         Assert.NotNull(resourceOps.Methods);
         Assert.Contains(resourceOps.Methods, m => m.Name == "get");
     }
+
+    #region Regression: IsModelType Logic
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithPublicServiceMethods_IsNotModel()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "ServiceClient",
+            Methods = new List<MethodInfo>
+            {
+                new() { Name = "createResource", Modifiers = ["public"] },
+                new() { Name = "deleteResource", Modifiers = ["public"] }
+            }
+        };
+
+        Assert.False(classInfo.IsModelType, "Service class with non-getter public methods should not be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithOnlyGettersSetters_IsModel()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "UserProfile",
+            Methods = new List<MethodInfo>
+            {
+                new() { Name = "getName", Modifiers = ["public"] },
+                new() { Name = "setName", Modifiers = ["public"] },
+                new() { Name = "isActive", Modifiers = ["public"] }
+            }
+        };
+
+        Assert.True(classInfo.IsModelType, "Class with only getters/setters/is should be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithNoPublicMethods_IsModel()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "InternalState",
+            Methods = new List<MethodInfo>
+            {
+                new() { Name = "computeHash", Modifiers = ["private"] }
+            }
+        };
+
+        Assert.True(classInfo.IsModelType, "Class with no public methods should be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithNoMethods_IsModel()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "EmptyPojo",
+            Methods = null
+        };
+
+        Assert.True(classInfo.IsModelType, "Class with null methods should be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithMixedMethods_IsNotModel()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "HybridService",
+            Methods = new List<MethodInfo>
+            {
+                new() { Name = "getName", Modifiers = ["public"] },
+                new() { Name = "executeOperation", Modifiers = ["public"] }
+            }
+        };
+
+        Assert.False(classInfo.IsModelType,
+            "Class with mix of getters and service methods should not be a model");
+    }
+
+    #endregion
 }

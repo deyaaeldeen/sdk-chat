@@ -243,3 +243,50 @@ public readonly struct Result<T>
     /// <summary>Creates a failure result.</summary>
     public static Result<T> Fail(string error) => new() { Status = ResultStatus.Failed, Error = error };
 }
+
+/// <summary>Delegate invoked when a widget changes.</summary>
+public delegate void WidgetChangedHandler(string widgetName, SampleClientOptions options);
+
+/// <summary>Delegate that produces a result asynchronously.</summary>
+public delegate Task<Result<T>> AsyncResultProducer<T>(string input, CancellationToken cancellationToken);
+
+/// <summary>
+/// Interface with a Default Interface Method (C# 8 DIM).
+/// Tests that private/internal DIM members are excluded from the public API surface.
+/// </summary>
+public interface IAdvancedClient
+{
+    /// <summary>Public method on the interface.</summary>
+    Task<Resource> FetchAsync(string id);
+
+    /// <summary>Default implementation — still public (no access modifier).</summary>
+    Task<Resource> FetchWithRetryAsync(string id)
+        => FetchAsync(id);
+
+    // Private DIM helper — must NOT appear in extracted API
+    private static string FormatId(string id) => id.Trim();
+}
+
+/// <summary>
+/// Class with a public nested type, a field-like event, and multi-variable consts.
+/// </summary>
+public class AdvancedService
+{
+    /// <summary>Constant A.</summary>
+    public const int MaxRetries = 5, DefaultTimeout = 30;
+
+    /// <summary>Raised when the service state changes.</summary>
+    public event EventHandler? StateChanged;
+
+    /// <summary>Does work.</summary>
+    public void Execute() { StateChanged?.Invoke(this, EventArgs.Empty); }
+
+    /// <summary>
+    /// Nested options type — must be extracted by recursing into the parent type.
+    /// </summary>
+    public class AdvancedServiceOptions
+    {
+        /// <summary>Whether to enable logging.</summary>
+        public bool EnableLogging { get; set; }
+    }
+}

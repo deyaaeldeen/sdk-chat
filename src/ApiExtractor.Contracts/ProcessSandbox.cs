@@ -138,6 +138,13 @@ public static class ProcessSandbox
 
             return ProcessResult.Failed(-1, "", $"Process timed out after {effectiveTimeout.TotalSeconds}s", elapsed, timedOut: true);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // User-initiated cancellation: propagate so callers can observe it
+            // via try/catch(OperationCanceledException) upstream.
+            KillProcess(process);
+            throw;
+        }
         catch (Exception ex)
         {
             var elapsed = Stopwatch.GetElapsedTime(startTime);

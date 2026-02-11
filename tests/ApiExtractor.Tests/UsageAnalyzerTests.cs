@@ -482,4 +482,63 @@ public class UsageAnalyzerTests
     }
 
     #endregion
+
+    #region Regression: Uncovered Operations Use Real Signatures
+
+    [Fact]
+    public async Task AnalyzeAsync_UncoveredOperations_UseRealSignaturesFromApiIndex()
+    {
+        // Arrange: API index with a method signature, but no sample code covers it
+        var tempDir = Path.Combine(Path.GetTempPath(), $"usage_sig_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            // Write an empty sample file — no calls to GetResourceAsync
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "sample.cs"),
+                """
+                using System;
+                class Sample { void Main() { } }
+                """);
+
+            var apiIndex = new ApiIndex
+            {
+                Package = "TestPackage",
+                Namespaces =
+                [
+                    new NamespaceInfo
+                    {
+                        Name = "TestPackage",
+                        Types =
+                        [
+                            new TypeInfo
+                            {
+                                Name = "SampleClient",
+                                Kind = "class",
+                                EntryPoint = true,
+                                Members =
+                                [
+                                    new MemberInfo { Name = "GetResourceAsync", Kind = "method", Signature = "Task<Resource> GetResourceAsync(string id, CancellationToken ct)" }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
+
+            // The uncovered operation should use the real signature from API index
+            var uncovered = result.UncoveredOperations.FirstOrDefault(u => u.Operation == "GetResourceAsync");
+            Assert.NotNull(uncovered);
+            Assert.Contains("GetResourceAsync", uncovered.Signature);
+            Assert.DoesNotContain("(...)", uncovered.Signature);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    #endregion
 }

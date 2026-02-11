@@ -812,7 +812,18 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     private void ExtractTypes(SyntaxNode container, string nsName, ConcurrentDictionary<string, MergedType> typeMap, bool isEntryPointNamespace)
     {
         foreach (var type in container.ChildNodes().OfType<BaseTypeDeclarationSyntax>().Where(IsPublic))
+        {
             MergeType(nsName, type, typeMap, isEntryPointNamespace);
+
+            // Recurse into nested types (e.g., ClientOptions.ServiceVersion enums,
+            if (type is TypeDeclarationSyntax tds)
+                ExtractTypes(tds, nsName, typeMap, isEntryPointNamespace);
+        }
+
+        // Delegate declarations inherit from MemberDeclarationSyntax, not BaseTypeDeclarationSyntax,
+        // so they require a separate pass to avoid silently dropping public delegates from the API surface.
+        foreach (var del in container.ChildNodes().OfType<DelegateDeclarationSyntax>().Where(d => d.Modifiers.Any(SyntaxKind.PublicKeyword)))
+            MergeDelegate(nsName, del, typeMap, isEntryPointNamespace);
     }
 
     private void MergeType(string ns, BaseTypeDeclarationSyntax type, ConcurrentDictionary<string, MergedType> typeMap, bool isEntryPointNamespace)
@@ -849,11 +860,64 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         {
             foreach (var member in typeSyntax.Members.Where(IsPublicMember))
             {
+                // Const field declarations may contain multiple variables
+                // (e.g., public const int A = 1, B = 2). Unroll them into
+                // separate MemberInfo entries so none are silently dropped.
+                if (member is FieldDeclarationSyntax f && f.Modifiers.Any(SyntaxKind.ConstKeyword))
+                {
+                    foreach (var v in f.Declaration.Variables)
+                    {
+                        var constInfo = new MemberInfo
+                        {
+                            Name = v.Identifier.Text,
+                            Kind = "const",
+                            Signature = $"const {Simplify(f.Declaration.Type)} {v.Identifier.Text}" +
+                                (v.Initializer != null && v.Initializer.Value.ToString().Length < 30 ? $" = {v.Initializer.Value}" : ""),
+                            Doc = GetXmlDoc(f)
+                        };
+                        merged.Members.TryAdd(constInfo.Signature, constInfo);
+                    }
+                    continue;
+                }
+
                 var info = ExtractMember(member);
                 if (info != null)
                     merged.Members.TryAdd(info.Signature, info);
             }
         }
+    }
+
+    /// <summary>
+    /// Merges a delegate declaration into the type map.
+    /// Delegates are modeled as a type with kind="delegate" and a single "Invoke" member
+    /// whose signature captures the delegate's return type and parameter list.
+    /// </summary>
+    private void MergeDelegate(string ns, DelegateDeclarationSyntax del, ConcurrentDictionary<string, MergedType> typeMap, bool isEntryPointNamespace)
+    {
+        var name = del.Identifier.Text;
+        if (del.TypeParameterList != null)
+            name += $"<{string.Join(",", del.TypeParameterList.Parameters.Select(p => p.Identifier.Text))}>";
+
+        var key = $"{ns}.{name}";
+        var merged = typeMap.GetOrAdd(key, _ => new MergedType { Namespace = ns, Name = name });
+
+        merged.SetKindIfEmpty("delegate");
+
+        if (isEntryPointNamespace)
+        {
+            merged.IsEntryPoint = true;
+        }
+
+        merged.SetDocIfNull(GetXmlDoc(del));
+
+        var signature = $"{Simplify(del.ReturnType)} {del.Identifier.Text}({FormatParams(del.ParameterList)})";
+        merged.Members.TryAdd(signature, new MemberInfo
+        {
+            Name = "Invoke",
+            Kind = "method",
+            Signature = signature,
+            Doc = GetXmlDoc(del)
+        });
     }
 
     /// <summary>
@@ -982,6 +1046,14 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Signature = $"event {Simplify(evt.Type)} {evt.Identifier.Text}",
             Doc = GetXmlDoc(evt)
         },
+        EventFieldDeclarationSyntax ef =>
+            ef.Declaration.Variables.FirstOrDefault() is { } ev ? new MemberInfo
+            {
+                Name = ev.Identifier.Text,
+                Kind = "event",
+                Signature = $"event {Simplify(ef.Declaration.Type)} {ev.Identifier.Text}",
+                Doc = GetXmlDoc(ef)
+            } : null,
         FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.ConstKeyword) =>
             f.Declaration.Variables.FirstOrDefault() is { } v ? new MemberInfo
             {
@@ -1122,9 +1194,14 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     /// <summary>
     /// Interface members are implicitly public in C# (no explicit modifier needed).
     /// For classes/structs, the public keyword is required.
+    /// Since C# 8 (DIM), interfaces can have private/protected/internal members — exclude those.
     /// </summary>
     private static bool IsPublicMember(MemberDeclarationSyntax m) =>
-        m.Modifiers.Any(SyntaxKind.PublicKeyword) || m.Parent is InterfaceDeclarationSyntax;
+        m.Modifiers.Any(SyntaxKind.PublicKeyword) ||
+        (m.Parent is InterfaceDeclarationSyntax &&
+         !m.Modifiers.Any(SyntaxKind.PrivateKeyword) &&
+         !m.Modifiers.Any(SyntaxKind.ProtectedKeyword) &&
+         !m.Modifiers.Any(SyntaxKind.InternalKeyword));
 
     private static string DetectPackageName(string rootPath)
     {
@@ -1150,7 +1227,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
             var beforeOk = pos == 0 || path[pos - 1] is '/' or '\\';
             var afterPos = pos + seg.Length;
-            var afterOk = afterPos < path.Length && path[afterPos] is '/' or '\\';
+            var afterOk = afterPos >= path.Length || path[afterPos] is '/' or '\\';
 
             if (beforeOk && afterOk) return true;
             searchFrom = pos + 1;

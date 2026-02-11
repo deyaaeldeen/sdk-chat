@@ -119,11 +119,12 @@ public sealed record ClassInfo
         EntryPoint == true &&
         (Methods?.Any() ?? false);
 
-    /// <summary>Returns true if this is a model/DTO class.</summary>
+    /// <summary>Returns true if this is a model/DTO class.
+    /// A model type either has no public methods, or all its methods are getters/setters/is-checks.</summary>
     [JsonIgnore]
     public bool IsModelType =>
         !(Methods?.Any(m => m.Modifiers?.Contains("public") == true) ?? false) ||
-        (Methods?.All(m => m.Name.StartsWith("get", StringComparison.Ordinal) || m.Name.StartsWith("set", StringComparison.Ordinal) || m.Name.StartsWith("is", StringComparison.Ordinal)) ?? false);
+        (Methods?.Count > 0 == true && Methods.All(m => m.Name.StartsWith("get", StringComparison.Ordinal) || m.Name.StartsWith("set", StringComparison.Ordinal) || m.Name.StartsWith("is", StringComparison.Ordinal)));
 
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]

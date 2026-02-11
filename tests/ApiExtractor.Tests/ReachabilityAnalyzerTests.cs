@@ -587,6 +587,64 @@ public class ReachabilityAnalyzerTests
 
     #endregion
 
+    #region Iterative Tarjan (Stack Safety)
+
+    [Fact]
+    public void FindReachable_DeepLinearChain_DoesNotStackOverflow()
+    {
+        // A linear chain of 5000 types: T0 → T1 → ... → T4999
+        // Recursive Tarjan would stack-overflow here; iterative must handle it.
+        const int depth = 5000;
+        var types = new List<ReachabilityAnalyzer.TypeNode>();
+        for (var i = 0; i < depth; i++)
+        {
+            types.Add(Node($"T{i}", hasOps: i == 0,
+                refs: i < depth - 1 ? [$"T{i + 1}"] : null));
+        }
+
+        var result = ReachabilityAnalyzer.FindReachable(types, EmptyEdges(), StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("T0", result);
+        Assert.Equal(depth, result.Count);
+    }
+
+    [Fact]
+    public void FindReachable_LargeSCC_HandledCorrectly()
+    {
+        // 500 nodes all in one SCC: T0 → T1 → ... → T499 → T0
+        const int size = 500;
+        var types = new List<ReachabilityAnalyzer.TypeNode>();
+        for (var i = 0; i < size; i++)
+        {
+            types.Add(Node($"T{i}", hasOps: i == 0,
+                refs: [$"T{(i + 1) % size}"]));
+        }
+
+        var result = ReachabilityAnalyzer.FindReachable(types, EmptyEdges(), StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(size, result.Count);
+    }
+
+    [Fact]
+    public void FindReachable_DeepChainWithSCCs_AllReachable()
+    {
+        // Chain of SCCs: (A↔B) → (C↔D) → E
+        var types = new List<ReachabilityAnalyzer.TypeNode>
+        {
+            Node("A", hasOps: true, refs: ["B", "C"]),
+            Node("B", hasOps: false, refs: ["A"]),
+            Node("C", hasOps: false, refs: ["D", "E"]),
+            Node("D", hasOps: false, refs: ["C"]),
+            Node("E", hasOps: false),
+        };
+
+        var result = ReachabilityAnalyzer.FindReachable(types, EmptyEdges(), StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(5, result.Count);
+    }
+
+    #endregion
+
     #region Helpers
 
     private static ReachabilityAnalyzer.TypeNode Node(

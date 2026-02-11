@@ -230,6 +230,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             {
                 Name = name,
                 HasOperations = cls.Methods?.Any() ?? false,
+                IsExplicitEntryPoint = cls.EntryPoint == true,
                 IsRootCandidate = true,
                 ReferencedTypes = cls.GetReferencedTypes(allTypeNames)
             });
@@ -242,6 +243,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             {
                 Name = name,
                 HasOperations = iface.Methods?.Any() ?? false,
+                IsExplicitEntryPoint = iface.EntryPoint == true,
                 IsRootCandidate = false,
                 ReferencedTypes = GetReferencedTypes(iface, allTypeNames)
             });

@@ -161,6 +161,7 @@ public static partial class ToolPathResolver
 
     /// <summary>
     /// Validates that an executable exists and runs successfully with given args.
+    /// Drains stdout/stderr before WaitForExit to prevent pipe-buffer deadlocks.
     /// </summary>
     private static bool ValidateExecutable(string path, string args)
     {
@@ -183,6 +184,12 @@ public static partial class ToolPathResolver
 
             using var process = Process.Start(psi);
             if (process is null) return false;
+
+            // Drain stdout/stderr to prevent pipe-buffer deadlocks:
+            // if the child writes enough to fill the OS pipe buffer (~4-64KB),
+            // WaitForExit will hang indefinitely because the pipe is full.
+            process.StandardOutput.ReadToEnd();
+            process.StandardError.ReadToEnd();
 
             process.WaitForExit(3000);
             return process.ExitCode == 0;

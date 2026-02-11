@@ -230,10 +230,10 @@ public static class ReachabilityAnalyzer
     }
 
     /// <summary>
-    /// Tarjan's strongly connected components algorithm (recursive).
+    /// Tarjan's strongly connected components algorithm (iterative).
     /// </summary>
     private static void TarjanScc(
-        string v,
+        string startNode,
         Dictionary<string, List<string>> adj,
         Dictionary<string, int> indices,
         Dictionary<string, int> lowlinks,
@@ -243,40 +243,72 @@ public static class ReachabilityAnalyzer
         List<List<string>> sccs,
         StringComparer comparer)
     {
-        indices[v] = nextIndex;
-        lowlinks[v] = nextIndex;
-        nextIndex++;
-        stack.Push(v);
-        onStack.Add(v);
+        // Each frame represents a node being processed and the position within its neighbor list.
+        // This mirrors the recursive call stack: (node, neighborIndex).
+        var callStack = new Stack<(string Node, int NeighborIndex)>();
 
-        if (adj.TryGetValue(v, out var neighbors))
+        // Initialize the start node
+        indices[startNode] = nextIndex;
+        lowlinks[startNode] = nextIndex;
+        nextIndex++;
+        stack.Push(startNode);
+        onStack.Add(startNode);
+        callStack.Push((startNode, 0));
+
+        while (callStack.Count > 0)
         {
-            foreach (var w in neighbors)
+            var (v, ni) = callStack.Pop();
+            var neighbors = adj.TryGetValue(v, out var n) ? n : null;
+            var neighborCount = neighbors?.Count ?? 0;
+            var advanced = false;
+
+            for (var i = ni; i < neighborCount; i++)
             {
+                var w = neighbors![i];
                 if (!indices.TryGetValue(w, out var wIndex))
                 {
-                    TarjanScc(w, adj, indices, lowlinks, onStack, stack, ref nextIndex, sccs, comparer);
-                    lowlinks[v] = Math.Min(lowlinks[v], lowlinks[w]);
+                    // "Recurse" into w: push current frame (resuming at i+1), then push w
+                    callStack.Push((v, i + 1));
+
+                    indices[w] = nextIndex;
+                    lowlinks[w] = nextIndex;
+                    nextIndex++;
+                    stack.Push(w);
+                    onStack.Add(w);
+                    callStack.Push((w, 0));
+                    advanced = true;
+                    break;
                 }
                 else if (onStack.Contains(w))
                 {
                     lowlinks[v] = Math.Min(lowlinks[v], wIndex);
                 }
             }
-        }
 
-        if (lowlinks[v] == indices[v])
-        {
-            var scc = new List<string>();
-            string w;
-            do
+            if (advanced)
+                continue;
+
+            // All neighbors processed — equivalent to returning from recursive call
+            if (lowlinks[v] == indices[v])
             {
-                w = stack.Pop();
-                onStack.Remove(w);
-                scc.Add(w);
-            } while (!comparer.Equals(w, v));
+                var scc = new List<string>();
+                string w;
+                do
+                {
+                    w = stack.Pop();
+                    onStack.Remove(w);
+                    scc.Add(w);
+                } while (!comparer.Equals(w, v));
 
-            sccs.Add(scc);
+                sccs.Add(scc);
+            }
+
+            // Propagate lowlink to parent (if any)
+            if (callStack.Count > 0)
+            {
+                var parent = callStack.Peek();
+                lowlinks[parent.Node] = Math.Min(lowlinks[parent.Node], lowlinks[v]);
+            }
         }
     }
 }

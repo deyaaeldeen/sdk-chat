@@ -168,11 +168,12 @@ public sealed record FunctionInfo
 [JsonSerializable(typeof(ApiIndex))]
 public partial class ApiIndexContext : JsonSerializerContext
 {
-    private static ApiIndexContext? _indented;
+    private static readonly Lazy<ApiIndexContext> _indented = new(
+        () => new ApiIndexContext(
+            new JsonSerializerOptions(Default!.Options) { WriteIndented = true }));
 
     /// <summary>Context configured for indented (pretty) output.</summary>
-    public static ApiIndexContext Indented => _indented ??= new ApiIndexContext(
-        new JsonSerializerOptions(Default.Options) { WriteIndented = true });
+    public static ApiIndexContext Indented => _indented.Value;
 }
 
 public static class ApiIndexExtensions

@@ -226,6 +226,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             {
                 Name = strct.Name,
                 HasOperations = strct.Methods?.Any() ?? false,
+                IsExplicitEntryPoint = strct.EntryPoint == true,
                 IsRootCandidate = true,
                 ReferencedTypes = strct.GetReferencedTypes(allTypeNames)
             });
@@ -237,6 +238,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             {
                 Name = iface.Name,
                 HasOperations = iface.Methods?.Any() ?? false,
+                IsExplicitEntryPoint = iface.EntryPoint == true,
                 IsRootCandidate = false,
                 ReferencedTypes = GetReferencedTypes(iface, allTypeNames)
             });

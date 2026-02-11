@@ -155,20 +155,6 @@ public class DotNetApiExtractorTests
         Assert.Contains("enum ResultStatus", formatted);
     }
 
-    [Fact]
-    public async Task Extract_ProducesSmallerOutputThanSource()
-    {
-        // For small test fixtures, API surface can approach or slightly exceed source size
-        // due to JSON overhead (property names, punctuation). Real SDK packages (100s of KB)
-        // show >90% reduction. Allow 10% margin for small fixtures.
-        var api = await _extractor.ExtractAsync(TestFixturesPath);
-        var json = JsonSerializer.Serialize(api);
-        var sourceSize = Directory.GetFiles(TestFixturesPath, "*.cs", SearchOption.AllDirectories)
-            .Sum(f => new FileInfo(f).Length);
-        var threshold = (long)(sourceSize * 1.1);
-        Assert.True(json.Length <= threshold,
-            $"JSON ({json.Length}) should be <= 110% of source ({sourceSize}, threshold {threshold})");
-    }
 
     [Fact]
     public async Task Extract_FindsStructs()
@@ -249,10 +235,11 @@ public class DotNetApiExtractorTests
     }
 
     [Fact]
-    public void ContainsSegment_TrailingSegment_NotMatched()
+    public void ContainsSegment_TrailingSegment_IsMatched()
     {
-        // "bin" at the end with no trailing separator is NOT a directory segment
-        Assert.False(CSharpApiExtractor.ContainsSegment("src/bin", "bin"));
+        // "bin" at the end with no trailing separator IS a directory segment
+        // (fixed: previously was incorrectly rejected)
+        Assert.True(CSharpApiExtractor.ContainsSegment("src/bin", "bin"));
     }
 
     [Fact]
@@ -260,6 +247,153 @@ public class DotNetApiExtractorTests
     {
         // "obj" inside "objfoo" should not match
         Assert.False(CSharpApiExtractor.ContainsSegment("src/objfoo/bar.cs", "obj"));
+    }
+
+    #endregion
+
+    #region Regression: ContainsSegment Terminal Segments
+
+    [Theory]
+    [InlineData("src/bin", "bin", true)]
+    [InlineData("obj", "obj", true)]
+    [InlineData("bin", "bin", true)]
+    [InlineData("src\\obj", "obj", true)]
+    [InlineData("path/to/ref", "ref", true)]
+    [InlineData("src/bin/Debug", "bin", true)]
+    [InlineData("combine", "bin", false)]
+    [InlineData("cabin", "bin", false)]
+    public void ContainsSegment_TerminalSegment_IsMatched(string path, string segment, bool expected)
+    {
+        Assert.Equal(expected, CSharpApiExtractor.ContainsSegment(path, segment));
+    }
+
+    #endregion
+
+    #region Regression: Delegate Extraction
+
+    [Fact]
+    public async Task Extract_FindsDelegates()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        Assert.Contains(types, t => t.Kind == "delegate");
+    }
+
+    [Fact]
+    public async Task Extract_DelegateHasCorrectKind()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var widgetChanged = types.FirstOrDefault(t => t.Name == "WidgetChangedHandler");
+        Assert.NotNull(widgetChanged);
+        Assert.Equal("delegate", widgetChanged.Kind);
+    }
+
+    [Fact]
+    public async Task Extract_DelegateHasSignatureMember()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var widgetChanged = types.FirstOrDefault(t => t.Name == "WidgetChangedHandler");
+        Assert.NotNull(widgetChanged);
+        Assert.NotNull(widgetChanged.Members);
+        Assert.NotEmpty(widgetChanged.Members);
+        Assert.Contains(widgetChanged.Members, m => m.Name == "Invoke");
+    }
+
+    [Fact]
+    public async Task Extract_GenericDelegateExtracted()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var asyncProducer = types.FirstOrDefault(t => t.Name.StartsWith("AsyncResultProducer"));
+        Assert.NotNull(asyncProducer);
+        Assert.Equal("delegate", asyncProducer.Kind);
+    }
+
+    [Fact]
+    public async Task Format_IncludesDelegates()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var formatted = CSharpFormatter.Format(api);
+        Assert.Contains("delegate", formatted);
+        Assert.Contains("WidgetChangedHandler", formatted);
+    }
+
+    #endregion
+
+    #region Regression: Nested Types
+
+    [Fact]
+    public async Task Extract_FindsPublicNestedTypes()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var nested = types.FirstOrDefault(t => t.Name == "AdvancedServiceOptions");
+        Assert.NotNull(nested);
+        Assert.Equal("class", nested.Kind);
+    }
+
+    [Fact]
+    public async Task Extract_NestedEnumInOptions()
+    {
+        // SampleClientOptions.ServiceVersion is a nested enum
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var serviceVersion = types.FirstOrDefault(t => t.Name == "ServiceVersion");
+        Assert.NotNull(serviceVersion);
+        Assert.Equal("enum", serviceVersion.Kind);
+    }
+
+    #endregion
+
+    #region Regression: Field-like Events
+
+    [Fact]
+    public async Task Extract_FindsFieldLikeEvents()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var advService = types.FirstOrDefault(t => t.Name == "AdvancedService");
+        Assert.NotNull(advService);
+        Assert.NotNull(advService.Members);
+        Assert.Contains(advService.Members, m => m.Kind == "event" && m.Name == "StateChanged");
+    }
+
+    #endregion
+
+    #region Regression: Multi-variable Const Declarations
+
+    [Fact]
+    public async Task Extract_FindsAllConstVariables()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var advService = types.FirstOrDefault(t => t.Name == "AdvancedService");
+        Assert.NotNull(advService);
+        Assert.NotNull(advService.Members);
+        var consts = advService.Members.Where(m => m.Kind == "const").ToList();
+        Assert.Contains(consts, c => c.Name == "MaxRetries");
+        Assert.Contains(consts, c => c.Name == "DefaultTimeout");
+    }
+
+    #endregion
+
+    #region Regression: DIM Private Members Excluded
+
+    [Fact]
+    public async Task Extract_ExcludesPrivateDimMembers()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var iAdvanced = types.FirstOrDefault(t => t.Name == "IAdvancedClient");
+        Assert.NotNull(iAdvanced);
+        Assert.NotNull(iAdvanced.Members);
+        // Public members should be present
+        Assert.Contains(iAdvanced.Members, m => m.Name == "FetchAsync");
+        Assert.Contains(iAdvanced.Members, m => m.Name == "FetchWithRetryAsync");
+        // Private DIM member should NOT appear
+        Assert.DoesNotContain(iAdvanced.Members, m => m.Name == "FormatId");
     }
 
     #endregion

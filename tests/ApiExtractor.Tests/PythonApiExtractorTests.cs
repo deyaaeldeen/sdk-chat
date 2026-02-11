@@ -333,4 +333,23 @@ public class PythonDeserializationTests
         Assert.True(func.EntryPoint);
         Assert.Equal("test_sdk._factories", func.ReExportedFrom);
     }
+
+    #region Regression: ApiIndexContext.Indented Thread Safety
+
+    [Fact]
+    public void ApiIndexContext_Indented_ReturnsSameInstance()
+    {
+        var context1 = ApiExtractor.Python.ApiIndexContext.Indented;
+        var context2 = ApiExtractor.Python.ApiIndexContext.Indented;
+        Assert.Same(context1, context2);
+    }
+
+    [Fact]
+    public void ApiIndexContext_Indented_WritesIndented()
+    {
+        var context = ApiExtractor.Python.ApiIndexContext.Indented;
+        Assert.True(context.Options.WriteIndented);
+    }
+
+    #endregion
 }

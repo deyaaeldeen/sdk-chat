@@ -248,6 +248,11 @@ public static class ExtractorAvailability
                 return (false, "Failed to start process");
             }
 
+            // Drain stdout/stderr BEFORE WaitForExit to prevent pipe-buffer deadlocks:
+            // if the child fills the OS pipe buffer (~4-64KB), WaitForExit hangs indefinitely.
+            process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+
             var completed = process.WaitForExit(ValidationTimeoutMs);
             if (!completed)
             {
@@ -270,7 +275,6 @@ public static class ExtractorAvailability
                 return (true, null);
             }
 
-            var stderr = process.StandardError.ReadToEnd();
             return (false, $"Exit code {process.ExitCode}: {stderr}");
         }
         catch (Exception ex)
