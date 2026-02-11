@@ -56,8 +56,11 @@ public static class GoFormatter
         var allStructs = index.GetAllStructs().ToList();
         var structsWithUncovered = allStructs.Where(s => uncoveredByClient.ContainsKey(s.Name)).ToList();
 
+        // Build set of all type names for dependency tracking
+        var allTypeNames = allStructs.Select(s => s.Name).ToHashSet();
+        var structsByName = allStructs.ToDictionary(s => s.Name);
+
         HashSet<string> includedStructs = [];
-        var currentLength = sb.Length;
 
         foreach (var st in structsWithUncovered)
         {
@@ -78,15 +81,28 @@ public static class GoFormatter
 
             var structContent = FormatStructToString(filteredStruct);
 
-            if (currentLength + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
+            if (sb.Length + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
             {
                 sb.AppendLine($"// ... truncated ({structsWithUncovered.Count - includedStructs.Count} structs omitted)");
                 break;
             }
 
             sb.Append(structContent);
-            currentLength += structContent.Length;
             includedStructs.Add(st.Name);
+
+            // Include supporting model/option types referenced by uncovered operations
+            var deps = filteredStruct.GetReferencedTypes(allTypeNames);
+            foreach (var depName in deps)
+            {
+                if (!includedStructs.Contains(depName) && structsByName.TryGetValue(depName, out var depStruct))
+                {
+                    var depContent = FormatStructToString(depStruct);
+                    if (sb.Length + depContent.Length > maxLength - 100)
+                        break;
+                    sb.Append(depContent);
+                    includedStructs.Add(depName);
+                }
+            }
         }
 
         return sb.ToString();

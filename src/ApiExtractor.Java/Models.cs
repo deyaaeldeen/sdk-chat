@@ -177,7 +177,7 @@ public sealed record ClassInfo
 }
 
 /// <summary>An enum type.</summary>
-public record EnumInfo
+public sealed record EnumInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -193,7 +193,7 @@ public record EnumInfo
 }
 
 /// <summary>A method or constructor.</summary>
-public record MethodInfo
+public sealed record MethodInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -218,7 +218,7 @@ public record MethodInfo
 }
 
 /// <summary>A field or constant.</summary>
-public record FieldInfo
+public sealed record FieldInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -242,9 +242,10 @@ public record FieldInfo
 [JsonSerializable(typeof(ApiIndex))]
 internal sealed partial class SourceGenerationContext : JsonSerializerContext
 {
-    private static SourceGenerationContext? _indented;
+    private static readonly Lazy<SourceGenerationContext> _indented = new(
+        () => new SourceGenerationContext(
+            new JsonSerializerOptions(Default!.Options!) { WriteIndented = true }));
 
     /// <summary>Context configured for indented (pretty) output.</summary>
-    public static SourceGenerationContext Indented => _indented ??= new SourceGenerationContext(
-        new JsonSerializerOptions(Default.Options) { WriteIndented = true });
+    public static SourceGenerationContext Indented => _indented.Value;
 }

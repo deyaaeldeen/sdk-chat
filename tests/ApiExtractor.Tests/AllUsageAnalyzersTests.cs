@@ -622,6 +622,115 @@ client.send()
         );
     }
 
+    private static Python.ApiIndex CreatePythonApiIndexWithBase(
+        (string ClassName, string[] Methods, string? Base)[] classes)
+    {
+        return CreatePythonApiIndexWithProperties(
+            classes: classes.Select(c =>
+                (c.ClassName, c.Methods, Array.Empty<(string Name, string? Type)>(), c.Base)
+            ).ToArray(),
+            functions: []);
+    }
+
+    [Fact]
+    public async Task Python_Strategy2_UniqueMethodName_MatchesSingleCandidate()
+    {
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
+
+        // "process" only exists on ServiceClient — should match via Strategy 2
+        // even when the receiver ("x") can't be resolved to a known client type
+        var apiIndex = CreatePythonApiIndexWithBase(
+            classes:
+            [
+                ("MainClient", ["connect"], null),
+                ("ServiceClient", ["process"], null)
+            ]);
+
+        await WriteFileAsync("sample.py", """
+x = unknown_factory()
+x.process()
+""");
+
+        var result = await _pythonAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o =>
+            o.ClientType == "ServiceClient" && o.Operation == "process");
+    }
+
+    [Fact]
+    public async Task Python_Strategy2_AmbiguousMethodName_RejectsMatch()
+    {
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
+
+        // "send" exists on both ClientA and ClientB (unrelated) — should NOT match
+        var apiIndex = CreatePythonApiIndexWithBase(
+            classes:
+            [
+                ("ClientA", ["send", "connect"], null),
+                ("ClientB", ["send", "disconnect"], null)
+            ]);
+
+        await WriteFileAsync("sample.py", """
+x = unknown_factory()
+x.send()
+""");
+
+        var result = await _pythonAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.DoesNotContain(result.CoveredOperations, o => o.Operation == "send");
+    }
+
+    [Fact]
+    public async Task Python_Strategy2_InheritedMethod_MatchesBaseClass()
+    {
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
+
+        // "process" exists on both ServiceBase and ServiceImpl (child),
+        // but they share an inheritance chain — should match the root (ServiceBase)
+        var apiIndex = CreatePythonApiIndexWithBase(
+            classes:
+            [
+                ("MainClient", ["connect"], null),
+                ("ServiceBase", ["process", "validate"], null),
+                ("ServiceImpl", ["process", "validate"], "ServiceBase")
+            ]);
+
+        await WriteFileAsync("sample.py", """
+x = unknown_factory()
+x.process()
+""");
+
+        var result = await _pythonAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o => o.Operation == "process");
+    }
+
+    [Fact]
+    public async Task Python_Strategy2_DiamondInheritance_MatchesSingleRoot()
+    {
+        if (!_pythonAnalyzer.IsAvailable()) Assert.Skip("Python not available");
+
+        // Both ChildA and ChildB inherit "run" from BaseClient.
+        // All three have "run" — but there's a single root: BaseClient
+        var apiIndex = CreatePythonApiIndexWithBase(
+            classes:
+            [
+                ("BaseClient", ["run"], null),
+                ("ChildA", ["run"], "BaseClient"),
+                ("ChildB", ["run"], "BaseClient")
+            ]);
+
+        await WriteFileAsync("sample.py", """
+x = unknown_factory()
+x.run()
+""");
+
+        var result = await _pythonAnalyzer.AnalyzeAsync(_tempDir, apiIndex);
+
+        Assert.Contains(result.CoveredOperations, o =>
+            o.ClientType == "BaseClient" && o.Operation == "run");
+    }
+
     #endregion
 
     #region TypeScript Usage Analyzer Tests

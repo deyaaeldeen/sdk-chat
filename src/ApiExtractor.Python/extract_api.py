@@ -5,6 +5,7 @@ Outputs JSON with classes, methods, functions, and their signatures.
 """
 
 import ast
+import collections
 import json
 import sys
 import os
@@ -995,7 +996,7 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
         derived_by_base.setdefault(base_key, []).append(cls)
 
     reachable: set[str] = set()
-    queue: list[str] = []
+    queue: collections.deque[str] = collections.deque()
 
     for cls in root_classes:
         name = cls.get("name", "").split("[")[0]
@@ -1004,7 +1005,7 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
             queue.append(name)
 
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         current_cls = next(
             (cls for cls in all_classes if cls.get("name", "").split("[")[0] == current),
             None,
@@ -1045,6 +1046,18 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
     method_return_type_map = _build_method_return_type_map(api, client_methods)
     function_return_type_map = _build_function_return_type_map(api, client_methods)
     property_type_map = _build_property_type_map(api, client_methods)
+
+    # Build inheritance relationships for Strategy 2 disambiguation:
+    # maps each class to its set of base classes that are also client types.
+    _class_bases: dict[str, set[str]] = {}
+    for module in api.get("modules", []):
+        for cls in module.get("classes", []):
+            name = cls.get("name", "")
+            base_str = cls.get("base", "")
+            if name in client_methods and base_str:
+                bases = {b.strip() for b in base_str.split(",") if b.strip() in client_methods}
+                if bases:
+                    _class_bases[name] = bases
 
     covered: list[dict[str, Any]] = []
     seen_ops: set[str] = set()
@@ -1100,18 +1113,38 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
                         continue
 
                 # Strategy 2: Fall back to global method name matching
-                # (catches cases where variable tracking fails)
-                for client_name, methods in client_methods.items():
-                    if method_name in methods:
-                        key = f"{client_name}.{method_name}"
-                        if key not in seen_ops:
-                            seen_ops.add(key)
-                            covered.append({
-                                "client": client_name,
-                                "method": method_name,
-                                "file": rel_path,
-                                "line": getattr(node, 'lineno', 0)
-                            })
+                # Only match if the method name is unique to a single client type,
+                # or all candidates share an inheritance chain (inherited method).
+                # (avoids false positives for common names like send, get, list)
+                candidates = [
+                    cn for cn, methods in client_methods.items()
+                    if method_name in methods
+                ]
+                if len(candidates) == 1:
+                    client_name = candidates[0]
+                elif len(candidates) > 1:
+                    # When multiple candidates exist, check if they form a
+                    # single inheritance chain. A candidate is a "root" if none
+                    # of its bases are also in the candidate set.
+                    candidates_set = set(candidates)
+                    roots = [
+                        c for c in candidates
+                        if not (_class_bases.get(c, set()) & candidates_set)
+                    ]
+                    client_name = roots[0] if len(roots) == 1 else None
+                else:
+                    client_name = None
+
+                if client_name is not None:
+                    key = f"{client_name}.{method_name}"
+                    if key not in seen_ops:
+                        seen_ops.add(key)
+                        covered.append({
+                            "client": client_name,
+                            "method": method_name,
+                            "file": rel_path,
+                            "line": getattr(node, 'lineno', 0)
+                        })
 
         # Detect patterns using AST
         detect_patterns_ast(tree, patterns)
@@ -1169,6 +1202,15 @@ def analyze_usage(samples_path: Path, api: dict[str, Any]) -> dict[str, Any]:
 # Usage Analysis Helpers
 # =============================================================================
 
+def _tokenize_identifiers(text: str) -> set[str]:
+    """Tokenize a string into identifier tokens (split on non-alphanumeric/underscore).
+
+    This prevents substring false positives like 'Policy' matching inside 'PolicyList'.
+    """
+    import re
+    return set(re.findall(r'[A-Za-z_]\w*', text))
+
+
 def get_referenced_types(cls: dict[str, Any], all_type_names: set[str]) -> set[str]:
     """Get all type names referenced by a class (base, methods, properties)."""
     refs: set[str] = set()
@@ -1182,15 +1224,13 @@ def get_referenced_types(cls: dict[str, Any], all_type_names: set[str]) -> set[s
     for method in cls.get("methods", []) or []:
         sig = method.get("sig", "")
         ret = method.get("ret", "")
-        for type_name in all_type_names:
-            if type_name in sig or type_name in ret:
-                refs.add(type_name)
+        tokens = _tokenize_identifiers(sig) | _tokenize_identifiers(ret)
+        refs.update(tokens & all_type_names)
 
     for prop in cls.get("properties", []) or []:
         ptype = prop.get("type") or ""
-        for type_name in all_type_names:
-            if type_name in ptype:
-                refs.add(type_name)
+        tokens = _tokenize_identifiers(ptype)
+        refs.update(tokens & all_type_names)
 
     return refs
 

@@ -55,8 +55,15 @@ public static class TypeScriptFormatter
         var allClasses = index.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
+        // Build lookups for dependency tracking
+        var allInterfaces = index.Modules.SelectMany(m => m.Interfaces ?? []).ToList();
+        HashSet<string> allTypeNames = [];
+        foreach (var c in allClasses) allTypeNames.Add(c.Name);
+        foreach (var i in allInterfaces) allTypeNames.Add(i.Name);
+        var allClassesByName = allClasses.ToDictionary(c => c.Name);
+        var allIfacesByName = allInterfaces.ToDictionary(i => i.Name);
+
         HashSet<string> includedClasses = [];
-        var currentLength = sb.Length;
 
         foreach (var cls in classesWithUncovered)
         {
@@ -77,15 +84,39 @@ public static class TypeScriptFormatter
 
             var classContent = FormatClassToString(filteredClass);
 
-            if (currentLength + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
+            if (sb.Length + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
             {
                 sb.AppendLine($"// ... truncated ({classesWithUncovered.Count - includedClasses.Count} classes omitted)");
                 break;
             }
 
             sb.Append(classContent);
-            currentLength += classContent.Length;
             includedClasses.Add(cls.Name);
+
+            // Include supporting model/option types referenced by uncovered operations
+            var deps = filteredClass.GetReferencedTypes(allTypeNames);
+            foreach (var depName in deps)
+            {
+                if (includedClasses.Contains(depName))
+                    continue;
+
+                if (allClassesByName.TryGetValue(depName, out var depClass))
+                {
+                    var depContent = FormatClassToString(depClass);
+                    if (sb.Length + depContent.Length > maxLength - 100)
+                        break;
+                    sb.Append(depContent);
+                    includedClasses.Add(depName);
+                }
+                else if (allIfacesByName.TryGetValue(depName, out var depIface))
+                {
+                    var depContent = FormatInterface(depIface);
+                    if (sb.Length + depContent.Length > maxLength - 100)
+                        break;
+                    sb.Append(depContent);
+                    includedClasses.Add(depName);
+                }
+            }
         }
 
         return sb.ToString();
@@ -122,6 +153,11 @@ public static class TypeScriptFormatter
         foreach (var e in allEnums) allTypeNames.Add(e.Name);
         foreach (var t in allTypes) allTypeNames.Add(t.Name);
 
+        // Pre-build dictionaries for O(1) lookups instead of O(n) FirstOrDefault
+        var interfacesByName = allInterfaces.ToDictionary(i => i.Name);
+        var enumsByName = allEnums.ToDictionary(e => e.Name);
+        var typesByName = allTypes.ToDictionary(t => t.Name);
+
         // Build dependency graph for classes
         var classDeps = new Dictionary<string, HashSet<string>>();
         foreach (var cls in allClasses)
@@ -156,7 +192,7 @@ public static class TypeScriptFormatter
 
                 var importPath = exportPath == "."
                     ? index.Package
-                    : $"{index.Package}/{exportPath[2..]}"; // Remove "./" prefix
+                    : $"{index.Package}/{(exportPath.StartsWith("./") ? exportPath[2..] : exportPath)}";
 
                 sb.AppendLine($"// ============================================================================");
                 sb.AppendLine($"// import {{ ... }} from \"{importPath}\"");
@@ -242,8 +278,7 @@ public static class TypeScriptFormatter
                     if (sb.Length >= maxLength) break;
 
                     // Try to find and include the dependency
-                    var iface = allInterfaces.FirstOrDefault(i => i.Name == depName);
-                    if (iface != null)
+                    if (interfacesByName.TryGetValue(depName, out var iface))
                     {
                         var ifaceStr = FormatInterface(iface);
                         if (sb.Length + ifaceStr.Length <= maxLength)
@@ -255,8 +290,7 @@ public static class TypeScriptFormatter
                         continue;
                     }
 
-                    var enumDef = allEnums.FirstOrDefault(e => e.Name == depName);
-                    if (enumDef != null)
+                    if (enumsByName.TryGetValue(depName, out var enumDef))
                     {
                         var enumStr = FormatEnum(enumDef);
                         if (sb.Length + enumStr.Length <= maxLength)
@@ -268,8 +302,7 @@ public static class TypeScriptFormatter
                         continue;
                     }
 
-                    var typeDef = allTypes.FirstOrDefault(t => t.Name == depName);
-                    if (typeDef != null)
+                    if (typesByName.TryGetValue(depName, out var typeDef))
                     {
                         var typeStr = FormatTypeAlias(typeDef);
                         if (sb.Length + typeStr.Length <= maxLength)
@@ -401,6 +434,9 @@ public static class TypeScriptFormatter
         List<ClassInfo> result = [];
         HashSet<string> added = [];
 
+        // Pre-build dictionary for O(1) lookups
+        var classesByName = classes.ToDictionary(c => c.Name);
+
         // Add client classes first (priority 0)
         var clientClasses = classes.Where(c => c.IsClientType).OrderBy(c => c.Name).ToList();
         foreach (var client in clientClasses)
@@ -414,8 +450,7 @@ public static class TypeScriptFormatter
         {
             foreach (var depName in deps.GetValueOrDefault(client.Name, []))
             {
-                var depClass = classes.FirstOrDefault(c => c.Name == depName);
-                if (depClass != null && !added.Contains(depClass.Name))
+                if (classesByName.TryGetValue(depName, out var depClass) && !added.Contains(depClass.Name))
                 {
                     result.Add(depClass);
                     added.Add(depClass.Name);

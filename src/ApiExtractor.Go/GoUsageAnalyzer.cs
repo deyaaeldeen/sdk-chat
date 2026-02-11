@@ -15,6 +15,8 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 {
     private static readonly string[] GoCandidates = { "go", "/usr/local/go/bin/go", "/opt/go/bin/go" };
 
+    // Benign race: worst case two threads both compute the same availability result.
+    // Reference assignment is atomic in .NET, so no corruption is possible.
     private ExtractorAvailabilityResult? _availability;
 
     /// <inheritdoc />
@@ -204,15 +206,16 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             .SelectMany(p => p.Interfaces ?? [])
             .ToList();
 
+        // Go is case-sensitive — use Ordinal comparison for type/method names.
         var allTypeNames = allStructs
             .Select(s => s.Name)
             .Concat(allInterfaces.Select(i => i.Name))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(StringComparer.Ordinal);
 
-        var interfaceMethods = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var interfaceMethods = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var iface in allInterfaces)
         {
-            var methods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var methods = new HashSet<string>(StringComparer.Ordinal);
             foreach (var method in iface.Methods ?? [])
             {
                 methods.Add(method.Name);
@@ -224,12 +227,17 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             }
         }
 
-        var interfaceImplementers = new Dictionary<string, List<StructApi>>(StringComparer.OrdinalIgnoreCase);
+        // Structural interface matching: a struct implements an interface if it has
+        // methods with matching names. This mirrors Go's structural typing model.
+        // Note: checking by name only (not full signature) may produce false positives
+        // if unrelated interfaces share method names, but this is rare in practice
+        // and is the correct approach for Go's type system.
+        var interfaceImplementers = new Dictionary<string, List<StructApi>>(StringComparer.Ordinal);
         foreach (var iface in interfaceMethods)
         {
             foreach (var strct in allStructs)
             {
-                var structMethods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var structMethods = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var method in strct.Methods ?? [])
                 {
                     structMethods.Add(method.Name);
@@ -247,7 +255,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             }
         }
 
-        var references = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var references = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var strct in allStructs)
         {
             references[strct.Name] = strct.GetReferencedTypes(allTypeNames);
@@ -258,7 +266,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             references[iface.Name] = GetReferencedTypes(iface, allTypeNames);
         }
 
-        var referencedBy = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var referencedBy = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var (typeName, refs) in references)
         {
             foreach (var target in refs)
@@ -270,7 +278,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             }
         }
 
-        var operationTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var operationTypes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var strct in allStructs)
         {
             if (strct.Methods?.Any() ?? false)
@@ -309,7 +317,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 .ToList();
         }
 
-        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var reachable = new HashSet<string>(StringComparer.Ordinal);
         var queue = new Queue<string>();
 
         foreach (var root in rootStructs)

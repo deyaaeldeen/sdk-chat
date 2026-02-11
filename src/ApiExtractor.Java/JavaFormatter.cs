@@ -56,8 +56,11 @@ public static class JavaFormatter
         var allClasses = index.GetAllClasses().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
+        // Build set of all type names for dependency tracking
+        var allTypeNames = allClasses.Select(c => c.Name.Split('<')[0]).ToHashSet();
+        var allClassesByName = allClasses.ToDictionary(c => c.Name.Split('<')[0]);
+
         HashSet<string> includedClasses = [];
-        var currentLength = sb.Length;
 
         foreach (var cls in classesWithUncovered)
         {
@@ -78,15 +81,28 @@ public static class JavaFormatter
 
             var classContent = FormatClassToString(filteredClass);
 
-            if (currentLength + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
+            if (sb.Length + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
             {
                 sb.AppendLine($"// ... truncated ({classesWithUncovered.Count - includedClasses.Count} classes omitted)");
                 break;
             }
 
             sb.Append(classContent);
-            currentLength += classContent.Length;
             includedClasses.Add(cls.Name);
+
+            // Include supporting model/option types referenced by uncovered operations
+            var deps = filteredClass.GetReferencedTypes(allTypeNames);
+            foreach (var depName in deps)
+            {
+                if (!includedClasses.Contains(depName) && allClassesByName.TryGetValue(depName, out var depClass))
+                {
+                    var depContent = FormatClassToString(depClass);
+                    if (sb.Length + depContent.Length > maxLength - 100)
+                        break;
+                    sb.Append(depContent);
+                    includedClasses.Add(depName);
+                }
+            }
         }
 
         return sb.ToString();
@@ -113,6 +129,9 @@ public static class JavaFormatter
         var allClasses = api.GetAllClasses().ToList();
         var allTypeNames = allClasses.Select(c => c.Name.Split('<')[0]).ToHashSet();
 
+        // Pre-build dictionary for O(1) lookups instead of O(n) FirstOrDefault
+        var classesByName = allClasses.ToDictionary(c => c.Name.Split('<')[0]);
+
         // Get client dependencies first
         var clients = allClasses.Where(c => c.IsClientType).ToList();
         HashSet<string> clientDeps = [];
@@ -131,8 +150,7 @@ public static class JavaFormatter
             .ThenBy(c => c.Name)
             .ToList();
 
-        HashSet<string> includedClasses = [];
-        var currentLength = sb.Length;
+        HashSet<string> includedClasses2 = [];
 
         foreach (var pkg in api.Packages)
         {
@@ -152,7 +170,7 @@ public static class JavaFormatter
 
             foreach (var cls in pkgClasses)
             {
-                if (includedClasses.Contains(cls.Name))
+                if (includedClasses2.Contains(cls.Name))
                     continue;
 
                 // Include class + dependencies
@@ -160,27 +178,24 @@ public static class JavaFormatter
                 var deps = cls.GetReferencedTypes(allTypeNames);
                 foreach (var depName in deps)
                 {
-                    if (!includedClasses.Contains(depName))
+                    if (!includedClasses2.Contains(depName) && classesByName.TryGetValue(depName, out var depClass))
                     {
-                        var depClass = allClasses.FirstOrDefault(c => c.Name == depName);
-                        if (depClass != null)
-                            classesToAdd.Add(depClass);
+                        classesToAdd.Add(depClass);
                     }
                 }
 
-                var classContent = FormatTypesToString(classesToAdd, pkg.Interfaces?.Any(i => classesToAdd.Contains(i)) == true);
+                var classContent = FormatTypesToString(classesToAdd, pkg.Interfaces?.Any(i => classesToAdd.Contains(i)) == true, pkg.Interfaces);
 
-                if (currentLength + classContent.Length > maxLength - 100 && includedClasses.Count > 0)
+                if (sb.Length + classContent.Length > maxLength - 100 && includedClasses2.Count > 0)
                 {
-                    sb.AppendLine($"// ... truncated ({allClasses.Count - includedClasses.Count} classes omitted)");
+                    sb.AppendLine($"// ... truncated ({allClasses.Count - includedClasses2.Count} classes omitted)");
                     return sb.ToString();
                 }
 
                 sb.Append(classContent);
-                currentLength += classContent.Length;
 
                 foreach (var c in classesToAdd)
-                    includedClasses.Add(c.Name);
+                    includedClasses2.Add(c.Name);
             }
         }
 
@@ -223,12 +238,18 @@ public static class JavaFormatter
         return sb.ToString();
     }
 
-    private static string FormatTypesToString(List<ClassInfo> types, bool isInterface)
+    private static string FormatTypesToString(List<ClassInfo> types, bool isInterface, IReadOnlyList<ClassInfo>? pkgInterfaces = null)
     {
         var sb = new StringBuilder();
-        var keyword = isInterface ? "interface" : "class";
+        // Determine keyword per-type instead of per-batch to avoid
+        // labeling classes as interfaces when they're mixed in the same batch
         foreach (var type in types)
+        {
+            var keyword = pkgInterfaces?.Contains(type) == true ? "interface"
+                : isInterface ? "interface"
+                : "class";
             FormatType(sb, type, keyword);
+        }
         return sb.ToString();
     }
 

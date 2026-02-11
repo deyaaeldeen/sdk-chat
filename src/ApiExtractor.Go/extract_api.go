@@ -137,7 +137,30 @@ func isBuiltinType(typeName string) bool {
 	typeName = strings.TrimPrefix(typeName, "*")
 	typeName = strings.TrimPrefix(typeName, "[]")
 	if strings.HasPrefix(typeName, "map[") {
-		return true // map types use builtins
+		// Parse map key and value types instead of blanket builtin
+		inner := typeName[4:] // skip "map["
+		depth := 1
+		keyEnd := -1
+		for i := 0; i < len(inner); i++ {
+			if inner[i] == '[' {
+				depth++
+			} else if inner[i] == ']' {
+				depth--
+				if depth == 0 {
+					keyEnd = i
+					break
+				}
+			}
+		}
+		if keyEnd >= 0 {
+			key := inner[:keyEnd]
+			val := ""
+			if keyEnd+1 < len(inner) {
+				val = inner[keyEnd+1:]
+			}
+			return isBuiltinType(key) && (val == "" || isBuiltinType(val))
+		}
+		return true // malformed, treat as builtin
 	}
 
 	// Check if it's a stdlib package reference
@@ -974,22 +997,6 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 	// Reset the type collector and import map for this extraction
 	typeCollector = NewTypeReferenceCollector()
 	importMap = make(map[string]string)
-
-	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() {
-			// Skip vendor, testdata, internal, examples
-			name := info.Name()
-			if name == "vendor" || name == "testdata" || name == "internal" ||
-				name == "examples" || name == "_test" || strings.HasPrefix(name, ".") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		return nil
-	})
 
 	// Find all Go packages
 	fset := token.NewFileSet()

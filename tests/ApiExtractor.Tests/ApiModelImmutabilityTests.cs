@@ -4,10 +4,15 @@
 using ApiExtractor.DotNet;
 using Xunit;
 
+using GoModels = ApiExtractor.Go;
+using JavaModels = ApiExtractor.Java;
+using TsModels = ApiExtractor.TypeScript;
+
 namespace ApiExtractor.Tests;
 
 /// <summary>
-/// Tests for ApiExtractor model immutability - verifies IReadOnlyList usage.
+/// Tests for ApiExtractor model immutability - verifies IReadOnlyList usage,
+/// sealed records, and thread-safe serialization.
 /// </summary>
 public class ApiModelImmutabilityTests
 {
@@ -158,4 +163,107 @@ public class ApiModelImmutabilityTests
         Assert.Single(clients);
         Assert.Equal("TestClient", clients[0].Name);
     }
+
+    #region Sealed Record Tests
+
+    [Fact]
+    public void Go_Records_AreSealed()
+    {
+        Assert.True(typeof(GoModels.IfaceApi).IsSealed);
+        Assert.True(typeof(GoModels.FuncApi).IsSealed);
+        Assert.True(typeof(GoModels.FieldApi).IsSealed);
+        Assert.True(typeof(GoModels.TypeApi).IsSealed);
+        Assert.True(typeof(GoModels.ConstApi).IsSealed);
+        Assert.True(typeof(GoModels.VarApi).IsSealed);
+    }
+
+    [Fact]
+    public void Java_Records_AreSealed()
+    {
+        Assert.True(typeof(JavaModels.EnumInfo).IsSealed);
+        Assert.True(typeof(JavaModels.MethodInfo).IsSealed);
+        Assert.True(typeof(JavaModels.FieldInfo).IsSealed);
+    }
+
+    [Fact]
+    public void TypeScript_Records_AreSealed()
+    {
+        Assert.True(typeof(TsModels.InterfaceInfo).IsSealed);
+        Assert.True(typeof(TsModels.EnumInfo).IsSealed);
+        Assert.True(typeof(TsModels.TypeAliasInfo).IsSealed);
+        Assert.True(typeof(TsModels.FunctionInfo).IsSealed);
+        Assert.True(typeof(TsModels.MethodInfo).IsSealed);
+        Assert.True(typeof(TsModels.PropertyInfo).IsSealed);
+        Assert.True(typeof(TsModels.ConstructorInfo).IsSealed);
+    }
+
+    #endregion
+
+    #region Thread-Safe Indented JSON Tests
+
+    [Fact]
+    public async Task DotNet_IndentedJson_ThreadSafe()
+    {
+        var api = new ApiIndex { Package = "Test" };
+
+        var tasks = Enumerable.Range(0, 10).Select(_ => Task.Run(() =>
+            api.ToJson(pretty: true)
+        )).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        var results = tasks.Select(t => t.Result).Distinct().ToList();
+        Assert.Single(results);
+        Assert.Contains("Test", results[0]);
+    }
+
+    [Fact]
+    public async Task Java_IndentedJson_ThreadSafe()
+    {
+        var api = new JavaModels.ApiIndex { Package = "com.test" };
+
+        var tasks = Enumerable.Range(0, 10).Select(_ => Task.Run(() =>
+            api.ToJson(pretty: true)
+        )).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        var results = tasks.Select(t => t.Result).Distinct().ToList();
+        Assert.Single(results);
+        Assert.Contains("com.test", results[0]);
+    }
+
+    [Fact]
+    public async Task Go_IndentedJson_ThreadSafe()
+    {
+        var api = new GoModels.ApiIndex { Package = "testpkg" };
+
+        var tasks = Enumerable.Range(0, 10).Select(_ => Task.Run(() =>
+            api.ToJson(pretty: true)
+        )).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        var results = tasks.Select(t => t.Result).Distinct().ToList();
+        Assert.Single(results);
+        Assert.Contains("testpkg", results[0]);
+    }
+
+    [Fact]
+    public async Task TypeScript_IndentedJson_ThreadSafe()
+    {
+        var api = new TsModels.ApiIndex { Package = "@test/pkg" };
+
+        var tasks = Enumerable.Range(0, 10).Select(_ => Task.Run(() =>
+            api.ToJson(pretty: true)
+        )).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        var results = tasks.Select(t => t.Result).Distinct().ToList();
+        Assert.Single(results);
+        Assert.Contains("@test/pkg", results[0]);
+    }
+
+    #endregion
 }

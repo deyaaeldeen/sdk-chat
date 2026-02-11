@@ -70,15 +70,15 @@ public sealed record ApiIndex : IApiIndex
                     deps.Add(ifaceName);
             }
 
-            // Check member signatures for type references
+            // Check member signatures for type references using token-boundary matching
+            // (avoids substring false positives like "Policy" matching inside "PolicyList")
             foreach (var member in type.Members ?? [])
             {
-                foreach (var typeName in allTypeNames)
-                {
-                    if (member.Signature.Contains(typeName))
-                        deps.Add(typeName);
-                }
+                SignatureTokenizer.TokenizeInto(member.Signature, deps);
             }
+
+            // Keep only references to known types
+            deps.IntersectWith(allTypeNames);
 
             graph[type.Name] = deps;
         }
@@ -244,9 +244,10 @@ public record MemberInfo
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 internal sealed partial class JsonContext : JsonSerializerContext
 {
-    private static JsonContext? _indented;
+    private static readonly Lazy<JsonContext> _indented = new(
+        () => new JsonContext(
+            new JsonSerializerOptions(Default!.Options!) { WriteIndented = true }));
 
     /// <summary>Context configured for indented (pretty) output.</summary>
-    public static JsonContext Indented => _indented ??= new JsonContext(
-        new JsonSerializerOptions(Default.Options) { WriteIndented = true });
+    public static JsonContext Indented => _indented.Value;
 }

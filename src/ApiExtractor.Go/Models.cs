@@ -162,7 +162,7 @@ public sealed record StructApi
 }
 
 /// <summary>An interface type.</summary>
-public record IfaceApi
+public sealed record IfaceApi
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -180,7 +180,7 @@ public record IfaceApi
 }
 
 /// <summary>A function or method.</summary>
-public record FuncApi
+public sealed record FuncApi
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -209,7 +209,7 @@ public record FuncApi
 }
 
 /// <summary>A struct field.</summary>
-public record FieldApi
+public sealed record FieldApi
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -225,7 +225,7 @@ public record FieldApi
 }
 
 /// <summary>A type alias.</summary>
-public record TypeApi
+public sealed record TypeApi
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -242,7 +242,7 @@ public record TypeApi
 }
 
 /// <summary>A constant.</summary>
-public record ConstApi
+public sealed record ConstApi
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -258,7 +258,7 @@ public record ConstApi
 }
 
 /// <summary>A variable.</summary>
-public record VarApi
+public sealed record VarApi
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -276,9 +276,10 @@ public record VarApi
 [JsonSerializable(typeof(ApiIndex))]
 internal sealed partial class SourceGenerationContext : JsonSerializerContext
 {
-    private static SourceGenerationContext? _indented;
+    private static readonly Lazy<SourceGenerationContext> _indented = new(
+        () => new SourceGenerationContext(
+            new JsonSerializerOptions(Default!.Options!) { WriteIndented = true }));
 
     /// <summary>Context configured for indented (pretty) output.</summary>
-    public static SourceGenerationContext Indented => _indented ??= new SourceGenerationContext(
-        new JsonSerializerOptions(Default.Options) { WriteIndented = true });
+    public static SourceGenerationContext Indented => _indented.Value;
 }

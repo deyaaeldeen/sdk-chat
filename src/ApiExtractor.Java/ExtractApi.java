@@ -113,9 +113,13 @@ public class ExtractApi {
         }
 
         Map<String, Integer> referencedBy = new HashMap<>();
-        for (Set<String> refs : references.values()) {
-            for (String target : refs) {
-                referencedBy.put(target, referencedBy.getOrDefault(target, 0) + 1);
+        for (Map.Entry<String, Set<String>> entry : references.entrySet()) {
+            String sourceName = entry.getKey();
+            for (String target : entry.getValue()) {
+                // Exclude self-references to avoid inflating reference counts
+                if (!target.equals(sourceName)) {
+                    referencedBy.put(target, referencedBy.getOrDefault(target, 0) + 1);
+                }
             }
         }
 
@@ -213,10 +217,13 @@ public class ExtractApi {
         Map<String, String> fieldTypeMap = buildFieldTypeMap(usageClasses, clientNames);
 
         // Find sample files
-        List<Path> javaFiles = Files.walk(samplesPath)
-            .filter(p -> p.toString().endsWith(".java"))
-            .filter(p -> !p.toString().contains("/target/") && !p.toString().contains("\\target\\"))
-            .collect(Collectors.toList());
+        List<Path> javaFiles;
+        try (var stream = Files.walk(samplesPath)) {
+            javaFiles = stream
+                .filter(p -> p.toString().endsWith(".java"))
+                .filter(p -> !p.toString().contains("/target/") && !p.toString().contains("\\target\\"))
+                .collect(Collectors.toList());
+        }
 
         List<Map<String, Object>> covered = new ArrayList<>();
         Set<String> seenOps = new HashSet<>();
@@ -629,15 +636,17 @@ public class ExtractApi {
                 }
             }
 
+            // Use token-boundary matching to avoid substring false positives
+            // (e.g., "Policy" matching inside "PolicyList")
             JsonArray methods = cls.getAsJsonArray("methods");
             if (methods != null) {
                 for (JsonElement mEl : methods) {
                     JsonObject m = mEl.getAsJsonObject();
-                    String sig = getString(m, "sig");
-                    String ret = getString(m, "ret");
-                    for (String typeName : allTypeNames) {
-                        if (sig.contains(typeName) || (!ret.isEmpty() && ret.contains(typeName))) {
-                            refs.add(typeName);
+                    Set<String> tokens = tokenizeIdentifiers(getString(m, "sig"));
+                    tokens.addAll(tokenizeIdentifiers(getString(m, "ret")));
+                    for (String token : tokens) {
+                        if (allTypeNames.contains(token)) {
+                            refs.add(token);
                         }
                     }
                 }
@@ -647,16 +656,39 @@ public class ExtractApi {
             if (fields != null) {
                 for (JsonElement fEl : fields) {
                     JsonObject f = fEl.getAsJsonObject();
-                    String type = getString(f, "type");
-                    for (String typeName : allTypeNames) {
-                        if (type.contains(typeName)) {
-                            refs.add(typeName);
+                    Set<String> tokens = tokenizeIdentifiers(getString(f, "type"));
+                    for (String token : tokens) {
+                        if (allTypeNames.contains(token)) {
+                            refs.add(token);
                         }
                     }
                 }
             }
 
             return refs;
+        }
+
+        /**
+         * Tokenizes a signature string into individual identifier tokens.
+         * Splits on non-identifier characters (anything that isn't a letter, digit, or underscore).
+         * This prevents substring false positives like "Policy" matching inside "PolicyList".
+         */
+        private static Set<String> tokenizeIdentifiers(String text) {
+            Set<String> tokens = new HashSet<>();
+            if (text == null || text.isEmpty()) return tokens;
+            int start = -1;
+            for (int i = 0; i <= text.length(); i++) {
+                boolean isIdChar = i < text.length() && (Character.isLetterOrDigit(text.charAt(i)) || text.charAt(i) == '_');
+                if (isIdChar) {
+                    if (start < 0) start = i;
+                } else {
+                    if (start >= 0) {
+                        tokens.add(text.substring(start, i));
+                        start = -1;
+                    }
+                }
+            }
+            return tokens;
         }
 
     static Map<String, Object> extractPackage(Path root) throws Exception {
@@ -673,26 +705,29 @@ public class ExtractApi {
         if (!rootStr.endsWith("/")) rootStr += "/";
         final String finalRootStr = rootStr;
 
-        List<Path> javaFiles = Files.walk(root)
-            .filter(p -> p.toString().endsWith(".java"))
-            .filter(p -> {
-                // Get path relative to root for filtering
-                String pathStr = p.toString().replace('\\', '/');
-                String relativePath = pathStr.startsWith(finalRootStr)
-                    ? pathStr.substring(finalRootStr.length())
-                    : pathStr;
-                // Skip test directories, build artifacts, and generated code
-                if (relativePath.startsWith("src/test/") || relativePath.contains("/src/test/")) return false;
-                if (relativePath.contains("/target/") || relativePath.startsWith("target/")) return false;
-                if (relativePath.contains("/build/") || relativePath.startsWith("build/")) return false;
-                if (relativePath.contains("/.gradle/") || relativePath.startsWith(".gradle/")) return false;
-                if (relativePath.contains("/bin/") || relativePath.startsWith("bin/")) return false;
-                if (relativePath.contains("/out/") || relativePath.startsWith("out/")) return false;
-                return true;
-            })
-            .filter(p -> !p.getFileName().toString().startsWith("package-info"))
-            .sorted()
-            .collect(Collectors.toList());
+        List<Path> javaFiles;
+        try (var stream = Files.walk(root)) {
+            javaFiles = stream
+                .filter(p -> p.toString().endsWith(".java"))
+                .filter(p -> {
+                    // Get path relative to root for filtering
+                    String pathStr = p.toString().replace('\\', '/');
+                    String relativePath = pathStr.startsWith(finalRootStr)
+                        ? pathStr.substring(finalRootStr.length())
+                        : pathStr;
+                    // Skip test directories, build artifacts, and generated code
+                    if (relativePath.startsWith("src/test/") || relativePath.contains("/src/test/")) return false;
+                    if (relativePath.contains("/target/") || relativePath.startsWith("target/")) return false;
+                    if (relativePath.contains("/build/") || relativePath.startsWith("build/")) return false;
+                    if (relativePath.contains("/.gradle/") || relativePath.startsWith(".gradle/")) return false;
+                    if (relativePath.contains("/bin/") || relativePath.startsWith("bin/")) return false;
+                    if (relativePath.contains("/out/") || relativePath.startsWith("out/")) return false;
+                    return true;
+                })
+                .filter(p -> !p.getFileName().toString().startsWith("package-info"))
+                .sorted()
+                .collect(Collectors.toList());
+        }
 
         ParserConfiguration config = new ParserConfiguration();
         // Use RAW language level to disable validators that use reflection (fails in GraalVM native-image)
@@ -854,7 +889,7 @@ public class ExtractApi {
     private static boolean isStdlibPackage(String pkgName) {
         if (pkgName == null || pkgName.isEmpty()) return true;
         for (String stdlib : JAVA_STDLIB_PACKAGES) {
-            if (pkgName.equals(stdlib) || pkgName.startsWith(stdlib + ".") || pkgName.startsWith(stdlib)) {
+            if (pkgName.equals(stdlib) || pkgName.startsWith(stdlib + ".")) {
                 return true;
             }
         }
@@ -1278,7 +1313,17 @@ public class ExtractApi {
         Path pom = root.resolve("pom.xml");
         if (Files.exists(pom)) {
             String content = Files.readString(pom);
-            int idx = content.indexOf("<artifactId>");
+            // Skip <parent> section to find the project's own <artifactId>
+            int searchFrom = 0;
+            int parentStart = content.indexOf("<parent>");
+            if (parentStart >= 0) {
+                int parentEnd = content.indexOf("</parent>", parentStart);
+                if (parentEnd >= 0) {
+                    // Search for <artifactId> after </parent>
+                    searchFrom = parentEnd + "</parent>".length();
+                }
+            }
+            int idx = content.indexOf("<artifactId>", searchFrom);
             if (idx > 0) {
                 int end = content.indexOf("</artifactId>", idx);
                 if (end > idx) {

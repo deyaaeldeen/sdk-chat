@@ -188,7 +188,7 @@ public sealed record ClassInfo
 }
 
 /// <summary>An interface declaration.</summary>
-public record InterfaceInfo
+public sealed record InterfaceInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -221,7 +221,7 @@ public record InterfaceInfo
 }
 
 /// <summary>An enum declaration.</summary>
-public record EnumInfo
+public sealed record EnumInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -236,7 +236,7 @@ public record EnumInfo
 }
 
 /// <summary>A type alias.</summary>
-public record TypeAliasInfo
+public sealed record TypeAliasInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -253,7 +253,7 @@ public record TypeAliasInfo
 }
 
 /// <summary>A function declaration.</summary>
-public record FunctionInfo
+public sealed record FunctionInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -283,7 +283,7 @@ public record FunctionInfo
 }
 
 /// <summary>A method declaration.</summary>
-public record MethodInfo
+public sealed record MethodInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -305,7 +305,7 @@ public record MethodInfo
 }
 
 /// <summary>A property declaration.</summary>
-public record PropertyInfo
+public sealed record PropertyInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
@@ -324,7 +324,7 @@ public record PropertyInfo
 }
 
 /// <summary>A constructor declaration.</summary>
-public record ConstructorInfo
+public sealed record ConstructorInfo
 {
     [JsonPropertyName("sig")]
     public string Sig { get; init; } = "";
@@ -336,9 +336,10 @@ public record ConstructorInfo
 [JsonSerializable(typeof(ApiIndex))]
 internal sealed partial class SourceGenerationContext : JsonSerializerContext
 {
-    private static SourceGenerationContext? _indented;
+    private static readonly Lazy<SourceGenerationContext> _indented = new(
+        () => new SourceGenerationContext(
+            new JsonSerializerOptions(Default!.Options!) { WriteIndented = true }));
 
     /// <summary>Context configured for indented (pretty) output.</summary>
-    public static SourceGenerationContext Indented => _indented ??= new SourceGenerationContext(
-        new JsonSerializerOptions(Default.Options) { WriteIndented = true });
+    public static SourceGenerationContext Indented => _indented.Value;
 }

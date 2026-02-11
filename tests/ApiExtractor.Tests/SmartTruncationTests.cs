@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using ApiExtractor.Contracts;
 using ApiExtractor.DotNet;
 using ApiExtractor.Go;
 using ApiExtractor.Java;
@@ -687,6 +688,554 @@ public class SmartTruncationTests
         Assert.Contains("truncated", javaResult);
         Assert.Contains("truncated", goResult);
         Assert.Contains("truncated", tsResult);
+    }
+
+    #endregion
+
+    #region FormatWithCoverage Budget Tests
+
+    [Fact]
+    public void Java_FormatWithCoverage_TruncatesWithMultipleClients()
+    {
+        var classes = Enumerable.Range(0, 4).Select(c =>
+            new Java.ClassInfo
+            {
+                Name = $"Client{c}",
+                EntryPoint = true,
+                Methods = Enumerable.Range(0, 10).Select(i =>
+                    new Java.MethodInfo { Name = $"method{i}", Sig = $"(String arg{i})", Ret = "void" }
+                ).ToList()
+            }).ToList();
+
+        var api = new Java.ApiIndex
+        {
+            Package = "com.test",
+            Packages = [new Java.PackageInfo { Name = "com.test", Classes = classes }]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations = classes.SelectMany(c => c.Methods!.Select(m =>
+                new UncoveredOperation { ClientType = c.Name, Operation = m.Name, Signature = $"{m.Name}(...)" }
+            )).ToList()
+        };
+
+        var fullResult = JavaFormatter.FormatWithCoverage(api, coverage, int.MaxValue);
+        var budget = fullResult.Length / 2;
+        var truncated = JavaFormatter.FormatWithCoverage(api, coverage, budget);
+
+        Assert.True(truncated.Length < fullResult.Length,
+            $"Truncated ({truncated.Length}) should be shorter than full ({fullResult.Length})");
+        Assert.Contains("truncated", truncated);
+    }
+
+    [Fact]
+    public void Go_FormatWithCoverage_TruncatesWithMultipleClients()
+    {
+        var structs = Enumerable.Range(0, 4).Select(c =>
+            new Go.StructApi
+            {
+                Name = $"Client{c}",
+                EntryPoint = true,
+                Methods = Enumerable.Range(0, 10).Select(i =>
+                    new Go.FuncApi { Name = $"Method{i}", Sig = $"(arg{i} string)", Ret = "error" }
+                ).ToList()
+            }).ToList();
+
+        var api = new Go.ApiIndex
+        {
+            Package = "testpkg",
+            Packages = [new Go.PackageApi { Name = "testpkg", Structs = structs }]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations = structs.SelectMany(s => s.Methods!.Select(m =>
+                new UncoveredOperation { ClientType = s.Name, Operation = m.Name, Signature = $"{m.Name}(...)" }
+            )).ToList()
+        };
+
+        var fullResult = GoFormatter.FormatWithCoverage(api, coverage, int.MaxValue);
+        var budget = fullResult.Length / 2;
+        var truncated = GoFormatter.FormatWithCoverage(api, coverage, budget);
+
+        Assert.True(truncated.Length < fullResult.Length,
+            $"Truncated ({truncated.Length}) should be shorter than full ({fullResult.Length})");
+        Assert.Contains("truncated", truncated);
+    }
+
+    [Fact]
+    public void TypeScript_FormatWithCoverage_TruncatesWithMultipleClients()
+    {
+        var classes = Enumerable.Range(0, 4).Select(c =>
+            new TypeScript.ClassInfo
+            {
+                Name = $"Client{c}",
+                EntryPoint = true,
+                Methods = Enumerable.Range(0, 10).Select(i =>
+                    new TypeScript.MethodInfo { Name = $"method{i}", Sig = $"(arg{i}: string)", Ret = "void" }
+                ).ToList()
+            }).ToList();
+
+        var api = new TypeScript.ApiIndex
+        {
+            Package = "@test/pkg",
+            Modules = [new TypeScript.ModuleInfo { Name = "index", Classes = classes }]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations = classes.SelectMany(c => c.Methods!.Select(m =>
+                new UncoveredOperation { ClientType = c.Name, Operation = m.Name, Signature = $"{m.Name}(...)" }
+            )).ToList()
+        };
+
+        var fullResult = TypeScriptFormatter.FormatWithCoverage(api, coverage, int.MaxValue);
+        var budget = fullResult.Length / 2;
+        var truncated = TypeScriptFormatter.FormatWithCoverage(api, coverage, budget);
+
+        Assert.True(truncated.Length < fullResult.Length,
+            $"Truncated ({truncated.Length}) should be shorter than full ({fullResult.Length})");
+        Assert.Contains("truncated", truncated);
+    }
+
+    #endregion
+
+    #region Java Interface Keyword Tests
+
+    [Fact]
+    public void Java_Format_InterfaceAndClassMixed_CorrectKeywords()
+    {
+        var iface = new Java.ClassInfo
+        {
+            Name = "ServiceInterface",
+            EntryPoint = true,
+            Methods = [new Java.MethodInfo { Name = "execute", Sig = "()", Ret = "void" }]
+        };
+
+        var cls = new Java.ClassInfo
+        {
+            Name = "ServiceImpl",
+            EntryPoint = true,
+            Methods = [new Java.MethodInfo { Name = "process", Sig = "()", Ret = "void" }]
+        };
+
+        var api = new Java.ApiIndex
+        {
+            Package = "com.test",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.test",
+                    Interfaces = [iface],
+                    Classes = [iface, cls]
+                }
+            ]
+        };
+
+        var result = JavaFormatter.Format(api);
+
+        Assert.Contains("interface ServiceInterface", result);
+        Assert.Contains("class ServiceImpl", result);
+    }
+
+    #endregion
+
+    #region TypeScript ExportPath Tests
+
+    [Fact]
+    public void TypeScript_Format_ExportPathWithoutDotSlash_NoException()
+    {
+        var api = new TypeScript.ApiIndex
+        {
+            Package = "@azure/test",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "ClientA",
+                            EntryPoint = true,
+                            ExportPath = ".",
+                            Methods = [new TypeScript.MethodInfo { Name = "execute", Sig = "()", Ret = "void" }]
+                        },
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "ClientB",
+                            EntryPoint = true,
+                            ExportPath = "subclient",
+                            Methods = [new TypeScript.MethodInfo { Name = "run", Sig = "()", Ret = "void" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var result = TypeScriptFormatter.Format(api);
+
+        Assert.Contains("@azure/test", result);
+        Assert.Contains("ClientA", result);
+        Assert.Contains("ClientB", result);
+        Assert.Contains("@azure/test/subclient", result);
+    }
+
+    [Fact]
+    public void TypeScript_Format_ExportPathWithDotSlash_StripsCorrectly()
+    {
+        var api = new TypeScript.ApiIndex
+        {
+            Package = "@azure/test",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "ClientA",
+                            EntryPoint = true,
+                            ExportPath = ".",
+                            Methods = [new TypeScript.MethodInfo { Name = "execute", Sig = "()", Ret = "void" }]
+                        },
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "ClientB",
+                            EntryPoint = true,
+                            ExportPath = "./models",
+                            Methods = [new TypeScript.MethodInfo { Name = "run", Sig = "()", Ret = "void" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var result = TypeScriptFormatter.Format(api);
+
+        Assert.Contains("@azure/test/models", result);
+        Assert.DoesNotContain("@azure/test/./models", result);
+    }
+
+    #endregion
+
+    #region Go Case Sensitivity Tests
+
+    [Fact]
+    public void Go_Format_CaseSensitiveTypeNames()
+    {
+        var api = new Go.ApiIndex
+        {
+            Package = "testpkg",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "testpkg",
+                    Structs =
+                    [
+                        new Go.StructApi
+                        {
+                            Name = "Client",
+                            EntryPoint = true,
+                            Methods = [new Go.FuncApi { Name = "Send", Sig = "()", Ret = "error" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var stubs = GoFormatter.Format(api);
+        Assert.Contains("Client", stubs);
+    }
+
+    #endregion
+
+    #region FormatWithCoverage Dependency Inclusion Tests
+
+    [Fact]
+    public void Java_FormatWithCoverage_IncludesDependencyModels()
+    {
+        var api = new Java.ApiIndex
+        {
+            Package = "com.test",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.test",
+                    Classes =
+                    [
+                        new Java.ClassInfo
+                        {
+                            Name = "BlobClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new Java.MethodInfo
+                                {
+                                    Name = "upload",
+                                    Sig = "(BlobUploadOptions options)",
+                                    Ret = "BlobResponse"
+                                }
+                            ]
+                        },
+                        new Java.ClassInfo
+                        {
+                            Name = "BlobUploadOptions",
+                            Fields = [new Java.FieldInfo { Name = "size", Type = "int" }]
+                        },
+                        new Java.ClassInfo
+                        {
+                            Name = "BlobResponse",
+                            Fields = [new Java.FieldInfo { Name = "etag", Type = "String" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "BlobClient", Operation = "upload", Signature = "upload(...)" }
+            ]
+        };
+
+        var result = JavaFormatter.FormatWithCoverage(api, coverage, 10000);
+
+        Assert.Contains("BlobClient", result);
+        Assert.Contains("BlobUploadOptions", result);
+        Assert.Contains("BlobResponse", result);
+    }
+
+    [Fact]
+    public void Go_FormatWithCoverage_IncludesDependencyModels()
+    {
+        var api = new Go.ApiIndex
+        {
+            Package = "testpkg",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "testpkg",
+                    Structs =
+                    [
+                        new Go.StructApi
+                        {
+                            Name = "BlobClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new Go.FuncApi
+                                {
+                                    Name = "Upload",
+                                    Sig = "(opts UploadOptions)",
+                                    Ret = "UploadResponse"
+                                }
+                            ]
+                        },
+                        new Go.StructApi
+                        {
+                            Name = "UploadOptions",
+                            Fields = [new Go.FieldApi { Name = "Size", Type = "int64" }]
+                        },
+                        new Go.StructApi
+                        {
+                            Name = "UploadResponse",
+                            Fields = [new Go.FieldApi { Name = "ETag", Type = "string" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "BlobClient", Operation = "Upload", Signature = "Upload(...)" }
+            ]
+        };
+
+        var result = GoFormatter.FormatWithCoverage(api, coverage, 10000);
+
+        Assert.Contains("BlobClient", result);
+        Assert.Contains("UploadOptions", result);
+        Assert.Contains("UploadResponse", result);
+    }
+
+    [Fact]
+    public void TypeScript_FormatWithCoverage_IncludesDependencyTypes()
+    {
+        var api = new TypeScript.ApiIndex
+        {
+            Package = "@test/storage",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "BlobClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new TypeScript.MethodInfo
+                                {
+                                    Name = "upload",
+                                    Sig = "(options: UploadOptions)",
+                                    Ret = "Promise<UploadResult>"
+                                }
+                            ]
+                        },
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "UploadOptions",
+                            Properties = [new TypeScript.PropertyInfo { Name = "size", Type = "number" }]
+                        }
+                    ],
+                    Interfaces =
+                    [
+                        new TypeScript.InterfaceInfo
+                        {
+                            Name = "UploadResult",
+                            Properties = [new TypeScript.PropertyInfo { Name = "etag", Type = "string" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "BlobClient", Operation = "upload", Signature = "upload(...)" }
+            ]
+        };
+
+        var result = TypeScriptFormatter.FormatWithCoverage(api, coverage, 10000);
+
+        Assert.Contains("BlobClient", result);
+        Assert.Contains("UploadOptions", result);
+        Assert.Contains("UploadResult", result);
+    }
+
+    #endregion
+
+    #region Format Includes Dependencies Tests
+
+    [Fact]
+    public void TypeScript_Format_IncludesClientDependencies()
+    {
+        var api = new TypeScript.ApiIndex
+        {
+            Package = "@test/sdk",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "MyClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new TypeScript.MethodInfo { Name = "getConfig", Sig = "()", Ret = "ClientConfig" }
+                            ]
+                        },
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "ClientConfig",
+                            Properties = [new TypeScript.PropertyInfo { Name = "timeout", Type = "number" }]
+                        }
+                    ],
+                    Interfaces =
+                    [
+                        new TypeScript.InterfaceInfo
+                        {
+                            Name = "ServiceOptions",
+                            Properties = [new TypeScript.PropertyInfo { Name = "retries", Type = "number" }]
+                        }
+                    ],
+                    Enums =
+                    [
+                        new TypeScript.EnumInfo { Name = "LogLevel", Values = ["Debug", "Info", "Error"] }
+                    ]
+                }
+            ]
+        };
+
+        var result = TypeScriptFormatter.Format(api);
+
+        Assert.Contains("MyClient", result);
+        Assert.Contains("ClientConfig", result);
+        Assert.Contains("ServiceOptions", result);
+        Assert.Contains("LogLevel", result);
+    }
+
+    [Fact]
+    public void Java_Format_IncludesClientDependencies()
+    {
+        var api = new Java.ApiIndex
+        {
+            Package = "com.test",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.test",
+                    Classes =
+                    [
+                        new Java.ClassInfo
+                        {
+                            Name = "MyClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new Java.MethodInfo { Name = "getConfig", Sig = "()", Ret = "ClientConfig" }
+                            ]
+                        },
+                        new Java.ClassInfo
+                        {
+                            Name = "ClientConfig",
+                            Fields = [new Java.FieldInfo { Name = "timeout", Type = "int" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var result = JavaFormatter.Format(api);
+
+        Assert.Contains("MyClient", result);
+        Assert.Contains("ClientConfig", result);
     }
 
     #endregion
