@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using ApiExtractor.Contracts;
 using ApiExtractor.DotNet;
 using Xunit;
 
@@ -354,6 +355,77 @@ public class UsageAnalyzerTests
         }
 
         return (tempDir, paths.ToArray());
+    }
+
+    #endregion
+
+    #region Regression: Shared UsageFormatter
+
+    [Fact]
+    public void UsageFormatter_MatchesAnalyzerFormat()
+    {
+        // The shared UsageFormatter.Format must produce identical output
+        // to what the per-analyzer Format used to produce.
+        var usage = new Contracts.UsageIndex
+        {
+            FileCount = 3,
+            CoveredOperations =
+            [
+                new() { ClientType = "ChatClient", Operation = "SendAsync", File = "s1.cs", Line = 5 }
+            ],
+            UncoveredOperations =
+            [
+                new() { ClientType = "ChatClient", Operation = "ListAsync", Signature = "() -> Task" }
+            ]
+        };
+
+        var fromAnalyzer = _analyzer.Format(usage);
+        var fromShared = UsageFormatter.Format(usage);
+
+        Assert.Equal(fromShared, fromAnalyzer);
+    }
+
+    [Fact]
+    public void UsageFormatter_EmptyIndex_ProducesMinimalOutput()
+    {
+        var usage = new Contracts.UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations = []
+        };
+
+        var result = UsageFormatter.Format(usage);
+
+        Assert.Contains("Analyzed 0 files", result);
+        Assert.DoesNotContain("COVERED OPERATIONS", result);
+        Assert.DoesNotContain("UNCOVERED OPERATIONS", result);
+    }
+
+    [Fact]
+    public void UsageFormatter_SortsOperationsCorrectly()
+    {
+        var usage = new Contracts.UsageIndex
+        {
+            FileCount = 2,
+            CoveredOperations =
+            [
+                new() { ClientType = "Zebra", Operation = "B", File = "f.cs", Line = 1 },
+                new() { ClientType = "Alpha", Operation = "Z", File = "f.cs", Line = 2 },
+                new() { ClientType = "Alpha", Operation = "A", File = "f.cs", Line = 3 }
+            ],
+            UncoveredOperations = []
+        };
+
+        var result = UsageFormatter.Format(usage);
+
+        // Alpha.A should come before Alpha.Z, and both before Zebra.B
+        var alphaA = result.IndexOf("Alpha.A", StringComparison.Ordinal);
+        var alphaZ = result.IndexOf("Alpha.Z", StringComparison.Ordinal);
+        var zebraB = result.IndexOf("Zebra.B", StringComparison.Ordinal);
+
+        Assert.True(alphaA < alphaZ, "Alpha.A should appear before Alpha.Z");
+        Assert.True(alphaZ < zebraB, "Alpha.Z should appear before Zebra.B");
     }
 
     #endregion

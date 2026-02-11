@@ -187,4 +187,80 @@ public class DotNetApiExtractorTests
         var genericType = types.FirstOrDefault(t => t.Name.Contains('<') || t.Name.Contains("Result", StringComparison.Ordinal));
         Assert.NotNull(genericType);
     }
+
+    #region Regression: ParseSemVerPrefix
+
+    [Theory]
+    [InlineData("1.0.0", 1, 0, 0)]
+    [InlineData("10.0.0", 10, 0, 0)]
+    [InlineData("2.1.3", 2, 1, 3)]
+    [InlineData("9.0.0-preview.1", 9, 0, 0)]
+    [InlineData("1.0.0-beta", 1, 0, 0)]
+    public void ParseSemVerPrefix_ParsesCorrectly(string input, int major, int minor, int build)
+    {
+        var result = CSharpApiExtractor.ParseSemVerPrefix(input);
+        Assert.Equal(new Version(major, minor, build), result);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-version")]
+    public void ParseSemVerPrefix_InvalidInput_ReturnsZero(string? input)
+    {
+        var result = CSharpApiExtractor.ParseSemVerPrefix(input);
+        Assert.Equal(new Version(0, 0), result);
+    }
+
+    [Fact]
+    public void ParseSemVerPrefix_SortsCorrectly_v10_After_v9()
+    {
+        // Regression: lexicographic sort put "9.0.0" after "10.0.0" because '9' > '1'
+        var versions = new[] { "9.0.0", "10.0.0", "1.2.3", "2.0.0-preview.1" };
+        var sorted = versions.OrderByDescending(v => CSharpApiExtractor.ParseSemVerPrefix(v)).ToList();
+
+        Assert.Equal("10.0.0", sorted[0]);
+        Assert.Equal("9.0.0", sorted[1]);
+        Assert.Equal("2.0.0-preview.1", sorted[2]);
+        Assert.Equal("1.2.3", sorted[3]);
+    }
+
+    #endregion
+
+    #region Regression: ContainsSegment Zero-Allocation
+
+    [Theory]
+    [InlineData("src/bin/Debug/foo.cs", "bin", true)]
+    [InlineData("src/obj/Release/foo.cs", "obj", true)]
+    [InlineData("bin/foo.cs", "bin", true)]
+    [InlineData("src\\bin\\Debug\\foo.cs", "bin", true)]
+    [InlineData("src/bin\\Debug/foo.cs", "bin", true)]
+    [InlineData("src\\bin/Debug\\foo.cs", "bin", true)]
+    [InlineData("bin\\foo.cs", "bin", true)]
+    [InlineData("src/binary/foo.cs", "bin", false)]
+    [InlineData("combine/foo.cs", "bin", false)]
+    [InlineData("src/cabin/foo.cs", "bin", false)]
+    [InlineData("robin/foo.cs", "bin", false)]
+    [InlineData("foo.cs", "bin", false)]
+    [InlineData("", "bin", false)]
+    public void ContainsSegment_MatchesBoundaries(string path, string segment, bool expected)
+    {
+        Assert.Equal(expected, CSharpApiExtractor.ContainsSegment(path, segment));
+    }
+
+    [Fact]
+    public void ContainsSegment_TrailingSegment_NotMatched()
+    {
+        // "bin" at the end with no trailing separator is NOT a directory segment
+        Assert.False(CSharpApiExtractor.ContainsSegment("src/bin", "bin"));
+    }
+
+    [Fact]
+    public void ContainsSegment_MiddleOfFilename_NotMatched()
+    {
+        // "obj" inside "objfoo" should not match
+        Assert.False(CSharpApiExtractor.ContainsSegment("src/objfoo/bar.cs", "obj"));
+    }
+
+    #endregion
 }

@@ -1239,4 +1239,163 @@ public class SmartTruncationTests
     }
 
     #endregion
+
+    #region Regression: PythonFormatter Docstring Placement
+
+    [Fact]
+    public void Python_PythonFormatter_DocstringAppearsInsideClassBody()
+    {
+        // Regression: docstring was emitted BEFORE the class declaration, generating invalid Python.
+        var api = new Python.ApiIndex(
+            Package: "test_package",
+            Modules: [new Python.ModuleInfo("test_module", [
+                new Python.ClassInfo
+                {
+                    Name = "MyClient",
+                    EntryPoint = true,
+                    Base = "BaseClient",
+                    Doc = "This is a client for something.",
+                    Methods = [new Python.MethodInfo("do_thing", "self", null, null, null, null)],
+                    Properties = null
+                }
+            ], null)]
+        );
+
+        var result = PythonFormatter.Format(api);
+
+        // The class declaration must come BEFORE the docstring
+        var classIdx = result.IndexOf("class MyClient(BaseClient):", StringComparison.Ordinal);
+        var docIdx = result.IndexOf("\"\"\"This is a client for something.\"\"\"", StringComparison.Ordinal);
+        Assert.True(classIdx >= 0, "class declaration not found in output");
+        Assert.True(docIdx >= 0, "docstring not found in output");
+        Assert.True(classIdx < docIdx,
+            $"class declaration (pos {classIdx}) must appear before docstring (pos {docIdx})");
+    }
+
+    [Fact]
+    public void Python_PythonFormatter_ClassWithoutDocstring_NoCrash()
+    {
+        var api = new Python.ApiIndex(
+            Package: "test_package",
+            Modules: [new Python.ModuleInfo("test_module", [
+                new Python.ClassInfo
+                {
+                    Name = "SimpleModel",
+                    Base = null,
+                    Doc = null,
+                    Methods = null,
+                    Properties = [new Python.PropertyInfo("value", "str", null)]
+                }
+            ], null)]
+        );
+
+        var result = PythonFormatter.Format(api);
+
+        Assert.Contains("class SimpleModel:", result);
+        Assert.DoesNotContain("\"\"\"", result);
+    }
+
+    #endregion
+
+    #region Regression: CSharpFormatter Namespace Mapping
+
+    [Fact]
+    public void DotNet_CSharpFormatter_MultipleNamespaces_TypesGroupedCorrectly()
+    {
+        // Regression: GetNamespace was O(n²) via linear scan; now uses pre-built map.
+        // Verify formatting still groups types by namespace correctly.
+        var api = new DotNet.ApiIndex
+        {
+            Package = "MultiNsPackage",
+            Namespaces =
+            [
+                new NamespaceInfo
+                {
+                    Name = "Namespace.One",
+                    Types =
+                    [
+                        new DotNet.TypeInfo
+                        {
+                            Name = "ClientA",
+                            Kind = "class",
+                            EntryPoint = true,
+                            Members = [new MemberInfo { Name = "RunAsync", Kind = "method", Signature = "() -> Task" }]
+                        }
+                    ]
+                },
+                new NamespaceInfo
+                {
+                    Name = "Namespace.Two",
+                    Types =
+                    [
+                        new DotNet.TypeInfo
+                        {
+                            Name = "ModelB",
+                            Kind = "class",
+                            Members = [new MemberInfo { Name = "Value", Kind = "property", Signature = "string" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var result = CSharpFormatter.Format(api);
+
+        // Both namespaces should appear
+        Assert.Contains("namespace Namespace.One", result);
+        Assert.Contains("namespace Namespace.Two", result);
+        // Types should be present
+        Assert.Contains("ClientA", result);
+        Assert.Contains("ModelB", result);
+    }
+
+    [Fact]
+    public void DotNet_CSharpFormatter_FormatWithCoverage_UsesNamespaceMapCorrectly()
+    {
+        // Ensures FormatWithCoverage (which also uses BuildNamespaceMap) groups types correctly.
+        var api = new DotNet.ApiIndex
+        {
+            Package = "CoverageNsPackage",
+            Namespaces =
+            [
+                new NamespaceInfo
+                {
+                    Name = "MyNamespace",
+                    Types =
+                    [
+                        new DotNet.TypeInfo
+                        {
+                            Name = "ChatClient",
+                            Kind = "class",
+                            EntryPoint = true,
+                            Members =
+                            [
+                                new MemberInfo { Name = "SendAsync", Kind = "method", Signature = "(string msg) -> Task" },
+                                new MemberInfo { Name = "ListAsync", Kind = "method", Signature = "() -> Task<List>" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var coverage = new Contracts.UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new() { ClientType = "ChatClient", Operation = "SendAsync", Signature = "(string msg) -> Task" },
+                new() { ClientType = "ChatClient", Operation = "ListAsync", Signature = "() -> Task<List>" }
+            ]
+        };
+
+        var result = CSharpFormatter.FormatWithCoverage(api, coverage, int.MaxValue);
+
+        Assert.Contains("namespace MyNamespace", result);
+        Assert.Contains("ChatClient", result);
+        Assert.Contains("UNCOVERED API", result);
+    }
+
+    #endregion
 }

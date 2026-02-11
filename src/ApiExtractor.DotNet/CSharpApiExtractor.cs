@@ -480,7 +480,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                         // Get the latest version
                         var versions = Directory.GetDirectories(packageBaseDir)
                             .Select(Path.GetFileName)
-                            .OrderByDescending(v => v)
+                            .OrderByDescending(v => ParseSemVerPrefix(v))
                             .FirstOrDefault();
                         if (versions != null)
                         {
@@ -592,6 +592,18 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
         // Fall back to any framework folder
         return Directory.GetDirectories(libDir).FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Parses a NuGet version string into a comparable <see cref="Version"/>, stripping pre-release suffixes.
+    /// Handles SemVer correctly (e.g., "10.0.0" sorts after "9.0.0", unlike lexicographic sort).
+    /// </summary>
+    internal static Version ParseSemVerPrefix(string? version)
+    {
+        if (string.IsNullOrEmpty(version)) return new Version(0, 0);
+        var dashIdx = version.IndexOf('-');
+        var versionPart = dashIdx >= 0 ? version[..dashIdx] : version;
+        return Version.TryParse(versionPart, out var v) ? v : new Version(0, 0);
     }
 
     #endregion
@@ -1121,12 +1133,27 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
     /// <summary>
     /// Returns true if the relative path contains a directory segment matching <paramref name="segment"/>.
-    /// Handles both / and \ separators and leading segments.
+    /// Zero-allocation: avoids per-call string interpolation by checking separator boundaries directly.
     /// </summary>
-    private static bool ContainsSegment(string relativePath, string segment)
+    internal static bool ContainsSegment(string relativePath, string segment)
     {
-        return relativePath.Contains($"/{segment}/", StringComparison.Ordinal) || relativePath.Contains($"\\{segment}\\", StringComparison.Ordinal)
-            || relativePath.StartsWith($"{segment}/", StringComparison.Ordinal) || relativePath.StartsWith($"{segment}\\", StringComparison.Ordinal)
-            || relativePath.Contains($"/{segment}\\", StringComparison.Ordinal) || relativePath.Contains($"\\{segment}/", StringComparison.Ordinal);
+        var path = relativePath.AsSpan();
+        var seg = segment.AsSpan();
+        int searchFrom = 0;
+        while (searchFrom <= path.Length - seg.Length)
+        {
+            var pos = path[searchFrom..].IndexOf(seg, StringComparison.Ordinal);
+            if (pos < 0) return false;
+            pos += searchFrom;
+
+            var beforeOk = pos == 0 || path[pos - 1] is '/' or '\\';
+            var afterPos = pos + seg.Length;
+            var afterOk = afterPos < path.Length && path[afterPos] is '/' or '\\';
+
+            if (beforeOk && afterOk) return true;
+            searchFrom = pos + 1;
+        }
+
+        return false;
     }
 }

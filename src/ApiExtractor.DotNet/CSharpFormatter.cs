@@ -58,6 +58,7 @@ public static class CSharpFormatter
         // Format only types that have uncovered operations
         var allTypes = index.GetAllTypes().ToList();
         var allTypeNames = allTypes.Select(t => t.Name.Split('<')[0]).ToHashSet();
+        var nsMap = BuildNamespaceMap(index);
 
         // Find types with uncovered operations and their dependencies
         var typesWithUncovered = allTypes
@@ -106,7 +107,7 @@ public static class CSharpFormatter
                 };
             }
 
-            var typeContent = FormatTypesWithNamespace(new[] { filteredType }, index);
+            var typeContent = FormatTypesWithNamespace(new[] { filteredType }, nsMap);
 
             if (currentLength + typeContent.Length > maxLength - 100 && includedTypes.Count > 0)
             {
@@ -144,7 +145,9 @@ public static class CSharpFormatter
             // First one wins - typically the more important one is defined first
             typesByName.TryAdd(t.Name, t);
         }
-        var typesByNamespace = allTypes.GroupBy(t => GetNamespace(t, index)).ToDictionary(g => g.Key, g => g.ToList());
+
+        // Pre-build type→namespace map for O(1) lookups
+        var nsMap = BuildNamespaceMap(index);
 
         // Prioritize types for inclusion
         var orderedTypes = GetPrioritizedTypes(allTypes, allTypeNames);
@@ -168,7 +171,7 @@ public static class CSharpFormatter
                     typesToAdd.Add(depType);
             }
 
-            var typeContent = FormatTypes(typesToAdd, GetNamespace(type, index));
+            var typeContent = FormatTypes(typesToAdd, GetNamespace(type, nsMap));
 
             // Check if we have room
             if (currentLength + typeContent.Length > maxLength - 100 && includedTypes.Count > 0)
@@ -238,13 +241,18 @@ public static class CSharpFormatter
             .ToList();
     }
 
-    private static string GetNamespace(TypeInfo type, ApiIndex index)
+    /// <summary>Pre-builds a type-name → namespace lookup for O(1) access.</summary>
+    private static Dictionary<string, string> BuildNamespaceMap(ApiIndex index)
     {
+        var map = new Dictionary<string, string>();
         foreach (var ns in index.Namespaces)
-            if (ns.Types.Contains(type))
-                return ns.Name;
-        return "";
+            foreach (var t in ns.Types)
+                map.TryAdd(t.Name, ns.Name);
+        return map;
     }
+
+    private static string GetNamespace(TypeInfo type, Dictionary<string, string> nsMap)
+        => nsMap.TryGetValue(type.Name, out var ns) ? ns : "";
 
     private static string FormatTypes(List<TypeInfo> types, string namespaceName)
     {
@@ -414,10 +422,10 @@ public static class CSharpFormatter
     /// <summary>
     /// Formats types with proper namespace wrapping.
     /// </summary>
-    private static string FormatTypesWithNamespace(IEnumerable<TypeInfo> types, ApiIndex index)
+    private static string FormatTypesWithNamespace(IEnumerable<TypeInfo> types, Dictionary<string, string> nsMap)
     {
         var sb = new StringBuilder();
-        var typesByNamespace = types.GroupBy(t => GetNamespace(t, index));
+        var typesByNamespace = types.GroupBy(t => GetNamespace(t, nsMap));
 
         foreach (var group in typesByNamespace)
         {

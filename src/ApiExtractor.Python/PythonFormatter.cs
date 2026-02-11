@@ -235,11 +235,11 @@ public static class PythonFormatter
 
     private static void FormatClass(StringBuilder sb, ClassInfo cls)
     {
-        if (!string.IsNullOrEmpty(cls.Doc))
-            sb.AppendLine($"    \"\"\"{cls.Doc}\"\"\"");
-
         var baseClass = !string.IsNullOrEmpty(cls.Base) ? $"({cls.Base})" : "";
         sb.AppendLine($"class {cls.Name}{baseClass}:");
+
+        if (!string.IsNullOrEmpty(cls.Doc))
+            sb.AppendLine($"    \"\"\"{cls.Doc}\"\"\"");
 
         var hasMembers = false;
 

@@ -67,15 +67,21 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         if (!IsAvailable())
             return ExtractorResult<ApiIndex>.CreateFailure(UnavailableReason ?? "Go not available");
 
+        using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
         try
         {
             var result = await ExtractAsync(rootPath, ct).ConfigureAwait(false);
-            return result != null
-                ? ExtractorResult<ApiIndex>.CreateSuccess(result)
-                : ExtractorResult<ApiIndex>.CreateFailure("No API surface extracted");
+            if (result != null)
+            {
+                ExtractorTelemetry.RecordResult(activity, true, result.Packages.Count);
+                return ExtractorResult<ApiIndex>.CreateSuccess(result);
+            }
+            ExtractorTelemetry.RecordResult(activity, false, error: "No API surface extracted");
+            return ExtractorResult<ApiIndex>.CreateFailure("No API surface extracted");
         }
         catch (Exception ex)
         {
+            ExtractorTelemetry.RecordResult(activity, false, error: ex.Message);
             return ExtractorResult<ApiIndex>.CreateFailure($"{ex.Message}\n{ex.StackTrace}");
         }
     }

@@ -18,6 +18,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ApiExtractor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
   </ItemGroup>
 

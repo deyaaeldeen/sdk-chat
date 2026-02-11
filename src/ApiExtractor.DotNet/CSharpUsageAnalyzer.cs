@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Diagnostics;
-using System.Text;
 using ApiExtractor.Contracts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -163,35 +162,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     }
 
     /// <inheritdoc />
-    public string Format(UsageIndex index)
-    {
-        var sb = new StringBuilder();
-
-        sb.AppendLine($"Analyzed {index.FileCount} files.");
-        sb.AppendLine();
-
-        if (index.CoveredOperations.Count > 0)
-        {
-            sb.AppendLine("COVERED OPERATIONS (already have examples):");
-            foreach (var op in index.CoveredOperations.OrderBy(o => o.ClientType).ThenBy(o => o.Operation))
-            {
-                sb.AppendLine($"  - {op.ClientType}.{op.Operation} ({op.File}:{op.Line})");
-            }
-            sb.AppendLine();
-        }
-
-        if (index.UncoveredOperations.Count > 0)
-        {
-            sb.AppendLine("UNCOVERED OPERATIONS (need examples):");
-            foreach (var op in index.UncoveredOperations.OrderBy(o => o.ClientType).ThenBy(o => o.Operation))
-            {
-                sb.AppendLine($"  - {op.ClientType}.{op.Operation}: {op.Signature}");
-            }
-            sb.AppendLine();
-        }
-
-        return sb.ToString();
-    }
+    public string Format(UsageIndex index) => UsageFormatter.Format(index);
 
     /// <summary>
     /// Builds a map of client type names to their method names.
