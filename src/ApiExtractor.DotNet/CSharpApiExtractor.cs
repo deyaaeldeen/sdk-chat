@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Xml;
 using System.Xml.Linq;
 using ApiExtractor.Contracts;
 using Microsoft.CodeAnalysis;
@@ -546,7 +547,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
         try
         {
-            var doc = XDocument.Load(csproj);
+            var doc = LoadXmlSecure(csproj);
             var packageRefs = doc.Descendants()
                 .Where(e => e.Name.LocalName == "PackageReference");
 
@@ -561,7 +562,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is XmlException or IOException)
         {
             Trace.TraceWarning("Failed to parse package references from '{0}': {1}", csproj, ex.Message);
         }
@@ -631,7 +632,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         {
             try
             {
-                var doc = XDocument.Load(csproj);
+                var doc = LoadXmlSecure(csproj);
 
                 var rootNs = ExtractCsprojProperty(doc, "RootNamespace");
                 if (!string.IsNullOrEmpty(rootNs))
@@ -645,7 +646,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 if (!string.IsNullOrEmpty(assemblyName))
                     entryPoints.Add(assemblyName);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is XmlException or IOException)
             {
                 Trace.TraceWarning("Failed to parse csproj '{0}': {1}", csproj, ex.Message);
             }
@@ -987,6 +988,20 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         return idx >= 0 ? name[..idx] : name;
     }
 
+    /// <summary>
+    /// Loads an XML document with DTD processing prohibited to prevent XXE attacks.
+    /// </summary>
+    private static XDocument LoadXmlSecure(string path)
+    {
+        var settings = new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null
+        };
+        using var reader = XmlReader.Create(path, settings);
+        return XDocument.Load(reader);
+    }
+
     private static string GetTypeKind(BaseTypeDeclarationSyntax type) => type switch
     {
         RecordDeclarationSyntax r when r.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword) => "record struct",
@@ -1063,6 +1078,31 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
                     (v.Initializer != null && v.Initializer.Value.ToString().Length < 30 ? $" = {v.Initializer.Value}" : ""),
                 Doc = GetXmlDoc(f)
             } : null,
+        FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.StaticKeyword) && f.Modifiers.Any(SyntaxKind.ReadOnlyKeyword) =>
+            f.Declaration.Variables.FirstOrDefault() is { } sv ? new MemberInfo
+            {
+                Name = sv.Identifier.Text,
+                Kind = "field",
+                Signature = $"static readonly {Simplify(f.Declaration.Type)} {sv.Identifier.Text}",
+                Doc = GetXmlDoc(f),
+                IsStatic = true
+            } : null,
+        OperatorDeclarationSyntax op => new MemberInfo
+        {
+            Name = $"operator {op.OperatorToken.Text}",
+            Kind = "operator",
+            Signature = $"static {Simplify(op.ReturnType)} operator {op.OperatorToken.Text}({FormatParams(op.ParameterList)})",
+            Doc = GetXmlDoc(op),
+            IsStatic = true
+        },
+        ConversionOperatorDeclarationSyntax conv => new MemberInfo
+        {
+            Name = $"{conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}",
+            Kind = "operator",
+            Signature = $"static {conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}({FormatParams(conv.ParameterList)})",
+            Doc = GetXmlDoc(conv),
+            IsStatic = true
+        },
         _ => null
     };
 

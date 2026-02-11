@@ -269,9 +269,6 @@ public static class PythonFormatter
 
     private static void FormatMethod(StringBuilder sb, MethodInfo method, string indent)
     {
-        if (!string.IsNullOrEmpty(method.Doc))
-            sb.AppendLine($"{indent}    \"\"\"{method.Doc}\"\"\"");
-
         List<string> decorators = [];
         if (method.IsClassMethod == true) decorators.Add("@classmethod");
         if (method.IsStaticMethod == true) decorators.Add("@staticmethod");
@@ -280,16 +277,21 @@ public static class PythonFormatter
             sb.AppendLine($"{indent}{dec}");
 
         var asyncPrefix = method.IsAsync == true ? "async " : "";
-        sb.AppendLine($"{indent}{asyncPrefix}def {method.Name}({method.Signature}): ...");
+        var retAnnotation = !string.IsNullOrEmpty(method.Ret) ? $" -> {method.Ret}" : "";
+        sb.AppendLine($"{indent}{asyncPrefix}def {method.Name}({method.Signature}){retAnnotation}: ...");
+
+        if (!string.IsNullOrEmpty(method.Doc))
+            sb.AppendLine($"{indent}    \"\"\"{method.Doc}\"\"\"");
     }
 
     private static void FormatFunction(StringBuilder sb, FunctionInfo func, string indent)
     {
-        if (!string.IsNullOrEmpty(func.Doc))
-            sb.AppendLine($"{indent}\"\"\"{func.Doc}\"\"\"");
-
         var asyncPrefix = func.IsAsync == true ? "async " : "";
-        sb.AppendLine($"{indent}{asyncPrefix}def {func.Name}({func.Signature}): ...");
+        var retAnnotation = !string.IsNullOrEmpty(func.Ret) ? $" -> {func.Ret}" : "";
+        sb.AppendLine($"{indent}{asyncPrefix}def {func.Name}({func.Signature}){retAnnotation}: ...");
+
+        if (!string.IsNullOrEmpty(func.Doc))
+            sb.AppendLine($"{indent}    \"\"\"{func.Doc}\"\"\"");
         sb.AppendLine();
     }
 }

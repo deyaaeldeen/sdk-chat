@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
-using ApiExtractor.Contracts;
 using ApiExtractor.Python;
 using Xunit;
 
@@ -227,7 +226,7 @@ public class PythonDeserializationTests
         }
         """;
 
-        var cls = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonClass);
+        var cls = JsonSerializer.Deserialize(json, RawPythonJsonContext.Default.RawPythonClass);
 
         Assert.NotNull(cls);
         Assert.Equal("ChatClient", cls!.Name);
@@ -247,7 +246,7 @@ public class PythonDeserializationTests
         }
         """;
 
-        var cls = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonClass);
+        var cls = JsonSerializer.Deserialize(json, RawPythonJsonContext.Default.RawPythonClass);
 
         Assert.NotNull(cls);
         Assert.Equal("azure.storage.blob._blob_client", cls!.ReExportedFrom);
@@ -263,7 +262,7 @@ public class PythonDeserializationTests
         }
         """;
 
-        var cls = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonClass);
+        var cls = JsonSerializer.Deserialize(json, RawPythonJsonContext.Default.RawPythonClass);
 
         Assert.NotNull(cls);
         Assert.Null(cls!.EntryPoint);
@@ -282,7 +281,7 @@ public class PythonDeserializationTests
         }
         """;
 
-        var func = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonFunction);
+        var func = JsonSerializer.Deserialize(json, RawPythonJsonContext.Default.RawPythonFunction);
 
         Assert.NotNull(func);
         Assert.True(func!.EntryPoint);
@@ -322,7 +321,7 @@ public class PythonDeserializationTests
         }
         """;
 
-        var raw = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonApiIndex);
+        var raw = JsonSerializer.Deserialize(json, RawPythonJsonContext.Default.RawPythonApiIndex);
 
         Assert.NotNull(raw);
         var cls = raw!.Modules![0].Classes![0];

@@ -12,6 +12,18 @@ namespace ApiExtractor.TypeScript;
 /// </summary>
 public static class TypeScriptFormatter
 {
+    /// <summary>
+    /// Builds a dictionary from items by key, keeping only the first item for each key
+    /// to safely handle duplicate names across modules.
+    /// </summary>
+    private static Dictionary<string, T> SafeToDictionary<T>(IEnumerable<T> items, Func<T, string> keySelector)
+    {
+        var dict = new Dictionary<string, T>();
+        foreach (var item in items)
+            dict.TryAdd(keySelector(item), item);
+        return dict;
+    }
+
     public static string Format(ApiIndex index) => Format(index, int.MaxValue);
 
     /// <summary>
@@ -60,8 +72,8 @@ public static class TypeScriptFormatter
         HashSet<string> allTypeNames = [];
         foreach (var c in allClasses) allTypeNames.Add(c.Name);
         foreach (var i in allInterfaces) allTypeNames.Add(i.Name);
-        var allClassesByName = allClasses.ToDictionary(c => c.Name);
-        var allIfacesByName = allInterfaces.ToDictionary(i => i.Name);
+        var allClassesByName = SafeToDictionary(allClasses, c => c.Name);
+        var allIfacesByName = SafeToDictionary(allInterfaces, i => i.Name);
 
         HashSet<string> includedClasses = [];
 
@@ -154,9 +166,9 @@ public static class TypeScriptFormatter
         foreach (var t in allTypes) allTypeNames.Add(t.Name);
 
         // Pre-build dictionaries for O(1) lookups instead of O(n) FirstOrDefault
-        var interfacesByName = allInterfaces.ToDictionary(i => i.Name);
-        var enumsByName = allEnums.ToDictionary(e => e.Name);
-        var typesByName = allTypes.ToDictionary(t => t.Name);
+        var interfacesByName = SafeToDictionary(allInterfaces, i => i.Name);
+        var enumsByName = SafeToDictionary(allEnums, e => e.Name);
+        var typesByName = SafeToDictionary(allTypes, t => t.Name);
 
         // Build dependency graph for classes
         var classDeps = new Dictionary<string, HashSet<string>>();
@@ -435,7 +447,7 @@ public static class TypeScriptFormatter
         HashSet<string> added = [];
 
         // Pre-build dictionary for O(1) lookups
-        var classesByName = classes.ToDictionary(c => c.Name);
+        var classesByName = SafeToDictionary(classes, c => c.Name);
 
         // Add client classes first (priority 0)
         var clientClasses = classes.Where(c => c.IsClientType).OrderBy(c => c.Name).ToList();

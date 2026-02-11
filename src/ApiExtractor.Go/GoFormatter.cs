@@ -197,6 +197,23 @@ public static class GoFormatter
                 sb.AppendLine();
             }
 
+            // Variables (package-level exported vars)
+            if (pkg.Variables?.Count > 0)
+            {
+                sb.AppendLine("var (");
+                foreach (var v in pkg.Variables.Take(20))
+                {
+                    if (!string.IsNullOrEmpty(v.Doc))
+                        sb.AppendLine($"    // {v.Doc}");
+                    var type = !string.IsNullOrEmpty(v.Type) ? $" {v.Type}" : "";
+                    sb.AppendLine($"    {v.Name}{type}");
+                }
+                if (pkg.Variables.Count > 20)
+                    sb.AppendLine($"    // ... {pkg.Variables.Count - 20} more variables");
+                sb.AppendLine(")");
+                sb.AppendLine();
+            }
+
             foreach (var iface in pkg.Interfaces ?? [])
             {
                 if (!string.IsNullOrEmpty(iface.Doc))
@@ -343,9 +360,16 @@ public static class GoFormatter
         // Methods
         foreach (var m in s.Methods ?? [])
         {
-            var recv = !string.IsNullOrEmpty(m.Receiver) ? m.Receiver : $"*{s.Name}";
             var ret = !string.IsNullOrEmpty(m.Ret) ? $" {m.Ret}" : "";
-            sb.AppendLine($"func ({recv}) {m.Name}({m.Sig}){ret}");
+            if (!string.IsNullOrEmpty(m.Receiver))
+            {
+                sb.AppendLine($"func ({m.Receiver}) {m.Name}({m.Sig}){ret}");
+            }
+            else
+            {
+                // Constructor function — render as package-level func, not as method with fake receiver
+                sb.AppendLine($"func {m.Name}({m.Sig}){ret}");
+            }
         }
         sb.AppendLine();
     }

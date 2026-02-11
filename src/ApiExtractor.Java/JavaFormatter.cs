@@ -53,12 +53,14 @@ public static class JavaFormatter
         sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
         sb.AppendLine();
 
-        var allClasses = index.GetAllClasses().ToList();
+        var allClasses = index.GetAllTypes().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
         // Build set of all type names for dependency tracking
         var allTypeNames = allClasses.Select(c => c.Name.Split('<')[0]).ToHashSet();
-        var allClassesByName = allClasses.ToDictionary(c => c.Name.Split('<')[0]);
+        var allClassesByName = new Dictionary<string, ClassInfo>();
+        foreach (var c in allClasses)
+            allClassesByName.TryAdd(c.Name.Split('<')[0], c);
 
         HashSet<string> includedClasses = [];
 
@@ -126,11 +128,13 @@ public static class JavaFormatter
         sb.AppendLine();
 
         // Build type lookup
-        var allClasses = api.GetAllClasses().ToList();
+        var allClasses = api.GetAllTypes().ToList();
         var allTypeNames = allClasses.Select(c => c.Name.Split('<')[0]).ToHashSet();
 
-        // Pre-build dictionary for O(1) lookups instead of O(n) FirstOrDefault
-        var classesByName = allClasses.ToDictionary(c => c.Name.Split('<')[0]);
+        // Pre-build dictionary for O(1) lookups — first-wins for duplicate names
+        var classesByName = new Dictionary<string, ClassInfo>();
+        foreach (var c in allClasses)
+            classesByName.TryAdd(c.Name.Split('<')[0], c);
 
         // Get client dependencies first
         var clients = allClasses.Where(c => c.IsClientType).ToList();
@@ -241,13 +245,11 @@ public static class JavaFormatter
     private static string FormatTypesToString(List<ClassInfo> types, bool isInterface, IReadOnlyList<ClassInfo>? pkgInterfaces = null)
     {
         var sb = new StringBuilder();
-        // Determine keyword per-type instead of per-batch to avoid
-        // labeling classes as interfaces when they're mixed in the same batch
+        // Use a HashSet for O(1) interface membership checks instead of O(n) IReadOnlyList.Contains
+        var ifaceSet = pkgInterfaces != null ? new HashSet<ClassInfo>(pkgInterfaces) : null;
         foreach (var type in types)
         {
-            var keyword = pkgInterfaces?.Contains(type) == true ? "interface"
-                : isInterface ? "interface"
-                : "class";
+            var keyword = ifaceSet?.Contains(type) == true ? "interface" : "class";
             FormatType(sb, type, keyword);
         }
         return sb.ToString();

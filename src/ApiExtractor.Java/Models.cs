@@ -25,6 +25,14 @@ public sealed record ApiIndex : IApiIndex
     public IEnumerable<ClassInfo> GetAllClasses() =>
         Packages.SelectMany(p => p.Classes ?? []);
 
+    /// <summary>Gets all types (classes + interfaces) in the API.</summary>
+    public IEnumerable<ClassInfo> GetAllTypes() =>
+        Packages.SelectMany(p => (p.Classes ?? []).Concat(p.Interfaces ?? []));
+
+    /// <summary>Gets all interfaces in the API.</summary>
+    public IEnumerable<ClassInfo> GetAllInterfaces() =>
+        Packages.SelectMany(p => p.Interfaces ?? []);
+
     /// <summary>Gets client classes (entry points for SDK operations).</summary>
     public IEnumerable<ClassInfo> GetClientClasses() =>
         GetAllClasses().Where(c => c.IsClientType);

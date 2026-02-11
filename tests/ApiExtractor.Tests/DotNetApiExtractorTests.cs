@@ -397,4 +397,54 @@ public class DotNetApiExtractorTests
     }
 
     #endregion
+
+    #region Regression: Operator Overloads
+
+    [Fact]
+    public async Task Extract_FindsOperatorOverloads()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var money = types.FirstOrDefault(t => t.Name == "Money");
+        Assert.NotNull(money);
+        Assert.NotNull(money.Members);
+        var operators = money.Members.Where(m => m.Kind == "operator").ToList();
+        Assert.Contains(operators, m => m.Name == "operator +" && m.Signature!.Contains("operator +"));
+        Assert.Contains(operators, m => m.Name == "operator -");
+        Assert.Contains(operators, m => m.Name == "operator ==");
+        Assert.Contains(operators, m => m.Name == "operator !=");
+    }
+
+    [Fact]
+    public async Task Extract_FindsConversionOperators()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var money = types.FirstOrDefault(t => t.Name == "Money");
+        Assert.NotNull(money);
+        Assert.NotNull(money.Members);
+        var operators = money.Members.Where(m => m.Kind == "operator").ToList();
+        Assert.Contains(operators, m => m.Name.Contains("implicit") && m.Signature!.Contains("implicit operator"));
+        Assert.Contains(operators, m => m.Name.Contains("explicit") && m.Signature!.Contains("explicit operator"));
+    }
+
+    #endregion
+
+    #region Regression: Static Readonly Fields
+
+    [Fact]
+    public async Task Extract_FindsStaticReadonlyFields()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var advService = types.FirstOrDefault(t => t.Name == "AdvancedService");
+        Assert.NotNull(advService);
+        Assert.NotNull(advService.Members);
+        var field = advService.Members.FirstOrDefault(m => m.Name == "DefaultEndpoint" && m.Kind == "field");
+        Assert.NotNull(field);
+        Assert.True(field.IsStatic);
+        Assert.Contains("static readonly", field.Signature);
+    }
+
+    #endregion
 }

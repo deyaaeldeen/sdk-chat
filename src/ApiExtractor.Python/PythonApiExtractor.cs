@@ -173,7 +173,8 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                     mt.Doc,
                     mt.Async,
                     mt.Classmethod,
-                    mt.Staticmethod
+                    mt.Staticmethod,
+                    mt.Ret
                 )).ToList(),
                 Properties = c.Properties?.Select(p => new PropertyInfo(p.Name ?? "", p.Type, p.Doc)).ToList()
             }).ToList(),
@@ -184,14 +185,44 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 ReExportedFrom = f.ReExportedFrom,
                 Signature = f.Sig ?? "",
                 Doc = f.Doc,
+                Ret = f.Ret,
                 IsAsync = f.Async
             }).ToList()
         )).ToList() ?? [];
 
-        return new ApiIndex(raw.Package ?? "", modules);
+        var dependencies = raw.Dependencies?.Select(d => new DependencyInfo
+        {
+            Package = d.Package ?? "",
+            Classes = d.Classes?.Select(c => new ClassInfo
+            {
+                Name = c.Name ?? "",
+                Base = c.Base,
+                Doc = c.Doc,
+                Methods = c.Methods?.Select(mt => new MethodInfo(
+                    mt.Name ?? "",
+                    mt.Sig ?? "",
+                    mt.Doc,
+                    mt.Async,
+                    mt.Classmethod,
+                    mt.Staticmethod,
+                    mt.Ret
+                )).ToList(),
+                Properties = c.Properties?.Select(p => new PropertyInfo(p.Name ?? "", p.Type, p.Doc)).ToList()
+            }).ToList(),
+            Functions = d.Functions?.Select(f => new FunctionInfo
+            {
+                Name = f.Name ?? "",
+                Signature = f.Sig ?? "",
+                Doc = f.Doc,
+                Ret = f.Ret,
+                IsAsync = f.Async
+            }).ToList()
+        }).ToList();
+
+        return new ApiIndex(raw.Package ?? "", modules, dependencies);
     }
 
     // AOT-safe deserialization using source-generated context
     private static RawPythonApiIndex? DeserializeRaw(string json) =>
-        JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonApiIndex);
+        JsonSerializer.Deserialize(json, RawPythonJsonContext.Default.RawPythonApiIndex);
 }

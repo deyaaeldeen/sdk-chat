@@ -275,6 +275,9 @@ public class AdvancedService
     /// <summary>Constant A.</summary>
     public const int MaxRetries = 5, DefaultTimeout = 30;
 
+    /// <summary>The default endpoint.</summary>
+    public static readonly Uri DefaultEndpoint = new("https://example.com");
+
     /// <summary>Raised when the service state changes.</summary>
     public event EventHandler? StateChanged;
 
@@ -289,4 +292,50 @@ public class AdvancedService
         /// <summary>Whether to enable logging.</summary>
         public bool EnableLogging { get; set; }
     }
+}
+
+/// <summary>
+/// A type with operator overloads for testing operator extraction.
+/// </summary>
+public readonly struct Money
+{
+    /// <summary>The amount.</summary>
+    public decimal Amount { get; init; }
+
+    /// <summary>The currency code.</summary>
+    public string Currency { get; init; }
+
+    /// <summary>Creates a new Money value.</summary>
+    public Money(decimal amount, string currency)
+    {
+        Amount = amount;
+        Currency = currency;
+    }
+
+    /// <summary>Adds two money values.</summary>
+    public static Money operator +(Money left, Money right) =>
+        new(left.Amount + right.Amount, left.Currency);
+
+    /// <summary>Subtracts two money values.</summary>
+    public static Money operator -(Money left, Money right) =>
+        new(left.Amount - right.Amount, left.Currency);
+
+    /// <summary>Checks equality.</summary>
+    public static bool operator ==(Money left, Money right) =>
+        left.Amount == right.Amount && left.Currency == right.Currency;
+
+    /// <summary>Checks inequality.</summary>
+    public static bool operator !=(Money left, Money right) => !(left == right);
+
+    /// <summary>Converts from decimal.</summary>
+    public static implicit operator Money(decimal amount) => new(amount, "USD");
+
+    /// <summary>Converts to decimal.</summary>
+    public static explicit operator decimal(Money money) => money.Amount;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is Money m && this == m;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(Amount, Currency);
 }
