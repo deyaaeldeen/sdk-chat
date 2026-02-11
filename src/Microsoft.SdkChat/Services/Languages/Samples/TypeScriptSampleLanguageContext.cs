@@ -12,9 +12,8 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
 {
     private readonly TypeScriptUsageAnalyzer _usageAnalyzer = new();
-
-    private ApiIndex? _cachedApiIndex;
-    private string? _cachedSourcePath;
+    private readonly ExtractionCache<ApiIndex> _cache = new(
+        (path, ct) => new TypeScriptApiExtractor().ExtractAsync(path, ct), [".ts"]);
 
     public TypeScriptSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -128,18 +127,10 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
 
     private async Task<ApiIndex?> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        var normalizedPath = Path.GetFullPath(sourcePath);
-
-        if (_cachedApiIndex != null && _cachedSourcePath == normalizedPath)
-            return _cachedApiIndex;
-
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("typescript", normalizedPath);
+        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("typescript", sourcePath);
         try
         {
-            var extractor = new TypeScriptApiExtractor();
-            _cachedApiIndex = await extractor.ExtractAsync(normalizedPath, ct);
-            _cachedSourcePath = normalizedPath;
-            return _cachedApiIndex;
+            return await _cache.ExtractAsync(sourcePath, ct);
         }
         catch (Exception ex)
         {

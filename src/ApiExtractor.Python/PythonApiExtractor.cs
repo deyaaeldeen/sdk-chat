@@ -16,9 +16,16 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         AppContext.BaseDirectory,
         "extract_api.py");
 
-    private static readonly string[] PythonCandidates = { "python3", "python" };
+    /// <summary>Shared availability configuration for all Python extractor components.</summary>
+    internal static readonly ExtractorConfig SharedConfig = new()
+    {
+        Language = "python",
+        NativeBinaryName = "python_extractor",
+        RuntimeToolName = "python",
+        RuntimeCandidates = ["python3", "python"]
+    };
 
-    private ExtractorAvailabilityResult? _availability;
+    private readonly ExtractorAvailabilityProvider _availability = new(SharedConfig);
 
     /// <inheritdoc />
     public string Language => "python";
@@ -27,32 +34,18 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     /// Warning message from tool resolution (if any).
     /// Check this after calling IsAvailable() for non-fatal issues.
     /// </summary>
-    public string? Warning => GetAvailability().Warning;
+    public string? Warning => _availability.Warning;
 
     /// <summary>
     /// Gets the current execution mode (NativeBinary or RuntimeInterpreter).
     /// </summary>
-    public ExtractorMode Mode => GetAvailability().Mode;
+    public ExtractorMode Mode => _availability.Mode;
 
     /// <inheritdoc />
-    public bool IsAvailable() => GetAvailability().IsAvailable;
+    public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
-    public string? UnavailableReason => GetAvailability().UnavailableReason;
-
-    /// <summary>
-    /// Gets detailed availability information with caching.
-    /// </summary>
-    private ExtractorAvailabilityResult GetAvailability()
-    {
-        return _availability ??= ExtractorAvailability.Check(
-            language: "python",
-            nativeBinaryName: "python_extractor",
-            runtimeToolName: "python",
-            runtimeCandidates: PythonCandidates,
-            nativeValidationArgs: "--help",
-            runtimeValidationArgs: "--version");
-    }
+    public string? UnavailableReason => _availability.UnavailableReason;
 
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
@@ -95,7 +88,7 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
         var startTime = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        var availability = GetAvailability();
+        var availability = _availability.GetAvailability();
         ProcessResult result;
 
         if (availability.Mode == ExtractorMode.NativeBinary)
@@ -146,6 +139,11 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         }
 
         // Parse JSON output
+        if (result.OutputTruncated)
+            throw new InvalidOperationException(
+                "Python extractor output was truncated (exceeded output size limit). " +
+                "The target package may be too large for extraction.");
+
         var raw = DeserializeRaw(result.StandardOutput)
             ?? throw new InvalidOperationException("Failed to parse Python extractor output");
 

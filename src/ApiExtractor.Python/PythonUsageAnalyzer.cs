@@ -16,9 +16,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         AppContext.BaseDirectory,
         "extract_api.py");
 
-    private static readonly string[] PythonCandidates = { "python3", "python" };
-
-    private ExtractorAvailabilityResult? _availability;
+    private readonly ExtractorAvailabilityProvider _availability = new(PythonApiExtractor.SharedConfig);
 
     /// <inheritdoc />
     public string Language => "python";
@@ -26,7 +24,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <summary>
     /// Checks if Python is available to run the usage analyzer.
     /// </summary>
-    public bool IsAvailable() => GetAvailability().IsAvailable;
+    public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
@@ -42,7 +40,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!clientClasses.Any())
             return new UsageIndex { FileCount = 0 };
 
-        var availability = GetAvailability();
+        var availability = _availability.GetAvailability();
         if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
@@ -92,17 +90,6 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <inheritdoc />
     public string Format(UsageIndex index) => UsageFormatter.Format(index);
 
-    private ExtractorAvailabilityResult GetAvailability()
-    {
-        return _availability ??= ExtractorAvailability.Check(
-            language: "python",
-            nativeBinaryName: "python_extractor",
-            runtimeToolName: "python",
-            runtimeCandidates: PythonCandidates,
-            nativeValidationArgs: "--help",
-            runtimeValidationArgs: "--version");
-    }
-
     private static async Task<string?> AnalyzeUsageAsync(
         ExtractorAvailabilityResult availability,
         string apiJsonPath,
@@ -117,7 +104,15 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
-            return result.Success ? result.StandardOutput : null;
+            if (!result.Success)
+            {
+                Console.Error.WriteLine(result.TimedOut
+                    ? $"Python usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"Python usage analyzer: failed (exit {result.ExitCode}): {result.StandardError}");
+                return null;
+            }
+
+            return result.StandardOutput;
         }
 
         if (availability.Mode == ExtractorMode.Docker)
@@ -150,7 +145,15 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             cancellationToken: ct
         ).ConfigureAwait(false);
 
-        return runtimeResult.Success ? runtimeResult.StandardOutput : null;
+        if (!runtimeResult.Success)
+        {
+            Console.Error.WriteLine(runtimeResult.TimedOut
+                ? $"Python usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Python usage analyzer: failed (exit {runtimeResult.ExitCode}): {runtimeResult.StandardError}");
+            return null;
+        }
+
+        return runtimeResult.StandardOutput;
     }
 
     private static string GetScriptPath()

@@ -11,10 +11,18 @@ namespace ApiExtractor.TypeScript;
 /// </summary>
 public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
 {
-    private static readonly string[] NodeCandidates = { "node" };
     private static readonly SemaphoreSlim NpmInstallLock = new(1, 1);
 
-    private ExtractorAvailabilityResult? _availability;
+    /// <summary>Shared availability configuration for all TypeScript extractor components.</summary>
+    internal static readonly ExtractorConfig SharedConfig = new()
+    {
+        Language = "typescript",
+        NativeBinaryName = "ts_extractor",
+        RuntimeToolName = "node",
+        RuntimeCandidates = ["node"]
+    };
+
+    private readonly ExtractorAvailabilityProvider _availability = new(SharedConfig);
 
     /// <inheritdoc />
     public string Language => "typescript";
@@ -22,32 +30,18 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// <summary>
     /// Warning message from tool resolution (if any).
     /// </summary>
-    public string? Warning => GetAvailability().Warning;
+    public string? Warning => _availability.Warning;
 
     /// <summary>
     /// Gets the current execution mode (NativeBinary or RuntimeInterpreter).
     /// </summary>
-    public ExtractorMode Mode => GetAvailability().Mode;
+    public ExtractorMode Mode => _availability.Mode;
 
     /// <inheritdoc />
-    public bool IsAvailable() => GetAvailability().IsAvailable;
+    public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
-    public string? UnavailableReason => GetAvailability().UnavailableReason;
-
-    /// <summary>
-    /// Gets detailed availability information with caching.
-    /// </summary>
-    private ExtractorAvailabilityResult GetAvailability()
-    {
-        return _availability ??= ExtractorAvailability.Check(
-            language: "typescript",
-            nativeBinaryName: "ts_extractor",
-            runtimeToolName: "node",
-            runtimeCandidates: NodeCandidates,
-            nativeValidationArgs: "--help",
-            runtimeValidationArgs: "--version");
-    }
+    public string? UnavailableReason => _availability.UnavailableReason;
 
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
@@ -104,6 +98,11 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         if (string.IsNullOrWhiteSpace(result.StandardOutput))
             return (null, warnings);
 
+        if (result.OutputTruncated)
+            throw new InvalidOperationException(
+                "TypeScript extractor output was truncated (exceeded output size limit). " +
+                "The target package may be too large for extraction.");
+
         return (JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex), warnings);
     }
 
@@ -128,7 +127,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     private async Task<ProcessResult> RunExtractorAsync(string outputFlag, string rootPath, CancellationToken ct)
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
-        var availability = GetAvailability();
+        var availability = _availability.GetAvailability();
 
         if (availability.Mode == ExtractorMode.NativeBinary)
         {
@@ -179,11 +178,6 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         await EnsureDependenciesAsync(scriptDir, ct).ConfigureAwait(false);
 
         var scriptPath = Path.Combine(scriptDir, "dist", "extract_api.js");
-        if (!File.Exists(scriptPath))
-        {
-            // Fallback to mjs for backwards compatibility
-            scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
-        }
 
         var nodeResult = await ProcessSandbox.ExecuteAsync(
             availability.ExecutablePath!,
@@ -245,18 +239,13 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     {
         // SECURITY: Only load scripts from assembly directory - no path traversal allowed
         var assemblyDir = AppContext.BaseDirectory;
-        var scriptPath = Path.Combine(assemblyDir, "extract_api.mjs");
-
-        if (File.Exists(scriptPath))
-            return assemblyDir;
-
-        // Also check for compiled dist version
         var distPath = Path.Combine(assemblyDir, "dist", "extract_api.js");
+
         if (File.Exists(distPath))
             return assemblyDir;
 
         throw new FileNotFoundException(
-            $"Corrupt installation: extract_api.mjs not found at {scriptPath}. " +
+            $"Corrupt installation: dist/extract_api.js not found at {distPath}. " +
             "Reinstall the application to resolve this issue.");
     }
 }

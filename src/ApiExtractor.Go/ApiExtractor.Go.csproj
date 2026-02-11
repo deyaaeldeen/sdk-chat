@@ -26,6 +26,10 @@
     <ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ApiExtractor.Tests" />
+  </ItemGroup>
+
   <!-- Determine executable suffix based on OS -->
   <PropertyGroup>
     <ExeSuffix Condition="$([MSBuild]::IsOSPlatform('Windows'))">.exe</ExeSuffix>

@@ -12,9 +12,7 @@ namespace ApiExtractor.Java;
 /// </summary>
 public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 {
-    private static readonly string[] JBangCandidates = { "jbang" };
-
-    private ExtractorAvailabilityResult? _availability;
+    private readonly ExtractorAvailabilityProvider _availability = new(JavaApiExtractor.SharedConfig);
 
     /// <inheritdoc />
     public string Language => "java";
@@ -22,7 +20,7 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <summary>
     /// Checks if JBang is available to run the usage analyzer.
     /// </summary>
-    public bool IsAvailable() => GetAvailability().IsAvailable;
+    public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
@@ -38,7 +36,7 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!clientClasses.Any())
             return new UsageIndex { FileCount = 0 };
 
-        var availability = GetAvailability();
+        var availability = _availability.GetAvailability();
         if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
@@ -88,17 +86,6 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <inheritdoc />
     public string Format(UsageIndex index) => UsageFormatter.Format(index);
 
-    private ExtractorAvailabilityResult GetAvailability()
-    {
-        return _availability ??= ExtractorAvailability.Check(
-            language: "java",
-            nativeBinaryName: "java_extractor",
-            runtimeToolName: "jbang",
-            runtimeCandidates: JBangCandidates,
-            nativeValidationArgs: "--help",
-            runtimeValidationArgs: "--version");
-    }
-
     private static string GetScriptDir() => AppContext.BaseDirectory;
 
     private static async Task<string?> AnalyzeUsageAsync(
@@ -115,7 +102,15 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
-            return result.Success ? result.StandardOutput : null;
+            if (!result.Success)
+            {
+                Console.Error.WriteLine(result.TimedOut
+                    ? $"Java usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"Java usage analyzer: failed (exit {result.ExitCode}): {result.StandardError}");
+                return null;
+            }
+
+            return result.StandardOutput;
         }
 
         if (availability.Mode == ExtractorMode.Docker)
@@ -151,7 +146,15 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             cancellationToken: ct
         ).ConfigureAwait(false);
 
-        return runtimeResult.Success ? runtimeResult.StandardOutput : null;
+        if (!runtimeResult.Success)
+        {
+            Console.Error.WriteLine(runtimeResult.TimedOut
+                ? $"Java usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Java usage analyzer: failed (exit {runtimeResult.ExitCode}): {runtimeResult.StandardError}");
+            return null;
+        }
+
+        return runtimeResult.StandardOutput;
     }
 
     // AOT-safe deserialization using source-generated context

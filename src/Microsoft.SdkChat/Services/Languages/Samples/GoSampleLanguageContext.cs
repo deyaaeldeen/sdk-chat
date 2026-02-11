@@ -12,9 +12,8 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 public sealed class GoSampleLanguageContext : SampleLanguageContext
 {
     private readonly GoUsageAnalyzer _usageAnalyzer = new();
-
-    private ApiIndex? _cachedApiIndex;
-    private string? _cachedSourcePath;
+    private readonly ExtractionCache<ApiIndex> _cache = new(
+        (path, ct) => new GoApiExtractor().ExtractAsync(path, ct), [".go"]);
 
     public GoSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -126,18 +125,10 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
 
     private async Task<ApiIndex?> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        var normalizedPath = Path.GetFullPath(sourcePath);
-
-        if (_cachedApiIndex != null && _cachedSourcePath == normalizedPath)
-            return _cachedApiIndex;
-
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("go", normalizedPath);
+        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("go", sourcePath);
         try
         {
-            var extractor = new GoApiExtractor();
-            _cachedApiIndex = await extractor.ExtractAsync(normalizedPath, ct);
-            _cachedSourcePath = normalizedPath;
-            return _cachedApiIndex;
+            return await _cache.ExtractAsync(sourcePath, ct);
         }
         catch (Exception ex)
         {

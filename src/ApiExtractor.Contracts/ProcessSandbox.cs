@@ -22,6 +22,15 @@ public static class ProcessSandbox
     /// <summary>Maximum output size per stream in characters (~10M chars).</summary>
     public const int MaxOutputChars = 10 * 1024 * 1024;
 
+    /// <summary>Marker appended to output when truncation occurs.</summary>
+    internal const string TruncationMarker = "[OUTPUT TRUNCATED - exceeded ";
+
+    /// <summary>
+    /// Returns true if the given output was truncated by <see cref="ReadStreamWithLimitAsync"/>.
+    /// </summary>
+    public static bool IsOutputTruncated(string? output) =>
+        output is not null && output.Contains(TruncationMarker, StringComparison.Ordinal);
+
     /// <summary>
     /// Validates that a root path is safe to pass to an external process.
     /// Resolves symlinks, verifies the directory exists, and rejects paths
@@ -225,7 +234,7 @@ public static class ProcessSandbox
                 var remaining = maxChars - (totalCharsRead - charsRead);
                 if (remaining > 0)
                     result.Append(buffer, 0, remaining);
-                result.Append("\n[OUTPUT TRUNCATED - exceeded ");
+                result.Append(TruncationMarker);
                 result.Append(maxChars / 1024 / 1024);
                 result.Append("M char limit]");
                 break;
@@ -249,6 +258,12 @@ public sealed record ProcessResult
     public TimeSpan Duration { get; init; }
     public bool TimedOut { get; init; }
     public bool Success => ExitCode == 0 && !TimedOut;
+
+    /// <summary>
+    /// True if <see cref="StandardOutput"/> was truncated due to exceeding the output size limit.
+    /// Truncated output will contain invalid/incomplete JSON and should not be parsed.
+    /// </summary>
+    public bool OutputTruncated => ProcessSandbox.IsOutputTruncated(StandardOutput);
 
     public ProcessResult(int exitCode, string standardOutput, string standardError, TimeSpan? duration = null)
     {

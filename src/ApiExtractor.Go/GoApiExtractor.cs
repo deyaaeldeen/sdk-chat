@@ -13,11 +13,20 @@ namespace ApiExtractor.Go;
 /// </summary>
 public class GoApiExtractor : IApiExtractor<ApiIndex>
 {
-    private static readonly string[] GoPaths = { "go", "/usr/local/go/bin/go", "/opt/go/bin/go" };
     private static readonly SemaphoreSlim CompileLock = new(1, 1);
     private static string? _cachedBinaryPath;
 
-    private ExtractorAvailabilityResult? _availability;
+    /// <summary>Shared availability configuration for all Go extractor components.</summary>
+    internal static readonly ExtractorConfig SharedConfig = new()
+    {
+        Language = "go",
+        NativeBinaryName = "go_extractor",
+        RuntimeToolName = "go",
+        RuntimeCandidates = ["go", "/usr/local/go/bin/go", "/opt/go/bin/go"],
+        RuntimeValidationArgs = "version"
+    };
+
+    private readonly ExtractorAvailabilityProvider _availability = new(SharedConfig);
 
     /// <inheritdoc />
     public string Language => "go";
@@ -25,32 +34,18 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// <summary>
     /// Warning message from tool resolution (if any).
     /// </summary>
-    public string? Warning => GetAvailability().Warning;
+    public string? Warning => _availability.Warning;
 
     /// <summary>
     /// Gets the current execution mode (NativeBinary or RuntimeInterpreter).
     /// </summary>
-    public ExtractorMode Mode => GetAvailability().Mode;
+    public ExtractorMode Mode => _availability.Mode;
 
     /// <inheritdoc />
-    public bool IsAvailable() => GetAvailability().IsAvailable;
+    public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
-    public string? UnavailableReason => GetAvailability().UnavailableReason;
-
-    /// <summary>
-    /// Gets detailed availability information with caching.
-    /// </summary>
-    private ExtractorAvailabilityResult GetAvailability()
-    {
-        return _availability ??= ExtractorAvailability.Check(
-            language: "go",
-            nativeBinaryName: "go_extractor",
-            runtimeToolName: "go",
-            runtimeCandidates: GoPaths,
-            nativeValidationArgs: "--help",
-            runtimeValidationArgs: "version");
-    }
+    public string? UnavailableReason => _availability.UnavailableReason;
 
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
@@ -107,6 +102,11 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         if (string.IsNullOrWhiteSpace(result.StandardOutput))
             return (null, warnings);
 
+        if (result.OutputTruncated)
+            throw new InvalidOperationException(
+                "Go extractor output was truncated (exceeded output size limit). " +
+                "The target package may be too large for extraction.");
+
         return (JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex), warnings);
     }
 
@@ -131,7 +131,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     private async Task<ProcessResult> RunExtractorAsync(string outputFlag, string rootPath, CancellationToken ct)
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
-        var availability = GetAvailability();
+        var availability = _availability.GetAvailability();
         ProcessResult result;
 
         if (availability.Mode == ExtractorMode.NativeBinary)

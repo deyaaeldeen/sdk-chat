@@ -29,11 +29,10 @@ public static class SignatureTokenizer
             }
             else if (!isIdChar && start >= 0)
             {
-                var span = signature[start..i];
-                // Use string.Create to avoid intermediate allocation from Span<char>.ToString()
-                // when the token already exists in the set (common in large APIs with repeated types).
-                tokens.Add(string.Create(span.Length, (Signature: signature.ToString(), Start: start, End: i),
-                    static (dest, state) => state.Signature.AsSpan(state.Start, state.End - state.Start).CopyTo(dest)));
+                // Span<char>.ToString() allocates exactly once per unique token.
+                // The HashSet deduplicates, so repeated types (common in large APIs)
+                // only pay allocation cost on the first occurrence.
+                tokens.Add(signature[start..i].ToString());
                 start = -1;
             }
         }

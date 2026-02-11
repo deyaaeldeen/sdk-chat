@@ -11,9 +11,16 @@ namespace ApiExtractor.Java;
 /// </summary>
 public class JavaApiExtractor : IApiExtractor<ApiIndex>
 {
-    private static readonly string[] JBangCandidates = { "jbang" };
+    /// <summary>Shared availability configuration for all Java extractor components.</summary>
+    internal static readonly ExtractorConfig SharedConfig = new()
+    {
+        Language = "java",
+        NativeBinaryName = "java_extractor",
+        RuntimeToolName = "jbang",
+        RuntimeCandidates = ["jbang"]
+    };
 
-    private ExtractorAvailabilityResult? _availability;
+    private readonly ExtractorAvailabilityProvider _availability = new(SharedConfig);
 
     /// <inheritdoc />
     public string Language => "java";
@@ -21,32 +28,18 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// <summary>
     /// Warning message from tool resolution (if any).
     /// </summary>
-    public string? Warning => GetAvailability().Warning;
+    public string? Warning => _availability.Warning;
 
     /// <summary>
     /// Gets the current execution mode (NativeBinary or RuntimeInterpreter).
     /// </summary>
-    public ExtractorMode Mode => GetAvailability().Mode;
+    public ExtractorMode Mode => _availability.Mode;
 
     /// <inheritdoc />
-    public bool IsAvailable() => GetAvailability().IsAvailable;
+    public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
-    public string? UnavailableReason => GetAvailability().UnavailableReason;
-
-    /// <summary>
-    /// Gets detailed availability information with caching.
-    /// </summary>
-    private ExtractorAvailabilityResult GetAvailability()
-    {
-        return _availability ??= ExtractorAvailability.Check(
-            language: "java",
-            nativeBinaryName: "java_extractor",
-            runtimeToolName: "jbang",
-            runtimeCandidates: JBangCandidates,
-            nativeValidationArgs: "--help",
-            runtimeValidationArgs: "--version");
-    }
+    public string? UnavailableReason => _availability.UnavailableReason;
 
     /// <inheritdoc />
     public string ToJson(ApiIndex index, bool pretty = false)
@@ -103,6 +96,11 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         if (string.IsNullOrWhiteSpace(result.StandardOutput))
             return (null, warnings);
 
+        if (result.OutputTruncated)
+            throw new InvalidOperationException(
+                "Java extractor output was truncated (exceeded output size limit). " +
+                "The target package may be too large for extraction.");
+
         return (JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex), warnings);
     }
 
@@ -127,7 +125,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     private async Task<ProcessResult> RunExtractorAsync(string outputFlag, string rootPath, CancellationToken ct)
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
-        var availability = GetAvailability();
+        var availability = _availability.GetAvailability();
 
         if (availability.Mode == ExtractorMode.NativeBinary)
         {

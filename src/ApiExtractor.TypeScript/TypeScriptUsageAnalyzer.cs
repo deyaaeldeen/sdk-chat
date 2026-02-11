@@ -12,8 +12,7 @@ namespace ApiExtractor.TypeScript;
 /// </summary>
 public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 {
-    private static readonly string[] NodeCandidates = { "node" };
-    private ExtractorAvailabilityResult? _availability;
+    private readonly ExtractorAvailabilityProvider _availability = new(TypeScriptApiExtractor.SharedConfig);
 
     /// <inheritdoc />
     public string Language => "typescript";
@@ -21,7 +20,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <summary>
     /// Checks if Node.js is available to run the usage analyzer.
     /// </summary>
-    public bool IsAvailable() => GetAvailability().IsAvailable;
+    public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
@@ -34,7 +33,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!HasReachableOperations(apiIndex))
             return new UsageIndex { FileCount = 0 };
 
-        var availability = GetAvailability();
+        var availability = _availability.GetAvailability();
         if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
@@ -84,17 +83,6 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <inheritdoc />
     public string Format(UsageIndex index) => UsageFormatter.Format(index);
 
-    private ExtractorAvailabilityResult GetAvailability()
-    {
-        return _availability ??= ExtractorAvailability.Check(
-            language: "typescript",
-            nativeBinaryName: "ts_extractor",
-            runtimeToolName: "node",
-            runtimeCandidates: NodeCandidates,
-            nativeValidationArgs: "--help",
-            runtimeValidationArgs: "--version");
-    }
-
     private static string GetScriptDir() => AppContext.BaseDirectory;
 
     private static async Task<string?> AnalyzeUsageAsync(
@@ -112,7 +100,12 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             ).ConfigureAwait(false);
 
             if (!result.Success)
+            {
+                Console.Error.WriteLine(result.TimedOut
+                    ? $"TypeScript usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"TypeScript usage analyzer: failed (exit {result.ExitCode}): {result.StandardError}");
                 return null;
+            }
 
             return result.StandardOutput;
         }
@@ -142,10 +135,6 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
         var scriptDir = GetScriptDir();
         var scriptPath = Path.Combine(scriptDir, "dist", "extract_api.js");
-        if (!File.Exists(scriptPath))
-        {
-            scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
-        }
 
         // Route through ProcessSandbox for timeout enforcement, output size limits,
         // and hardened execution — consistent with all other extractors
@@ -156,7 +145,15 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             cancellationToken: ct
         ).ConfigureAwait(false);
 
-        return runtimeResult.Success ? runtimeResult.StandardOutput : null;
+        if (!runtimeResult.Success)
+        {
+            Console.Error.WriteLine(runtimeResult.TimedOut
+                ? $"TypeScript usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"TypeScript usage analyzer: failed (exit {runtimeResult.ExitCode}): {runtimeResult.StandardError}");
+            return null;
+        }
+
+        return runtimeResult.StandardOutput;
     }
 
     // AOT-safe deserialization using source-generated context

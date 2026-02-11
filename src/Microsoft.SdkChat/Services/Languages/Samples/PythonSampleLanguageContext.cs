@@ -11,11 +11,9 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 
 public sealed class PythonSampleLanguageContext : SampleLanguageContext
 {
-    private readonly PythonApiExtractor _extractor = new();
     private readonly PythonUsageAnalyzer _usageAnalyzer = new();
-
-    private ApiIndex? _cachedApiIndex;
-    private string? _cachedSourcePath;
+    private readonly ExtractionCache<ApiIndex> _cache = new(
+        async (path, ct) => (ApiIndex?)await new PythonApiExtractor().ExtractAsync(path, ct), [".py"]);
 
     public PythonSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -130,17 +128,10 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
 
     private async Task<ApiIndex?> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        var normalizedPath = Path.GetFullPath(sourcePath);
-
-        if (_cachedApiIndex != null && _cachedSourcePath == normalizedPath)
-            return _cachedApiIndex;
-
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("python", normalizedPath);
+        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("python", sourcePath);
         try
         {
-            _cachedApiIndex = await _extractor.ExtractAsync(normalizedPath, ct);
-            _cachedSourcePath = normalizedPath;
-            return _cachedApiIndex;
+            return await _cache.ExtractAsync(sourcePath, ct);
         }
         catch (Exception ex)
         {

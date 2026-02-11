@@ -128,11 +128,29 @@ public sealed record ClassInfo
         (Methods?.Any() ?? false);
 
     /// <summary>Returns true if this is a model/DTO class.
-    /// A model type either has no public methods, or all its methods are getters/setters/is-checks.</summary>
+    /// A model type has no public methods (and has fields or no methods at all),
+    /// or all its public methods are getters/setters/is-checks.</summary>
     [JsonIgnore]
-    public bool IsModelType =>
-        !(Methods?.Any(m => m.Modifiers?.Contains("public") == true) ?? false) ||
-        (Methods?.Count > 0 == true && Methods.All(m => m.Name.StartsWith("get", StringComparison.Ordinal) || m.Name.StartsWith("set", StringComparison.Ordinal) || m.Name.StartsWith("is", StringComparison.Ordinal)));
+    public bool IsModelType
+    {
+        get
+        {
+            var hasPublicMethods = Methods?.Any(m => m.Modifiers?.Contains("public") == true) ?? false;
+
+            if (!hasPublicMethods)
+            {
+                // No public methods: model if it has fields, or if Methods wasn't extracted (null).
+                // An empty class (empty Methods list + no fields) is a marker type, not a model.
+                return (Fields?.Count > 0) || Methods is null;
+            }
+
+            // All public methods are getters/setters/is-checks
+            return Methods!.Where(m => m.Modifiers?.Contains("public") == true)
+                .All(m => m.Name.StartsWith("get", StringComparison.Ordinal)
+                    || m.Name.StartsWith("set", StringComparison.Ordinal)
+                    || m.Name.StartsWith("is", StringComparison.Ordinal));
+        }
+    }
 
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]

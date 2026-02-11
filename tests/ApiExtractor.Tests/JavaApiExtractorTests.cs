@@ -221,7 +221,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
     }
 
     [Fact]
-    public void ClassInfo_IsModelType_ClassWithNoPublicMethods_IsModel()
+    public void ClassInfo_IsModelType_ClassWithNoPublicMethods_AndFields_IsModel()
     {
         var classInfo = new ClassInfo
         {
@@ -229,10 +229,14 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
             Methods = new List<MethodInfo>
             {
                 new() { Name = "computeHash", Modifiers = ["private"] }
+            },
+            Fields = new List<FieldInfo>
+            {
+                new() { Name = "value", Type = "String" }
             }
         };
 
-        Assert.True(classInfo.IsModelType, "Class with no public methods should be a model");
+        Assert.True(classInfo.IsModelType, "Class with no public methods but with fields should be a model");
     }
 
     [Fact]
@@ -262,6 +266,60 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
 
         Assert.False(classInfo.IsModelType,
             "Class with mix of getters and service methods should not be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_EmptyClassNoFieldsNoMethods_IsNotModel()
+    {
+        // Regression: empty class with zero methods AND zero fields should NOT be a model
+        // (it's just an empty type marker, not a data transfer object)
+        var classInfo = new ClassInfo
+        {
+            Name = "EmptyMarker",
+            Methods = new List<MethodInfo>(),
+            Fields = null
+        };
+
+        Assert.False(classInfo.IsModelType,
+            "Empty class with no methods and no fields should not be a model (not a DTO)");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithOnlyPrivateMethods_NoFields_IsNotModel()
+    {
+        // Class with only private methods and no fields is not a model
+        var classInfo = new ClassInfo
+        {
+            Name = "InternalHelper",
+            Methods = new List<MethodInfo>
+            {
+                new() { Name = "compute", Modifiers = ["private"] }
+            },
+            Fields = null
+        };
+
+        Assert.False(classInfo.IsModelType,
+            "Class with private methods but no fields should not be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithOnlyPrivateMethods_WithFields_IsModel()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "DataHolder",
+            Methods = new List<MethodInfo>
+            {
+                new() { Name = "validate", Modifiers = ["private"] }
+            },
+            Fields = new List<FieldInfo>
+            {
+                new() { Name = "data", Type = "byte[]" }
+            }
+        };
+
+        Assert.True(classInfo.IsModelType,
+            "Class with private methods and fields should be a model");
     }
 
     #endregion

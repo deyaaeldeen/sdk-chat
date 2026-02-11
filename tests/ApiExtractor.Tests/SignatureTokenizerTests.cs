@@ -211,4 +211,31 @@ public class SignatureTokenizerTests
         var tokensGo = SignatureTokenizer.Tokenize("[]string");
         Assert.Equal(new HashSet<string> { "string" }, tokensGo);
     }
+
+    [Fact]
+    public void TokenizeInto_SpanOverload_ProducesCorrectTokens()
+    {
+        // Verify the ReadOnlySpan<char> overload produces identical results to string overload
+        var fromString = SignatureTokenizer.Tokenize("Task<List<MyModel>>");
+
+        HashSet<string> fromSpan = [];
+        SignatureTokenizer.TokenizeInto("Task<List<MyModel>>".AsSpan(), fromSpan);
+
+        Assert.Equal(fromString, fromSpan);
+    }
+
+    [Fact]
+    public void TokenizeInto_SpanOverload_TokensAreIndependent()
+    {
+        // Regression: ensure tokens extracted from span are independent string instances,
+        // not views into a shared backing buffer that could be invalidated
+        HashSet<string> tokens = [];
+        var input = "Foo<Bar>";
+        SignatureTokenizer.TokenizeInto(input.AsSpan(), tokens);
+
+        // Tokens should survive even if the original string is GC'd
+        Assert.Contains("Foo", tokens);
+        Assert.Contains("Bar", tokens);
+        Assert.Equal(2, tokens.Count);
+    }
 }

@@ -19,13 +19,13 @@ Extracts public API surface from TypeScript packages by spawning a Node.js subpr
 | File | Description |
 |------|-------------|
 | `TypeScriptApiExtractor.cs` | Orchestrates Node subprocess |
-| `extract_api.mjs` | Node script using ts-morph |
+| `src/extract_api.ts` | TypeScript source (compiled to `dist/extract_api.js`) |
 | `TypeScriptFormatter.cs` | Output formatting |
 | `TypeScriptUsageAnalyzer.cs` | Analyzes imports in samples |
 
 ## How It Works
 
-1. C# spawns `node extract_api.mjs <path>`
+1. C# spawns `node dist/extract_api.js <path>`
 2. Script uses ts-morph to parse TypeScript
 3. JSON output piped back to C#
 4. C# formats as API surface
@@ -49,5 +49,5 @@ npm install
 dotnet test tests/ApiExtractor.Tests --filter "FullyQualifiedName~TypeScript"
 
 # Test Node script directly
-node src/ApiExtractor.TypeScript/extract_api.mjs /path/to/ts/package
+node src/ApiExtractor.TypeScript/dist/extract_api.js /path/to/ts/package
 ```

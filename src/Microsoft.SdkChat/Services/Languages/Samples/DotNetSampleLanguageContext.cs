@@ -11,11 +11,9 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 
 public sealed class DotNetSampleLanguageContext : SampleLanguageContext
 {
-    private readonly CSharpApiExtractor _extractor = new();
     private readonly CSharpUsageAnalyzer _usageAnalyzer = new();
-
-    private ApiIndex? _cachedApiIndex;
-    private string? _cachedSourcePath;
+    private readonly ExtractionCache<ApiIndex> _cache = new(
+        async (path, ct) => (ApiIndex?)await new CSharpApiExtractor().ExtractAsync(path, ct), [".cs"]);
 
     public DotNetSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -106,16 +104,9 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
     /// </summary>
     private async Task<ApiIndex> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        var normalizedPath = Path.GetFullPath(sourcePath);
-
-        if (_cachedApiIndex != null && _cachedSourcePath == normalizedPath)
-            return _cachedApiIndex;
-
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("dotnet", normalizedPath);
-        _cachedApiIndex = await _extractor.ExtractAsync(normalizedPath, ct);
-        _cachedSourcePath = normalizedPath;
-
-        return _cachedApiIndex;
+        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("dotnet", sourcePath);
+        return await _cache.ExtractAsync(sourcePath, ct)
+            ?? throw new InvalidOperationException($"Failed to extract API surface from '{sourcePath}'.");
     }
 
     protected override int GetPriority(FileMetadata file)

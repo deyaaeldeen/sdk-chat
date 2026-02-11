@@ -18,6 +18,10 @@
     <ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ApiExtractor.Tests" />
+  </ItemGroup>
+
   <!-- Pre-warm JBang dependencies during build (similar to Go/TypeScript extractors) -->
   <Target Name="PreWarmJBang" AfterTargets="Build" Condition="'$(SkipJBangWarmup)' != 'true'">
     <!-- Check if JBang is available -->

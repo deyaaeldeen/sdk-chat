@@ -12,11 +12,7 @@ namespace ApiExtractor.Go;
 /// </summary>
 public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 {
-    private static readonly string[] GoCandidates = { "go", "/usr/local/go/bin/go", "/opt/go/bin/go" };
-
-    // Benign race: worst case two threads both compute the same availability result.
-    // Reference assignment is atomic in .NET, so no corruption is possible.
-    private ExtractorAvailabilityResult? _availability;
+    private readonly ExtractorAvailabilityProvider _availability = new(GoApiExtractor.SharedConfig);
 
     /// <inheritdoc />
     public string Language => "go";
@@ -24,7 +20,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <summary>
     /// Checks if Go is available to run the usage analyzer.
     /// </summary>
-    public bool IsAvailable() => GetAvailability().IsAvailable;
+    public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
@@ -37,7 +33,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!HasReachableOperations(apiIndex))
             return new UsageIndex { FileCount = 0 };
 
-        var availability = GetAvailability();
+        var availability = _availability.GetAvailability();
         if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
@@ -85,17 +81,6 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// <inheritdoc />
     public string Format(UsageIndex index) => UsageFormatter.Format(index);
 
-    private ExtractorAvailabilityResult GetAvailability()
-    {
-        return _availability ??= ExtractorAvailability.Check(
-            language: "go",
-            nativeBinaryName: "go_extractor",
-            runtimeToolName: "go",
-            runtimeCandidates: GoCandidates,
-            nativeValidationArgs: "--help",
-            runtimeValidationArgs: "version");
-    }
-
     private static string GetScriptDir() => AppContext.BaseDirectory;
 
     private static async Task<string?> AnalyzeUsageAsync(
@@ -112,7 +97,15 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
-            return result.Success ? result.StandardOutput : null;
+            if (!result.Success)
+            {
+                Console.Error.WriteLine(result.TimedOut
+                    ? $"Go usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"Go usage analyzer: failed (exit {result.ExitCode}): {result.StandardError}");
+                return null;
+            }
+
+            return result.StandardOutput;
         }
 
         if (availability.Mode == ExtractorMode.Docker)
@@ -148,7 +141,15 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             cancellationToken: ct
         ).ConfigureAwait(false);
 
-        return runtimeResult.Success ? runtimeResult.StandardOutput : null;
+        if (!runtimeResult.Success)
+        {
+            Console.Error.WriteLine(runtimeResult.TimedOut
+                ? $"Go usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Go usage analyzer: failed (exit {runtimeResult.ExitCode}): {runtimeResult.StandardError}");
+            return null;
+        }
+
+        return runtimeResult.StandardOutput;
     }
 
     // AOT-safe deserialization using source-generated context
