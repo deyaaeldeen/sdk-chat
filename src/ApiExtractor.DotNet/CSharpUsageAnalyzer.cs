@@ -35,6 +35,11 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (clientMethods.Count == 0)
             return new UsageIndex { FileCount = 0 };
 
+        // Pre-build canonical name lookup for O(1) case-insensitive → stored-key resolution
+        var canonicalClientNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in clientMethods.Keys)
+            canonicalClientNames[key] = key;
+
         var files = Directory.EnumerateFiles(normalizedPath, "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("\\obj\\", StringComparison.Ordinal)
                      && !f.Contains("/bin/", StringComparison.Ordinal) && !f.Contains("\\bin\\", StringComparison.Ordinal))
@@ -63,10 +68,10 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 .WithNullableContextOptions(NullableContextOptions.Enable));
 
         // Build property type map from API index for subclient resolution
-        var propertyTypeMap = BuildPropertyTypeMap(apiIndex, clientMethods);
+        var propertyTypeMap = BuildPropertyTypeMap(apiIndex, clientMethods, canonicalClientNames);
 
         // Build method return type map from API index for precise factory/getter resolution
-        var methodReturnTypeMap = BuildMethodReturnTypeMap(apiIndex, clientMethods);
+        var methodReturnTypeMap = BuildMethodReturnTypeMap(apiIndex, clientMethods, canonicalClientNames);
 
         // Collect all type names from API for variable tracking (including types without methods)
         var allTypeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -100,7 +105,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 if (clientType is null)
                 {
                     (clientType, methodName) = ExtractMethodCallSyntactic(
-                        invocation, clientMethods, varTypes, propertyTypeMap, methodReturnTypeMap);
+                        invocation, clientMethods, varTypes, propertyTypeMap, methodReturnTypeMap, canonicalClientNames);
                 }
 
                 if (clientType is not null && methodName is not null)
@@ -197,121 +202,34 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             .Select(t => t.Name.Split('<')[0])
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var interfaceNames = allTypes
-            .Where(t => t.Kind.Equals("interface", StringComparison.OrdinalIgnoreCase))
-            .Select(t => t.Name.Split('<')[0])
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var interfaceImplementers = new Dictionary<string, List<TypeInfo>>(StringComparer.OrdinalIgnoreCase);
+        // Build interface→implementer edges for BFS
+        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var type in allTypes)
         {
             foreach (var iface in type.Interfaces ?? [])
             {
                 var ifaceName = iface.Split('<')[0];
-                if (!interfaceImplementers.TryGetValue(ifaceName, out var list))
+                if (!additionalEdges.TryGetValue(ifaceName, out var list))
                 {
                     list = [];
-                    interfaceImplementers[ifaceName] = list;
+                    additionalEdges[ifaceName] = list;
                 }
-                list.Add(type);
+                list.Add(type.Name.Split('<')[0]);
             }
         }
 
-        var references = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var type in allTypes)
+        // Build type nodes for reachability analysis
+        var typeNodes = allTypes.Select(t => new ReachabilityAnalyzer.TypeNode
         {
-            var name = type.Name.Split('<')[0];
-            references[name] = type.GetReferencedTypes(allTypeNames);
-        }
+            Name = t.Name.Split('<')[0],
+            HasOperations = t.Members?.Any(m => m.Kind == "method") ?? false,
+            IsExplicitEntryPoint = t.EntryPoint == true,
+            IsRootCandidate = t.Kind.Equals("class", StringComparison.OrdinalIgnoreCase)
+                           || t.Kind.Equals("struct", StringComparison.OrdinalIgnoreCase),
+            ReferencedTypes = t.GetReferencedTypes(allTypeNames)
+        }).ToList();
 
-        var referencedBy = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var refs in references.Values)
-        {
-            foreach (var target in refs)
-            {
-                referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
-            }
-        }
-
-        var operationTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var type in allTypes)
-        {
-            if (type.Members?.Any(m => m.Kind == "method") ?? false)
-            {
-                operationTypes.Add(type.Name.Split('<')[0]);
-            }
-        }
-
-        var candidateRoots = allTypes
-            .Where(t => t.Kind.Equals("class", StringComparison.OrdinalIgnoreCase)
-                     || t.Kind.Equals("struct", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        // Use EntryPoint field to identify root types (SDK entry points)
-        static bool IsRootType(TypeInfo type) => type.EntryPoint == true;
-
-        var rootTypes = candidateRoots
-            .Where(type =>
-            {
-                var name = type.Name.Split('<')[0];
-                var hasOperations = type.Members?.Any(m => m.Kind == "method") ?? false;
-                var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
-                var isReferenced = referencedBy.ContainsKey(name);
-                return IsRootType(type) || (!isReferenced && (hasOperations || referencesOperations));
-            })
-            .ToList();
-
-        if (rootTypes.Count == 0)
-        {
-            rootTypes = candidateRoots
-                .Where(type =>
-                {
-                    var name = type.Name.Split('<')[0];
-                    var hasOperations = type.Members?.Any(m => m.Kind == "method") ?? false;
-                    var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
-                    return hasOperations || referencesOperations;
-                })
-                .ToList();
-        }
-
-        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var queue = new Queue<string>();
-
-        foreach (var client in rootTypes)
-        {
-            var name = client.Name.Split('<')[0];
-            if (reachable.Add(name))
-            {
-                queue.Enqueue(name);
-            }
-        }
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            if (references.TryGetValue(current, out var refs))
-            {
-                foreach (var typeName in refs)
-                {
-                    if (reachable.Add(typeName))
-                    {
-                        queue.Enqueue(typeName);
-                    }
-                }
-            }
-
-            if (interfaceNames.Contains(current) && interfaceImplementers.TryGetValue(current, out var implementers))
-            {
-                foreach (var impl in implementers)
-                {
-                    var implName = impl.Name.Split('<')[0];
-                    if (reachable.Add(implName))
-                    {
-                        queue.Enqueue(implName);
-                    }
-                }
-            }
-        }
+        var reachable = ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.OrdinalIgnoreCase);
 
         return allTypes
             .Where(t => reachable.Contains(t.Name.Split('<')[0]) && (t.Members?.Any(m => m.Kind == "method") ?? false))
@@ -475,7 +393,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         Dictionary<string, HashSet<string>> clientMethods,
         Dictionary<string, string> varTypes,
         Dictionary<string, string> propertyTypeMap,
-        Dictionary<string, string> methodReturnTypeMap)
+        Dictionary<string, string> methodReturnTypeMap,
+        Dictionary<string, string> canonicalClientNames)
     {
         if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
             return (null, null);
@@ -500,7 +419,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             if (clientMethods.TryGetValue(varName, out var staticMethods) &&
                 staticMethods.Contains(methodName))
             {
-                return (GetCanonicalClientName(varName, clientMethods), methodName);
+                return (GetCanonicalClientName(varName, canonicalClientNames), methodName);
             }
         }
         // Pattern 2: obj.Property.Method() — subclient chain, e.g., client.Widgets.ListWidgetsAsync()
@@ -663,7 +582,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// </summary>
     private static Dictionary<string, string> BuildPropertyTypeMap(
         ApiIndex apiIndex,
-        Dictionary<string, HashSet<string>> clientMethods)
+        Dictionary<string, HashSet<string>> clientMethods,
+        Dictionary<string, string> canonicalClientNames)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -679,7 +599,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                         if (returnType is not null && clientMethods.ContainsKey(returnType))
                         {
                             var key = $"{type.Name}.{member.Name}";
-                            map[key] = GetCanonicalClientName(returnType, clientMethods);
+                            map[key] = GetCanonicalClientName(returnType, canonicalClientNames);
                         }
                     }
                 }
@@ -707,7 +627,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// </summary>
     private static Dictionary<string, string> BuildMethodReturnTypeMap(
         ApiIndex apiIndex,
-        Dictionary<string, HashSet<string>> clientMethods)
+        Dictionary<string, HashSet<string>> clientMethods,
+        Dictionary<string, string> canonicalClientNames)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -726,7 +647,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                             if (unwrapped is not null && clientMethods.ContainsKey(unwrapped))
                             {
                                 var key = $"{type.Name}.{member.Name}";
-                                map[key] = GetCanonicalClientName(unwrapped, clientMethods);
+                                map[key] = GetCanonicalClientName(unwrapped, canonicalClientNames);
                             }
                         }
                     }
@@ -773,19 +694,14 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     }
 
     /// <summary>
-    /// Gets the canonical (stored) key name from the client methods dictionary.
-    /// Needed because the dictionary uses case-insensitive comparison.
+    /// Gets the canonical (stored) key name from the pre-built canonical names dictionary.
+    /// O(1) lookup via case-insensitive dictionary.
     /// </summary>
     private static string GetCanonicalClientName(
         string name,
-        Dictionary<string, HashSet<string>> clientMethods)
+        Dictionary<string, string> canonicalClientNames)
     {
-        foreach (var key in clientMethods.Keys)
-        {
-            if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
-                return key;
-        }
-        return name;
+        return canonicalClientNames.TryGetValue(name, out var canonical) ? canonical : name;
     }
 
     /// <summary>

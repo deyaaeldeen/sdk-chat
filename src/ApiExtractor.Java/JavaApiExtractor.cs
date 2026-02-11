@@ -88,93 +88,14 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
-        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
-        var availability = GetAvailability();
+        var result = await RunExtractorAsync("--json", rootPath, ct).ConfigureAwait(false);
 
-        if (availability.Mode == ExtractorMode.NativeBinary)
-        {
-            // Use precompiled native binary
-            var result = await ProcessSandbox.ExecuteAsync(
-                availability.ExecutablePath!,
-                [rootPath, "--json"],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-
-            if (!result.Success)
-            {
-                var errorMsg = result.TimedOut
-                    ? $"Java extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                    : $"Java extractor failed: {result.StandardError}";
-                throw new InvalidOperationException(errorMsg);
-            }
-
-            if (string.IsNullOrWhiteSpace(result.StandardOutput))
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
-        }
-
-        if (availability.Mode == ExtractorMode.Docker)
-        {
-            // Fall back to Docker container with precompiled extractor
-            var dockerResult = await DockerSandbox.ExecuteAsync(
-                availability.DockerImageName!,
-                rootPath,
-                [rootPath, "--json"],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-
-            if (!dockerResult.Success)
-            {
-                var errorMsg = dockerResult.TimedOut
-                    ? $"Java extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                    : $"Java extractor failed: {dockerResult.StandardError}";
-                throw new InvalidOperationException(errorMsg);
-            }
-
-            if (string.IsNullOrWhiteSpace(dockerResult.StandardOutput))
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize(dockerResult.StandardOutput, SourceGenerationContext.Default.ApiIndex);
-        }
-
-        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
-        {
-            throw new InvalidOperationException(availability.UnavailableReason ?? "Java extractor not available");
-        }
-
-        // Fall back to JBang runtime
-        var scriptPath = GetScriptPath();
-        if (!File.Exists(scriptPath))
-        {
-            throw new FileNotFoundException($"ExtractApi.java not found at {scriptPath}");
-        }
-
-        // Use ProcessSandbox for hardened execution with timeout and output limits
-        var jbangResult = await ProcessSandbox.ExecuteAsync(
-            availability.ExecutablePath!,
-            [scriptPath, rootPath, "--json"],
-            cancellationToken: ct
-        ).ConfigureAwait(false);
-
-        if (!jbangResult.Success)
-        {
-            var errorMsg = jbangResult.TimedOut
-                ? $"Java extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"jbang failed: {jbangResult.StandardError}";
-            throw new InvalidOperationException(errorMsg);
-        }
-
-        if (string.IsNullOrWhiteSpace(jbangResult.StandardOutput))
+        if (string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             return null;
         }
 
-        return JsonSerializer.Deserialize(jbangResult.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+        return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
     }
 
     /// <summary>
@@ -182,15 +103,24 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsJavaAsync(string rootPath, CancellationToken ct = default)
     {
+        var result = await RunExtractorAsync("--stub", rootPath, ct).ConfigureAwait(false);
+        return result.StandardOutput;
+    }
+
+    /// <summary>
+    /// Runs the Java extractor with the given output flag, dispatching to the correct
+    /// execution mode (NativeBinary, RuntimeInterpreter, or Docker).
+    /// </summary>
+    private async Task<ProcessResult> RunExtractorAsync(string outputFlag, string rootPath, CancellationToken ct)
+    {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
 
         if (availability.Mode == ExtractorMode.NativeBinary)
         {
-            // Use precompiled native binary
             var result = await ProcessSandbox.ExecuteAsync(
                 availability.ExecutablePath!,
-                [rootPath, "--stub"],
+                [rootPath, outputFlag],
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
@@ -202,16 +132,15 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
                 throw new InvalidOperationException(errorMsg);
             }
 
-            return result.StandardOutput;
+            return result;
         }
 
         if (availability.Mode == ExtractorMode.Docker)
         {
-            // Fall back to Docker container with precompiled extractor
             var dockerResult = await DockerSandbox.ExecuteAsync(
                 availability.DockerImageName!,
                 rootPath,
-                [rootPath, "--stub"],
+                [rootPath, outputFlag],
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
@@ -223,7 +152,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
                 throw new InvalidOperationException(errorMsg);
             }
 
-            return dockerResult.StandardOutput;
+            return dockerResult;
         }
 
         if (availability.Mode != ExtractorMode.RuntimeInterpreter)
@@ -234,10 +163,9 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         // Fall back to JBang runtime
         var scriptPath = GetScriptPath();
 
-        // Use ProcessSandbox for hardened execution with timeout and output limits
         var jbangResult = await ProcessSandbox.ExecuteAsync(
             availability.ExecutablePath!,
-            [scriptPath, rootPath, "--stub"],
+            [scriptPath, rootPath, outputFlag],
             cancellationToken: ct
         ).ConfigureAwait(false);
 
@@ -245,11 +173,11 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         {
             var errorMsg = jbangResult.TimedOut
                 ? $"Java extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"jbang failed: {jbangResult.StandardError}";
+                : $"JBang failed: {jbangResult.StandardError}";
             throw new InvalidOperationException(errorMsg);
         }
 
-        return jbangResult.StandardOutput;
+        return jbangResult;
     }
 
     private static string GetScriptPath()

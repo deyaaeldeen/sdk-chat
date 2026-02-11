@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Text.Json;
+using ApiExtractor.Contracts;
 using ApiExtractor.Python;
 using Xunit;
 
@@ -202,5 +204,133 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         // For small test fixtures, the overhead ratio is higher; real-world packages show much better compression
         Assert.True(json.Length < sourceSize,
             $"JSON ({json.Length}) should be smaller than source ({sourceSize})");
+    }
+}
+
+/// <summary>
+/// Tests for Python model deserialization (entryPoint, reExportedFrom fields).
+/// These are pure JSON round-trip tests that do not require a Python runtime.
+/// </summary>
+public class PythonDeserializationTests
+{
+    [Fact]
+    public void RawPythonClass_DeserializesEntryPoint()
+    {
+        var json = """
+        {
+            "name": "ChatClient",
+            "base": "BaseClient",
+            "doc": "A chat client.",
+            "entryPoint": true,
+            "methods": [],
+            "properties": []
+        }
+        """;
+
+        var cls = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonClass);
+
+        Assert.NotNull(cls);
+        Assert.Equal("ChatClient", cls!.Name);
+        Assert.True(cls.EntryPoint);
+    }
+
+    [Fact]
+    public void RawPythonClass_DeserializesReExportedFrom()
+    {
+        var json = """
+        {
+            "name": "BlobClient",
+            "doc": "A blob client.",
+            "reExportedFrom": "azure.storage.blob._blob_client",
+            "methods": [],
+            "properties": []
+        }
+        """;
+
+        var cls = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonClass);
+
+        Assert.NotNull(cls);
+        Assert.Equal("azure.storage.blob._blob_client", cls!.ReExportedFrom);
+    }
+
+    [Fact]
+    public void RawPythonClass_MissingEntryPoint_DefaultsNull()
+    {
+        var json = """
+        {
+            "name": "Helper",
+            "methods": []
+        }
+        """;
+
+        var cls = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonClass);
+
+        Assert.NotNull(cls);
+        Assert.Null(cls!.EntryPoint);
+        Assert.Null(cls.ReExportedFrom);
+    }
+
+    [Fact]
+    public void RawPythonFunction_DeserializesEntryPoint()
+    {
+        var json = """
+        {
+            "name": "create_client",
+            "sig": "(endpoint: str) -> ChatClient",
+            "entryPoint": true,
+            "reExportedFrom": "azure.ai._factories"
+        }
+        """;
+
+        var func = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonFunction);
+
+        Assert.NotNull(func);
+        Assert.True(func!.EntryPoint);
+        Assert.Equal("azure.ai._factories", func.ReExportedFrom);
+    }
+
+    [Fact]
+    public void RawPythonApiIndex_RoundTrip_PreservesEntryPointAndReExportedFrom()
+    {
+        var json = """
+        {
+            "package": "test-sdk",
+            "modules": [
+                {
+                    "name": "test_sdk",
+                    "classes": [
+                        {
+                            "name": "ChatClient",
+                            "entryPoint": true,
+                            "reExportedFrom": "test_sdk._internal",
+                            "methods": [
+                                { "name": "send", "sig": "(msg: str) -> str" }
+                            ],
+                            "properties": []
+                        }
+                    ],
+                    "functions": [
+                        {
+                            "name": "create_client",
+                            "sig": "() -> ChatClient",
+                            "entryPoint": true,
+                            "reExportedFrom": "test_sdk._factories"
+                        }
+                    ]
+                }
+            ]
+        }
+        """;
+
+        var raw = JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.RawPythonApiIndex);
+
+        Assert.NotNull(raw);
+        var cls = raw!.Modules![0].Classes![0];
+        Assert.True(cls.EntryPoint);
+        Assert.Equal("test_sdk._internal", cls.ReExportedFrom);
+
+        var func = raw.Modules![0].Functions![0];
+        Assert.True(func.EntryPoint);
+        Assert.Equal("test_sdk._factories", func.ReExportedFrom);
     }
 }

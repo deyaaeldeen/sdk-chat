@@ -89,98 +89,14 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
-        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
-        var availability = GetAvailability();
+        var result = await RunExtractorAsync("--json", rootPath, ct).ConfigureAwait(false);
 
-        if (availability.Mode == ExtractorMode.NativeBinary)
-        {
-            // Use precompiled native binary (bun-compiled)
-            var result = await ProcessSandbox.ExecuteAsync(
-                availability.ExecutablePath!,
-                [rootPath, "--json"],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-
-            if (!result.Success)
-            {
-                var errorMsg = result.TimedOut
-                    ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                    : $"TypeScript extractor failed: {result.StandardError}";
-                throw new InvalidOperationException(errorMsg);
-            }
-
-            if (string.IsNullOrWhiteSpace(result.StandardOutput))
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
-        }
-
-        if (availability.Mode == ExtractorMode.Docker)
-        {
-            // Fall back to Docker container with precompiled extractor
-            var dockerResult = await DockerSandbox.ExecuteAsync(
-                availability.DockerImageName!,
-                rootPath,
-                [rootPath, "--json"],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-
-            if (!dockerResult.Success)
-            {
-                var errorMsg = dockerResult.TimedOut
-                    ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                    : $"TypeScript extractor failed: {dockerResult.StandardError}";
-                throw new InvalidOperationException(errorMsg);
-            }
-
-            if (string.IsNullOrWhiteSpace(dockerResult.StandardOutput))
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize(dockerResult.StandardOutput, SourceGenerationContext.Default.ApiIndex);
-        }
-
-        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
-        {
-            throw new InvalidOperationException(availability.UnavailableReason ?? "TypeScript extractor not available");
-        }
-
-        // Fall back to Node.js runtime
-        var scriptDir = GetScriptDir();
-        await EnsureDependenciesAsync(scriptDir, ct).ConfigureAwait(false);
-
-        var scriptPath = Path.Combine(scriptDir, "dist", "extract_api.js");
-        if (!File.Exists(scriptPath))
-        {
-            // Fallback to mjs for backwards compatibility
-            scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
-        }
-
-        // Use ProcessSandbox for hardened execution with timeout and output limits
-        var nodeResult = await ProcessSandbox.ExecuteAsync(
-            availability.ExecutablePath!,
-            [scriptPath, rootPath, "--json"],
-            workingDirectory: scriptDir,
-            cancellationToken: ct
-        ).ConfigureAwait(false);
-
-        if (!nodeResult.Success)
-        {
-            var errorMsg = nodeResult.TimedOut
-                ? $"TypeScript extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Node failed: {nodeResult.StandardError}";
-            throw new InvalidOperationException(errorMsg);
-        }
-
-        if (string.IsNullOrWhiteSpace(nodeResult.StandardOutput))
+        if (string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             return null;
         }
 
-        return JsonSerializer.Deserialize(nodeResult.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+        return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
     }
 
     /// <summary>
@@ -188,15 +104,24 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsTypeScriptAsync(string rootPath, CancellationToken ct = default)
     {
+        var result = await RunExtractorAsync("--stub", rootPath, ct).ConfigureAwait(false);
+        return result.StandardOutput;
+    }
+
+    /// <summary>
+    /// Runs the TypeScript extractor with the given output flag, dispatching to the correct
+    /// execution mode (NativeBinary, RuntimeInterpreter, or Docker).
+    /// </summary>
+    private async Task<ProcessResult> RunExtractorAsync(string outputFlag, string rootPath, CancellationToken ct)
+    {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
 
         if (availability.Mode == ExtractorMode.NativeBinary)
         {
-            // Use precompiled native binary
             var result = await ProcessSandbox.ExecuteAsync(
                 availability.ExecutablePath!,
-                [rootPath, "--stub"],
+                [rootPath, outputFlag],
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
@@ -208,16 +133,15 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
                 throw new InvalidOperationException(errorMsg);
             }
 
-            return result.StandardOutput;
+            return result;
         }
 
         if (availability.Mode == ExtractorMode.Docker)
         {
-            // Fall back to Docker container with precompiled extractor
             var dockerResult = await DockerSandbox.ExecuteAsync(
                 availability.DockerImageName!,
                 rootPath,
-                [rootPath, "--stub"],
+                [rootPath, outputFlag],
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
@@ -229,7 +153,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
                 throw new InvalidOperationException(errorMsg);
             }
 
-            return dockerResult.StandardOutput;
+            return dockerResult;
         }
 
         if (availability.Mode != ExtractorMode.RuntimeInterpreter)
@@ -248,10 +172,9 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             scriptPath = Path.Combine(scriptDir, "extract_api.mjs");
         }
 
-        // Use ProcessSandbox for hardened execution with timeout and output limits
         var nodeResult = await ProcessSandbox.ExecuteAsync(
             availability.ExecutablePath!,
-            [scriptPath, rootPath, "--stub"],
+            [scriptPath, rootPath, outputFlag],
             workingDirectory: scriptDir,
             cancellationToken: ct
         ).ConfigureAwait(false);
@@ -264,7 +187,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
             throw new InvalidOperationException(errorMsg);
         }
 
-        return nodeResult.StandardOutput;
+        return nodeResult;
     }
 
     private static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)

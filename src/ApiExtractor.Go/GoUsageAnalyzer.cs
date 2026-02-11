@@ -183,154 +183,72 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             .Concat(allInterfaces.Select(i => i.Name))
             .ToHashSet(StringComparer.Ordinal);
 
+        // Structural interface matching: a struct implements an interface if it has
+        // methods with matching names. This mirrors Go's structural typing model.
         var interfaceMethods = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var iface in allInterfaces)
         {
             var methods = new HashSet<string>(StringComparer.Ordinal);
             foreach (var method in iface.Methods ?? [])
-            {
                 methods.Add(method.Name);
-            }
 
             if (methods.Count > 0)
-            {
                 interfaceMethods[iface.Name] = methods;
-            }
         }
 
-        // Structural interface matching: a struct implements an interface if it has
-        // methods with matching names. This mirrors Go's structural typing model.
-        // Note: checking by name only (not full signature) may produce false positives
-        // if unrelated interfaces share method names, but this is rare in practice
-        // and is the correct approach for Go's type system.
-        var interfaceImplementers = new Dictionary<string, List<StructApi>>(StringComparer.Ordinal);
+        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var iface in interfaceMethods)
         {
             foreach (var strct in allStructs)
             {
                 var structMethods = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var method in strct.Methods ?? [])
-                {
                     structMethods.Add(method.Name);
-                }
 
                 if (iface.Value.All(structMethods.Contains))
                 {
-                    if (!interfaceImplementers.TryGetValue(iface.Key, out var list))
+                    if (!additionalEdges.TryGetValue(iface.Key, out var list))
                     {
                         list = [];
-                        interfaceImplementers[iface.Key] = list;
+                        additionalEdges[iface.Key] = list;
                     }
-                    list.Add(strct);
+                    list.Add(strct.Name);
                 }
             }
         }
 
-        var references = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        // Build type nodes: structs are root candidates, interfaces are not
+        var typeNodes = new List<ReachabilityAnalyzer.TypeNode>();
+
         foreach (var strct in allStructs)
         {
-            references[strct.Name] = strct.GetReferencedTypes(allTypeNames);
+            typeNodes.Add(new ReachabilityAnalyzer.TypeNode
+            {
+                Name = strct.Name,
+                HasOperations = strct.Methods?.Any() ?? false,
+                IsRootCandidate = true,
+                ReferencedTypes = strct.GetReferencedTypes(allTypeNames)
+            });
         }
 
         foreach (var iface in allInterfaces)
         {
-            references[iface.Name] = GetReferencedTypes(iface, allTypeNames);
+            typeNodes.Add(new ReachabilityAnalyzer.TypeNode
+            {
+                Name = iface.Name,
+                HasOperations = iface.Methods?.Any() ?? false,
+                IsRootCandidate = false,
+                ReferencedTypes = GetReferencedTypes(iface, allTypeNames)
+            });
         }
 
-        var referencedBy = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var (typeName, refs) in references)
-        {
-            foreach (var target in refs)
-            {
-                if (!string.Equals(target, typeName, StringComparison.OrdinalIgnoreCase))
-                {
-                    referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
-                }
-            }
-        }
-
-        var operationTypes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var strct in allStructs)
-        {
-            if (strct.Methods?.Any() ?? false)
-            {
-                operationTypes.Add(strct.Name);
-            }
-        }
-
-        foreach (var iface in allInterfaces)
-        {
-            if (iface.Methods?.Any() ?? false)
-            {
-                operationTypes.Add(iface.Name);
-            }
-        }
-
-        var rootStructs = allStructs
-            .Where(strct =>
-            {
-                var hasOperations = strct.Methods?.Any() ?? false;
-                var referencesOperations = references.TryGetValue(strct.Name, out var refs) && refs.Any(operationTypes.Contains);
-                var isReferenced = referencedBy.ContainsKey(strct.Name);
-                return !isReferenced && (hasOperations || referencesOperations);
-            })
-            .ToList();
-
-        if (rootStructs.Count == 0)
-        {
-            rootStructs = allStructs
-                .Where(strct =>
-                {
-                    var hasOperations = strct.Methods?.Any() ?? false;
-                    var referencesOperations = references.TryGetValue(strct.Name, out var refs) && refs.Any(operationTypes.Contains);
-                    return hasOperations || referencesOperations;
-                })
-                .ToList();
-        }
-
-        var reachable = new HashSet<string>(StringComparer.Ordinal);
-        var queue = new Queue<string>();
-
-        foreach (var root in rootStructs)
-        {
-            if (reachable.Add(root.Name))
-            {
-                queue.Enqueue(root.Name);
-            }
-        }
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            if (references.TryGetValue(current, out var refs))
-            {
-                foreach (var typeName in refs)
-                {
-                    if (reachable.Add(typeName))
-                    {
-                        queue.Enqueue(typeName);
-                    }
-                }
-            }
-
-            if (interfaceImplementers.TryGetValue(current, out var implementers))
-            {
-                foreach (var impl in implementers)
-                {
-                    if (reachable.Add(impl.Name))
-                    {
-                        queue.Enqueue(impl.Name);
-                    }
-                }
-            }
-        }
-
-        return reachable;
+        return ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.Ordinal);
     }
 
     private static HashSet<string> GetReferencedTypes(IfaceApi iface, HashSet<string> allTypeNames)
     {
-        HashSet<string> tokens = new(StringComparer.OrdinalIgnoreCase);
+        // Go is case-sensitive — use Ordinal, consistent with struct GetReferencedTypes
+        HashSet<string> tokens = new(StringComparer.Ordinal);
 
         // Embedded interfaces are direct composition dependencies
         foreach (var embed in iface.Embeds ?? [])

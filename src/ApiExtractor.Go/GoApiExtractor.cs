@@ -92,48 +92,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
-        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
-        var availability = GetAvailability();
-        ProcessResult result;
-
-        if (availability.Mode == ExtractorMode.NativeBinary)
-        {
-            result = await ProcessSandbox.ExecuteAsync(
-                availability.ExecutablePath!,
-                ["--json", rootPath],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-        }
-        else if (availability.Mode == ExtractorMode.RuntimeInterpreter)
-        {
-            var binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
-            result = await ProcessSandbox.ExecuteAsync(
-                binaryPath,
-                ["--json", rootPath],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-        }
-        else if (availability.Mode == ExtractorMode.Docker)
-        {
-            result = await DockerSandbox.ExecuteAsync(
-                availability.DockerImageName!,
-                rootPath,
-                ["--json", rootPath],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-        }
-        else
-        {
-            throw new InvalidOperationException(availability.UnavailableReason ?? "Go extractor not available");
-        }
-
-        if (!result.Success)
-        {
-            var errorMsg = result.TimedOut
-                ? $"Go extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Go extractor failed: {result.StandardError}";
-            throw new InvalidOperationException(errorMsg);
-        }
+        var result = await RunExtractorAsync("--json", rootPath, ct).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(result.StandardOutput))
         {
@@ -148,6 +107,16 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsGoAsync(string rootPath, CancellationToken ct = default)
     {
+        var result = await RunExtractorAsync("--stub", rootPath, ct).ConfigureAwait(false);
+        return result.StandardOutput;
+    }
+
+    /// <summary>
+    /// Runs the Go extractor with the given output flag, dispatching to the correct
+    /// execution mode (NativeBinary, RuntimeInterpreter, or Docker).
+    /// </summary>
+    private async Task<ProcessResult> RunExtractorAsync(string outputFlag, string rootPath, CancellationToken ct)
+    {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = GetAvailability();
         ProcessResult result;
@@ -156,7 +125,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         {
             result = await ProcessSandbox.ExecuteAsync(
                 availability.ExecutablePath!,
-                ["--stub", rootPath],
+                [outputFlag, rootPath],
                 cancellationToken: ct
             ).ConfigureAwait(false);
         }
@@ -165,7 +134,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             var binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
             result = await ProcessSandbox.ExecuteAsync(
                 binaryPath,
-                ["--stub", rootPath],
+                [outputFlag, rootPath],
                 cancellationToken: ct
             ).ConfigureAwait(false);
         }
@@ -174,7 +143,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             result = await DockerSandbox.ExecuteAsync(
                 availability.DockerImageName!,
                 rootPath,
-                ["--stub", rootPath],
+                [outputFlag, rootPath],
                 cancellationToken: ct
             ).ConfigureAwait(false);
         }
@@ -191,7 +160,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             throw new InvalidOperationException(errorMsg);
         }
 
-        return result.StandardOutput;
+        return result;
     }
 
     /// <summary>

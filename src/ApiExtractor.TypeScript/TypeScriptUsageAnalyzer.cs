@@ -204,130 +204,50 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             .Concat(interfacesByName.Keys)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var interfaceImplementers = new Dictionary<string, List<ClassInfo>>(StringComparer.OrdinalIgnoreCase);
+        // Build interface→implementer edges for BFS
+        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var cls in allClasses)
         {
             foreach (var iface in cls.Implements ?? [])
             {
                 var ifaceName = iface.Split('<')[0];
-                if (!interfaceImplementers.TryGetValue(ifaceName, out var list))
+                if (!additionalEdges.TryGetValue(ifaceName, out var list))
                 {
                     list = [];
-                    interfaceImplementers[ifaceName] = list;
+                    additionalEdges[ifaceName] = list;
                 }
-                list.Add(cls);
+                list.Add(cls.Name.Split('<')[0]);
             }
         }
 
-        var references = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        // Build type nodes: classes are root candidates, interfaces are not
+        var typeNodes = new List<ReachabilityAnalyzer.TypeNode>();
+
         foreach (var cls in allClasses)
         {
             var name = cls.Name.Split('<')[0];
-            references[name] = cls.GetReferencedTypes(allTypeNames);
+            typeNodes.Add(new ReachabilityAnalyzer.TypeNode
+            {
+                Name = name,
+                HasOperations = cls.Methods?.Any() ?? false,
+                IsRootCandidate = true,
+                ReferencedTypes = cls.GetReferencedTypes(allTypeNames)
+            });
         }
 
         foreach (var iface in allInterfaces)
         {
             var name = iface.Name.Split('<')[0];
-            references[name] = GetReferencedTypes(iface, allTypeNames);
+            typeNodes.Add(new ReachabilityAnalyzer.TypeNode
+            {
+                Name = name,
+                HasOperations = iface.Methods?.Any() ?? false,
+                IsRootCandidate = false,
+                ReferencedTypes = GetReferencedTypes(iface, allTypeNames)
+            });
         }
 
-        var referencedBy = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (typeName, refs) in references)
-        {
-            foreach (var target in refs)
-            {
-                if (!string.Equals(target, typeName, StringComparison.OrdinalIgnoreCase))
-                {
-                    referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
-                }
-            }
-        }
-
-        var operationTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var cls in allClasses)
-        {
-            if (cls.Methods?.Any() ?? false)
-            {
-                operationTypes.Add(cls.Name.Split('<')[0]);
-            }
-        }
-
-        foreach (var iface in allInterfaces)
-        {
-            if (iface.Methods?.Any() ?? false)
-            {
-                operationTypes.Add(iface.Name.Split('<')[0]);
-            }
-        }
-
-        var rootClasses = classesByName
-            .Values
-            .Where(cls =>
-            {
-                var name = cls.Name.Split('<')[0];
-                var hasOperations = cls.Methods?.Any() ?? false;
-                var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
-                var isReferenced = referencedBy.ContainsKey(name);
-                return !isReferenced && (hasOperations || referencesOperations);
-            })
-            .ToList();
-
-        if (rootClasses.Count == 0)
-        {
-            rootClasses = classesByName
-                .Values
-                .Where(cls =>
-                {
-                    var name = cls.Name.Split('<')[0];
-                    var hasOperations = cls.Methods?.Any() ?? false;
-                    var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
-                    return hasOperations || referencesOperations;
-                })
-                .ToList();
-        }
-
-        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var queue = new Queue<string>();
-
-        foreach (var root in rootClasses)
-        {
-            var name = root.Name.Split('<')[0];
-            if (reachable.Add(name))
-            {
-                queue.Enqueue(name);
-            }
-        }
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-
-            if (references.TryGetValue(current, out var refs))
-            {
-                foreach (var typeName in refs)
-                {
-                    if (reachable.Add(typeName))
-                    {
-                        queue.Enqueue(typeName);
-                    }
-                }
-            }
-
-            if (interfaceImplementers.TryGetValue(current, out var implementers))
-            {
-                foreach (var impl in implementers)
-                {
-                    var implName = impl.Name.Split('<')[0];
-                    if (reachable.Add(implName))
-                    {
-                        queue.Enqueue(implName);
-                    }
-                }
-            }
-        }
-
-        return reachable;
+        return ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.OrdinalIgnoreCase);
     }
 
     private static HashSet<string> GetReferencedTypes(InterfaceInfo iface, HashSet<string> allTypeNames)

@@ -70,12 +70,14 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
         var files = Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories)
             .Where(f =>
             {
-                // Filter out build output, version control, and common non-source directories
-                // to avoid scanning .git, node_modules, etc. in monorepo layouts.
+                // Filter out build output, version control, and common non-source directories.
+                // ContainsSegment does boundary-aware matching (e.g. "bin" won't match "binary")
+                // so this is safe against partial-name collisions.
                 var relativePath = Path.GetRelativePath(rootPath, f);
                 return !ContainsSegment(relativePath, "obj")
                     && !ContainsSegment(relativePath, "bin")
                     && !ContainsSegment(relativePath, ".git")
+                    && !ContainsSegment(relativePath, ".vs")
                     && !ContainsSegment(relativePath, "node_modules");
             })
             .ToList();

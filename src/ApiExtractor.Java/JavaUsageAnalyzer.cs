@@ -181,108 +181,32 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             .Select(i => i.Name.Split('<')[0])
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var interfaceImplementers = new Dictionary<string, List<ClassInfo>>(StringComparer.OrdinalIgnoreCase);
+        // Build interface→implementer edges for BFS
+        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var cls in allClasses)
         {
             foreach (var iface in cls.Implements ?? [])
             {
                 var ifaceName = iface.Split('<')[0];
-                if (!interfaceImplementers.TryGetValue(ifaceName, out var list))
+                if (!additionalEdges.TryGetValue(ifaceName, out var list))
                 {
                     list = [];
-                    interfaceImplementers[ifaceName] = list;
+                    additionalEdges[ifaceName] = list;
                 }
-                list.Add(cls);
+                list.Add(cls.Name.Split('<')[0]);
             }
         }
 
-        var references = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var cls in allClasses)
+        // Build type nodes for reachability analysis
+        var typeNodes = allClasses.Select(c => new ReachabilityAnalyzer.TypeNode
         {
-            var name = cls.Name.Split('<')[0];
-            references[name] = cls.GetReferencedTypes(allTypeNames);
-        }
+            Name = c.Name.Split('<')[0],
+            HasOperations = c.Methods?.Any() ?? false,
+            IsRootCandidate = !interfaceNames.Contains(c.Name.Split('<')[0]),
+            ReferencedTypes = c.GetReferencedTypes(allTypeNames)
+        }).ToList();
 
-        var referencedBy = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var refs in references.Values)
-        {
-            foreach (var target in refs)
-            {
-                referencedBy[target] = referencedBy.TryGetValue(target, out var count) ? count + 1 : 1;
-            }
-        }
-
-        var operationTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var cls in allClasses)
-        {
-            if (cls.Methods?.Any() ?? false)
-            {
-                operationTypes.Add(cls.Name.Split('<')[0]);
-            }
-        }
-
-        var rootClasses = concreteClasses
-            .Where(cls =>
-            {
-                var name = cls.Name.Split('<')[0];
-                var hasOperations = cls.Methods?.Any() ?? false;
-                var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
-                var isReferenced = referencedBy.ContainsKey(name);
-                return !isReferenced && (hasOperations || referencesOperations);
-            })
-            .ToList();
-
-        if (rootClasses.Count == 0)
-        {
-            rootClasses = concreteClasses
-                .Where(cls =>
-                {
-                    var name = cls.Name.Split('<')[0];
-                    var hasOperations = cls.Methods?.Any() ?? false;
-                    var referencesOperations = references.TryGetValue(name, out var refs) && refs.Any(operationTypes.Contains);
-                    return hasOperations || referencesOperations;
-                })
-                .ToList();
-        }
-
-        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var queue = new Queue<string>();
-
-        foreach (var client in rootClasses)
-        {
-            var name = client.Name.Split('<')[0];
-            if (reachable.Add(name))
-            {
-                queue.Enqueue(name);
-            }
-        }
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            if (references.TryGetValue(current, out var refs))
-            {
-                foreach (var typeName in refs)
-                {
-                    if (reachable.Add(typeName))
-                    {
-                        queue.Enqueue(typeName);
-                    }
-                }
-            }
-
-            if (interfaceNames.Contains(current) && interfaceImplementers.TryGetValue(current, out var implementers))
-            {
-                foreach (var impl in implementers)
-                {
-                    var implName = impl.Name.Split('<')[0];
-                    if (reachable.Add(implName))
-                    {
-                        queue.Enqueue(implName);
-                    }
-                }
-            }
-        }
+        var reachable = ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.OrdinalIgnoreCase);
 
         return allClasses
             .Where(c => reachable.Contains(c.Name.Split('<')[0]) && (c.Methods?.Any() ?? false))

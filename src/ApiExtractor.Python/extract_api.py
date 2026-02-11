@@ -29,107 +29,92 @@ except ImportError:
 # Builtin Type Detection
 # =============================================================================
 
-# Comprehensive set of Python builtin types (from builtins, typing, collections.abc, etc.)
-PYTHON_BUILTINS = frozenset({
-    # Python builtins
-    "int", "float", "str", "bool", "bytes", "bytearray", "complex",
-    "list", "dict", "set", "frozenset", "tuple",
-    "None", "NoneType", "type", "object", "super",
-    "range", "slice", "memoryview",
-    "property", "classmethod", "staticmethod",
-    "Exception", "BaseException", "StopIteration", "GeneratorExit",
-    "SystemExit", "KeyboardInterrupt", "ImportError", "ModuleNotFoundError",
-    "OSError", "IOError", "EnvironmentError", "EOFError",
-    "RuntimeError", "RecursionError", "NotImplementedError",
-    "NameError", "UnboundLocalError", "AttributeError", "SyntaxError",
-    "IndentationError", "TabError", "TypeError", "ValueError",
-    "UnicodeError", "UnicodeEncodeError", "UnicodeDecodeError", "UnicodeTranslateError",
-    "AssertionError", "IndexError", "KeyError", "OverflowError", "ZeroDivisionError",
-    "FloatingPointError", "ArithmeticError", "LookupError",
-    "ConnectionError", "BrokenPipeError", "ConnectionAbortedError",
-    "ConnectionRefusedError", "ConnectionResetError",
-    "FileExistsError", "FileNotFoundError", "InterruptedError",
-    "IsADirectoryError", "NotADirectoryError", "PermissionError",
-    "ProcessLookupError", "TimeoutError", "BlockingIOError", "ChildProcessError",
-    "Warning", "UserWarning", "DeprecationWarning", "PendingDeprecationWarning",
-    "SyntaxWarning", "RuntimeWarning", "FutureWarning", "ImportWarning",
-    "UnicodeWarning", "BytesWarning", "ResourceWarning",
+def _build_builtins_set() -> frozenset[str]:
+    """
+    Build the set of Python stdlib/builtin type names dynamically.
 
-    # typing module
-    "Any", "Union", "Optional", "List", "Dict", "Set", "FrozenSet", "Tuple",
-    "Type", "Callable", "Iterable", "Iterator", "Generator", "AsyncGenerator",
-    "Sequence", "MutableSequence", "Mapping", "MutableMapping",
-    "Collection", "Reversible", "Container", "Hashable", "Sized",
-    "Awaitable", "Coroutine", "AsyncIterable", "AsyncIterator",
-    "ContextManager", "AsyncContextManager",
-    "Pattern", "Match", "IO", "TextIO", "BinaryIO",
-    "NoReturn", "Never", "Self", "LiteralString", "TypeAlias",
-    "Final", "Literal", "ClassVar", "TypeVar", "TypeVarTuple", "ParamSpec",
-    "Generic", "Protocol", "Annotated", "TypedDict", "NamedTuple",
-    "NewType", "cast", "overload", "final", "dataclass_transform",
-    "Concatenate", "TypeGuard", "Required", "NotRequired", "Unpack",
+    Uses runtime introspection of the executing interpreter so
+    the set automatically stays current across Python versions
+    (e.g. ExceptionGroup in 3.11, TaskGroup in 3.11, etc.)
+    without manual maintenance.
 
-    # collections.abc (only entries not already in typing above)
-    "ABC", "ABCMeta", "abstractmethod", "abstractproperty",
-    "MutableSet",
-    "MappingView", "KeysView", "ItemsView", "ValuesView",
-    "ByteString", "Buffer",
+    Supplements with a small static set for names exported from
+    stdlib modules whose public names aren't discoverable via
+    simple dir()/`__all__` introspection (e.g. collections.abc,
+    contextlib decorators, functools helpers).
+    """
+    names: set[str] = set()
 
-    # contextlib
-    "contextmanager", "asynccontextmanager", "closing", "suppress",
-    "redirect_stdout", "redirect_stderr", "ExitStack", "AsyncExitStack",
-    "nullcontext", "aclosing",
+    # 1. builtins — all builtin names (types, exceptions, functions)
+    import builtins
+    names.update(name for name in dir(builtins) if not name.startswith("_"))
 
-    # functools
-    "partial", "partialmethod", "reduce", "wraps", "update_wrapper",
-    "total_ordering", "cmp_to_key", "lru_cache", "cached_property", "singledispatch",
+    # 2. typing — all public typing constructs
+    import typing
+    names.update(getattr(typing, "__all__", []))
+    # Also grab names that aren't in __all__ but are commonly used in annotations
+    names.update(
+        name for name in dir(typing)
+        if not name.startswith("_") and name[0].isupper()
+    )
 
-    # io module
-    "IOBase", "RawIOBase", "BufferedIOBase", "TextIOBase",
-    "FileIO", "BytesIO", "StringIO", "BufferedReader", "BufferedWriter",
-    "BufferedRandom", "BufferedRWPair", "TextIOWrapper",
+    # 3. collections.abc — abstract base classes
+    import collections.abc
+    names.update(
+        name for name in dir(collections.abc)
+        if not name.startswith("_") and name[0].isupper()
+    )
 
-    # pathlib
-    "Path", "PurePath", "PurePosixPath", "PureWindowsPath",
-    "PosixPath", "WindowsPath",
+    # 4. abc module
+    import abc
+    names.update(["ABC", "ABCMeta", "abstractmethod"])
 
-    # datetime
-    "date", "time", "datetime", "timedelta", "timezone", "tzinfo",
+    # 5. Static supplement for stdlib names that are used as type annotations
+    #    but aren't discoverable from the modules above.  These are stable
+    #    across Python versions and rarely change.
+    _STDLIB_ANNOTATION_NAMES = {
+        # contextlib
+        "contextmanager", "asynccontextmanager", "closing", "suppress",
+        "redirect_stdout", "redirect_stderr", "ExitStack", "AsyncExitStack",
+        "nullcontext", "aclosing",
+        # functools
+        "partial", "partialmethod", "reduce", "wraps", "update_wrapper",
+        "total_ordering", "cmp_to_key", "lru_cache", "cached_property",
+        "singledispatch",
+        # io
+        "IOBase", "RawIOBase", "BufferedIOBase", "TextIOBase",
+        "FileIO", "BytesIO", "StringIO", "BufferedReader", "BufferedWriter",
+        "BufferedRandom", "BufferedRWPair", "TextIOWrapper",
+        # pathlib
+        "Path", "PurePath", "PurePosixPath", "PureWindowsPath",
+        "PosixPath", "WindowsPath",
+        # datetime
+        "date", "time", "datetime", "timedelta", "timezone", "tzinfo",
+        # uuid
+        "UUID",
+        # decimal / fractions
+        "Decimal", "Fraction",
+        # enum
+        "Enum", "IntEnum", "Flag", "IntFlag", "auto", "unique", "StrEnum",
+        # dataclasses
+        "dataclass", "field",
+        # json
+        "JSONEncoder", "JSONDecoder", "JSONDecodeError",
+        # logging
+        "Logger", "Handler", "Formatter", "Filter", "LogRecord",
+        # concurrent.futures
+        "Future", "Executor", "ThreadPoolExecutor", "ProcessPoolExecutor",
+        # asyncio
+        "Task", "Event", "Lock", "Semaphore", "BoundedSemaphore",
+        "Condition", "Queue", "LifoQueue", "PriorityQueue",
+        "StreamReader", "StreamWriter",
+    }
+    names.update(_STDLIB_ANNOTATION_NAMES)
 
-    # uuid
-    "UUID", "uuid1", "uuid3", "uuid4", "uuid5",
+    return frozenset(names)
 
-    # decimal
-    "Decimal",
 
-    # fractions
-    "Fraction",
-
-    # enum
-    "Enum", "IntEnum", "Flag", "IntFlag", "auto", "unique", "StrEnum",
-
-    # dataclasses
-    "dataclass", "field", "fields", "asdict", "astuple",
-
-    # json
-    "JSONEncoder", "JSONDecoder", "JSONDecodeError",
-
-    # re
-    "RegexFlag",
-    "compile", "search", "match", "fullmatch",
-    "split", "findall", "finditer", "sub", "subn",
-
-    # logging
-    "Logger", "Handler", "Formatter", "Filter", "LogRecord",
-
-    # concurrent.futures
-    "Future", "Executor", "ThreadPoolExecutor", "ProcessPoolExecutor",
-
-    # asyncio
-    "Task", "Event", "Lock", "Semaphore", "BoundedSemaphore",
-    "Condition", "Queue", "LifoQueue", "PriorityQueue",
-    "StreamReader", "StreamWriter",
-})
+PYTHON_BUILTINS = _build_builtins_set()
 
 # Packages that are part of Python stdlib (not external dependencies)
 PYTHON_STDLIB_PACKAGES = frozenset({

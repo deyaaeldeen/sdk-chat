@@ -163,6 +163,8 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
             m.Classes?.Select(c => new ClassInfo
             {
                 Name = c.Name ?? "",
+                EntryPoint = c.EntryPoint,
+                ReExportedFrom = c.ReExportedFrom,
                 Base = c.Base,
                 Doc = c.Doc,
                 Methods = c.Methods?.Select(mt => new MethodInfo(
@@ -178,6 +180,8 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
             m.Functions?.Select(f => new FunctionInfo
             {
                 Name = f.Name ?? "",
+                EntryPoint = f.EntryPoint,
+                ReExportedFrom = f.ReExportedFrom,
                 Signature = f.Sig ?? "",
                 Doc = f.Doc,
                 IsAsync = f.Async

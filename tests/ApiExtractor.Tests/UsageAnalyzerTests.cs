@@ -429,4 +429,57 @@ public class UsageAnalyzerTests
     }
 
     #endregion
+
+    #region Regression: Case-Insensitive Client Type Resolution (Fix #2)
+
+    [Fact]
+    public async Task CSharpUsageAnalyzer_CaseInsensitiveClientTypeResolution()
+    {
+        // This tests that stylistic casing differences in code don't affect detection
+        var (tempDir, _) = await SetupTestFilesAsync(
+            ("sample.cs", """
+                var chatClient = new ChatClient();
+                chatClient.GetCompletionAsync("hello");
+                """));
+
+        try
+        {
+            var apiIndex = new ApiIndex
+            {
+                Package = "TestSdk",
+                Namespaces =
+                [
+                    new NamespaceInfo
+                    {
+                        Name = "TestSdk",
+                        Types =
+                        [
+                            new TypeInfo
+                            {
+                                Name = "ChatClient",
+                                Kind = "class",
+                                Members =
+                                [
+                                    new MemberInfo { Name = "GetCompletionAsync", Kind = "method", Signature = "Task<string> GetCompletionAsync(string prompt)" }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
+
+            // Should detect the method call regardless of variable casing
+            Assert.NotEmpty(result.CoveredOperations);
+            // The ClientType should be the canonical name from API index
+            Assert.Equal("ChatClient", result.CoveredOperations[0].ClientType);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    #endregion
 }

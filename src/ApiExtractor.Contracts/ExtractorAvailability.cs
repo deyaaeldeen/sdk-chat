@@ -281,14 +281,15 @@ public static class ExtractorAvailability
 
     /// <summary>
     /// Gets installation hint for a language's runtime tool.
+    /// Provides exact shell commands where possible so the user can copy-paste to fix.
     /// </summary>
     private static string GetInstallHint(string language) => language.ToLowerInvariant() switch
     {
-        "go" => "Install Go from https://go.dev",
-        "python" => "Install Python 3.9+ from https://python.org",
-        "java" => "Install JBang from https://jbang.dev",
-        "typescript" or "javascript" => "Install Node.js 20+ from https://nodejs.org",
-        "dotnet" or "csharp" => "Install .NET SDK from https://dot.net",
+        "go" => "Install Go: https://go.dev/dl/ — or run: curl -fsSL https://go.dev/dl/go1.23.0.linux-amd64.tar.gz | sudo tar -C /usr/local -xzf -",
+        "python" => "Install Python 3.9+: https://python.org — or run: sudo apt install python3 (Debian/Ubuntu) / brew install python3 (macOS)",
+        "java" => "Install JBang: https://jbang.dev — or run: curl -Ls https://sh.jbang.dev | bash -s - app setup",
+        "typescript" or "javascript" => "Install Node.js 20+: https://nodejs.org — or run: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -",
+        "dotnet" or "csharp" => "Install .NET SDK: https://dot.net — or run: curl -fsSL https://dot.net/v1/dotnet-install.sh | bash",
         _ => $"Install the {language} runtime"
     };
 }

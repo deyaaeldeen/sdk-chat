@@ -100,7 +100,9 @@ public sealed record RawPythonClass(
     [property: JsonPropertyName("base")] string? Base,
     [property: JsonPropertyName("doc")] string? Doc,
     [property: JsonPropertyName("methods")] List<RawPythonMethod>? Methods,
-    [property: JsonPropertyName("properties")] List<RawPythonProperty>? Properties
+    [property: JsonPropertyName("properties")] List<RawPythonProperty>? Properties,
+    [property: JsonPropertyName("entryPoint")] bool? EntryPoint = null,
+    [property: JsonPropertyName("reExportedFrom")] string? ReExportedFrom = null
 );
 
 public sealed record RawPythonMethod(
@@ -122,7 +124,9 @@ public sealed record RawPythonFunction(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("sig")] string? Sig,
     [property: JsonPropertyName("doc")] string? Doc,
-    [property: JsonPropertyName("async")] bool? Async
+    [property: JsonPropertyName("async")] bool? Async,
+    [property: JsonPropertyName("entryPoint")] bool? EntryPoint = null,
+    [property: JsonPropertyName("reExportedFrom")] string? ReExportedFrom = null
 );
 
 #endregion
