@@ -39,6 +39,12 @@
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </Content>
     </ItemGroup>
+    <!-- Also transit node_modules so dependent projects (tests) get ts-morph etc. -->
+    <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/node_modules')">
+      <Content Include="node_modules/**/*">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+    </ItemGroup>
   </Target>
 
   <!-- Pre-install npm dependencies during build for faster cold starts -->
@@ -76,21 +82,11 @@
           Condition="'$(NpmExitCode)' == '0'"
           StandardOutputImportance="low" />
 
-    <!-- Copy node_modules to output directory using robocopy/cp -->
-    <Exec Command="xcopy /E /I /Y /Q &quot;node_modules&quot; &quot;$(OutputPath)node_modules&quot;"
-          WorkingDirectory="$(MSBuildProjectDirectory)"
-          Condition="'$(NpmExitCode)' == '0' and Exists('$(MSBuildProjectDirectory)/node_modules') and $([MSBuild]::IsOSPlatform('Windows'))"
-          StandardOutputImportance="low"
-          IgnoreExitCode="true" />
-
-    <Exec Command="cp -r node_modules &quot;$(OutputPath)&quot;"
-          WorkingDirectory="$(MSBuildProjectDirectory)"
-          Condition="'$(NpmExitCode)' == '0' and Exists('$(MSBuildProjectDirectory)/node_modules') and !$([MSBuild]::IsOSPlatform('Windows')) and !Exists('$(OutputPath)node_modules')"
-          StandardOutputImportance="low" />
+    <!-- node_modules transit to output via Content items in AddDistFilesToCopyItems -->
 
     <Message Importance="normal"
              Text="npm dependencies installed successfully."
-             Condition="'$(NpmExitCode)' == '0' and Exists('$(OutputPath)node_modules')" />
+             Condition="'$(NpmExitCode)' == '0' and Exists('$(MSBuildProjectDirectory)/node_modules')" />
 
     <Message Importance="normal"
              Text="npm not found - dependencies will be installed on first use."
