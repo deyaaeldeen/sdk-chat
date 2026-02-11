@@ -59,7 +59,13 @@ public static class DockerSandbox
     {
         // Allow bypass for development/CI environments
         if (string.Equals(Environment.GetEnvironmentVariable("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "Docker image registry validation bypassed via SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY=true. " +
+                "Image '{0}' was accepted without registry check. " +
+                "Do NOT use this setting in production.", image);
             return;
+        }
 
         foreach (var prefix in AllowedRegistryPrefixes)
         {

@@ -70,11 +70,11 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
         try
         {
-            var result = await ExtractAsync(rootPath, ct).ConfigureAwait(false);
+            var (result, warnings) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
             if (result != null)
             {
                 ExtractorTelemetry.RecordResult(activity, true, result.Packages.Count);
-                return ExtractorResult<ApiIndex>.CreateSuccess(result);
+                return ExtractorResult<ApiIndex>.CreateSuccess(result, warnings);
             }
             ExtractorTelemetry.RecordResult(activity, false, error: "No API surface extracted");
             return ExtractorResult<ApiIndex>.CreateFailure("No API surface extracted");
@@ -92,15 +92,28 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
+        var (index, _) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
+        return index;
+    }
+
+    /// <summary>
+    /// Shared extraction logic that returns both the API index and any stderr warnings.
+    /// </summary>
+    private async Task<(ApiIndex? Index, IReadOnlyList<string> Warnings)> ExtractCoreAsync(string rootPath, CancellationToken ct)
+    {
         var result = await RunExtractorAsync("--json", rootPath, ct).ConfigureAwait(false);
+        var warnings = ParseStderrWarnings(result.StandardError);
 
         if (string.IsNullOrWhiteSpace(result.StandardOutput))
-        {
-            return null;
-        }
+            return (null, warnings);
 
-        return JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+        return (JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex), warnings);
     }
+
+    private static IReadOnlyList<string> ParseStderrWarnings(string? stderr)
+        => string.IsNullOrWhiteSpace(stderr)
+            ? []
+            : stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>
     /// Extract and format as Go stub syntax.
@@ -197,6 +210,10 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             var cacheDir = Path.Combine(Path.GetTempPath(), "sdk-chat", "go-cache");
             Directory.CreateDirectory(cacheDir);
 
+            // Evict stale cached binaries to prevent unbounded disk growth in CI.
+            // Only the binary matching the current source hash is kept.
+            EvictStaleCacheEntries(cacheDir, hash);
+
             var binaryName = OperatingSystem.IsWindows() ? $"extractor_{hash}.exe" : $"extractor_{hash}";
 
             // SECURITY: Validate binary name to prevent path traversal attacks
@@ -232,6 +249,32 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         finally
         {
             CompileLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Removes cached Go extractor binaries that don't match the current source hash.
+    /// Prevents unbounded disk growth in CI environments where the source changes frequently.
+    /// </summary>
+    private static void EvictStaleCacheEntries(string cacheDir, string currentHash)
+    {
+        try
+        {
+            var prefix = "extractor_";
+            foreach (var file in Directory.EnumerateFiles(cacheDir, $"{prefix}*"))
+            {
+                var fileName = Path.GetFileNameWithoutExtension(file);
+                // Keep the binary matching the current hash
+                if (fileName.EndsWith(currentHash, StringComparison.Ordinal))
+                    continue;
+
+                try { File.Delete(file); }
+                catch { /* Best-effort: file may be in use by another process */ }
+            }
+        }
+        catch
+        {
+            // Best-effort: cache eviction failure is non-critical
         }
     }
 

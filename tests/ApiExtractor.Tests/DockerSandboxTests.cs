@@ -128,6 +128,50 @@ public class DockerSandboxTests : IDisposable
     }
 
     [Fact]
+    public void ValidateImageSource_BypassEmitsTraceWarning()
+    {
+        Environment.SetEnvironmentVariable("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY", "true");
+
+        // Capture trace output to verify warning is emitted
+        using var traceListener = new TestTraceListener();
+        System.Diagnostics.Trace.Listeners.Add(traceListener);
+        try
+        {
+            DockerSandbox.ValidateImageSource("evil-registry.io/miner:latest");
+
+            Assert.True(traceListener.Warnings.Count > 0, "Expected at least one trace warning when bypass is active");
+            Assert.Contains(traceListener.Warnings, w =>
+                w.Contains("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY") &&
+                w.Contains("evil-registry.io/miner:latest"));
+        }
+        finally
+        {
+            System.Diagnostics.Trace.Listeners.Remove(traceListener);
+        }
+    }
+
+    [Fact]
+    public void ValidateImageSource_NoWarning_WhenBypassNotActive()
+    {
+        Environment.SetEnvironmentVariable("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY", null);
+
+        using var traceListener = new TestTraceListener();
+        System.Diagnostics.Trace.Listeners.Add(traceListener);
+        try
+        {
+            // Trusted image — should not emit bypass warning
+            DockerSandbox.ValidateImageSource("mcr.microsoft.com/sdk-chat/python:latest");
+
+            Assert.DoesNotContain(traceListener.Warnings, w =>
+                w.Contains("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY"));
+        }
+        finally
+        {
+            System.Diagnostics.Trace.Listeners.Remove(traceListener);
+        }
+    }
+
+    [Fact]
     public void GetImageName_Rejects_UntrustedOverride()
     {
         Environment.SetEnvironmentVariable("SDK_CHAT_DOCKER_ALLOW_ANY_REGISTRY", null);

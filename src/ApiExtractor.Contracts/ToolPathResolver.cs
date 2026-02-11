@@ -162,6 +162,8 @@ public static partial class ToolPathResolver
     /// <summary>
     /// Validates that an executable exists and runs successfully with given args.
     /// Drains stdout/stderr before WaitForExit to prevent pipe-buffer deadlocks.
+    /// Accepts exit code 0 or 1 for --help (some tools return 1 for help text),
+    /// and only exit code 0 for other args (e.g., --version).
     /// </summary>
     private static bool ValidateExecutable(string path, string args)
     {
@@ -177,7 +179,8 @@ public static partial class ToolPathResolver
             };
 
             // SECURITY: Use ArgumentList for proper escaping - prevents injection
-            foreach (var arg in args.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            var splitArgs = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var arg in splitArgs)
             {
                 psi.ArgumentList.Add(arg);
             }
@@ -191,8 +194,19 @@ public static partial class ToolPathResolver
             process.StandardOutput.ReadToEnd();
             process.StandardError.ReadToEnd();
 
-            process.WaitForExit(3000);
-            return process.ExitCode == 0;
+            if (!process.WaitForExit(3000))
+            {
+                try { process.Kill(); }
+                catch { /* best-effort */ }
+                return false;
+            }
+
+            // Exit code 0 or 1 are acceptable for --help (some tools return 1 for help)
+            // Exit code 0 is required for --version
+            // Use exact token match to avoid false positives from substrings like "--helper"
+            var isHelpArgs = Array.Exists(splitArgs, a => a == "--help");
+            int[] acceptableExitCodes = isHelpArgs ? [0, 1] : [0];
+            return acceptableExitCodes.Contains(process.ExitCode);
         }
         catch (Exception ex)
         {

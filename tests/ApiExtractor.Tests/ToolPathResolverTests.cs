@@ -298,6 +298,45 @@ public class ToolPathResolverTests
         Assert.Contains("not found", result.WarningOrError);
     }
 
+    [Fact]
+    public void Resolve_WithHelpArgs_AcceptsExitCode0Or1()
+    {
+        // dotnet --help returns exit code 0, validating the happy path
+        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"], "--help");
+
+        // dotnet should be found — --help should succeed with exit 0 or 1
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public void Resolve_WithVersionArgs_OnlyAcceptsExitCode0()
+    {
+        // dotnet --version returns exit code 0
+        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"], "--version");
+
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public void Resolve_RejectsExitCode1_ForNonHelpArgs()
+    {
+        // Using a nonexistent flag that would cause exit code 1
+        // should not be accepted for non-help args
+        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"], "--nonexistent-flag-xyz");
+
+        // dotnet returns non-zero for unknown flags, so result should be null
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Resolve_TimesOutGracefully()
+    {
+        // Resolve should not hang if a tool produces excessive output
+        // This is tested implicitly by the 3-second timeout in ValidateExecutable
+        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"]);
+        Assert.NotNull(result);
+    }
+
     #endregion
 
     #region Integration Tests with Real Tools

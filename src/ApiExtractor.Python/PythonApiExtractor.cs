@@ -71,8 +71,8 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
         try
         {
-            var result = await ExtractAsync(rootPath, ct).ConfigureAwait(false);
-            return ExtractorResult<ApiIndex>.CreateSuccess(result);
+            var (index, warnings) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
+            return ExtractorResult<ApiIndex>.CreateSuccess(index, warnings);
         }
         catch (Exception ex)
         {
@@ -81,6 +81,15 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     }
 
     public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+    {
+        var (index, _) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
+        return index;
+    }
+
+    /// <summary>
+    /// Shared extraction logic that returns both the API index and any stderr warnings.
+    /// </summary>
+    private async Task<(ApiIndex Index, IReadOnlyList<string> Warnings)> ExtractCoreAsync(string rootPath, CancellationToken ct)
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
@@ -142,8 +151,14 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
         var apiIndex = ConvertToApiIndex(raw);
         ExtractorTelemetry.RecordResult(activity, true, apiIndex.Modules.Count);
-        return apiIndex;
+        var warnings = ParseStderrWarnings(result.StandardError);
+        return (apiIndex, warnings);
     }
+
+    private static IReadOnlyList<string> ParseStderrWarnings(string? stderr)
+        => string.IsNullOrWhiteSpace(stderr)
+            ? []
+            : stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static string GetScriptPath()
     {

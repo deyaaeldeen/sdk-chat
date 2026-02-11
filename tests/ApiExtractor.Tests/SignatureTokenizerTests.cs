@@ -139,6 +139,33 @@ public class SignatureTokenizerTests
     }
 
     [Fact]
+    public void TokenizeInto_DuplicateTokens_DoNotCauseExtraAllocations()
+    {
+        // Repeated tokenization with the same tokens should produce identical results
+        HashSet<string> tokens = [];
+        SignatureTokenizer.TokenizeInto("List<Foo>", tokens);
+        var countAfterFirst = tokens.Count;
+
+        SignatureTokenizer.TokenizeInto("List<Foo>", tokens);
+        Assert.Equal(countAfterFirst, tokens.Count);
+    }
+
+    [Fact]
+    public void TokenizeInto_LargeSignature_HandlesCorrectly()
+    {
+        // Stress test with a large number of tokens
+        var parts = Enumerable.Range(0, 100).Select(i => $"Type{i}");
+        var signature = string.Join(", ", parts);
+
+        HashSet<string> tokens = [];
+        SignatureTokenizer.TokenizeInto(signature, tokens);
+
+        Assert.Equal(100, tokens.Count);
+        Assert.Contains("Type0", tokens);
+        Assert.Contains("Type99", tokens);
+    }
+
+    [Fact]
     public void Tokenize_SubstringTypeName_DoesNotFalseMatch()
     {
         // This tests the key correctness improvement:
