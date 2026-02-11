@@ -29,7 +29,7 @@ public class JavaSdkStructuresTests : SdkStructureTestBase
         var info = SdkInfo.Scan(_testRoot);
 
         Assert.Equal(SdkLanguage.Java, info.Language);
-        Assert.Contains("main/java", info.SourceFolder.Replace("\\", "/"));
+        Assert.Contains("main/java", info.SourceFolder.Replace("\\", "/", StringComparison.Ordinal));
         Assert.Equal(examples, info.SamplesFolder);
     }
 
@@ -46,7 +46,7 @@ public class JavaSdkStructuresTests : SdkStructureTestBase
         var info = SdkInfo.Scan(_testRoot);
 
         Assert.Equal(SdkLanguage.Java, info.Language);
-        Assert.Contains("main/java", info.SourceFolder.Replace("\\", "/"));
+        Assert.Contains("main/java", info.SourceFolder.Replace("\\", "/", StringComparison.Ordinal));
     }
 
     // Pattern 3: Gradle Kotlin DSL (build.gradle.kts)
@@ -63,7 +63,7 @@ public class JavaSdkStructuresTests : SdkStructureTestBase
         var info = SdkInfo.Scan(_testRoot);
 
         Assert.Equal(SdkLanguage.Java, info.Language);
-        Assert.Contains("main/java", info.SourceFolder.Replace("\\", "/"));
+        Assert.Contains("main/java", info.SourceFolder.Replace("\\", "/", StringComparison.Ordinal));
     }
 
     // Pattern 4: src/main/java with nested package
@@ -79,7 +79,7 @@ public class JavaSdkStructuresTests : SdkStructureTestBase
         var info = SdkInfo.Scan(_testRoot);
 
         Assert.Equal(SdkLanguage.Java, info.Language);
-        Assert.Contains("main/java", info.SourceFolder.Replace("\\", "/"));
+        Assert.Contains("main/java", info.SourceFolder.Replace("\\", "/", StringComparison.Ordinal));
     }
 
     // Pattern 5: With samples folder at root

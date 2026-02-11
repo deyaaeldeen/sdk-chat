@@ -101,6 +101,11 @@ public sealed record StructApi
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
+    /// <summary>Embedded struct/interface names (Go composition pattern).</summary>
+    [JsonPropertyName("embeds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Embeds { get; init; }
+
     [JsonPropertyName("fields")]
     public IReadOnlyList<FieldApi>? Fields { get; init; }
 
@@ -122,7 +127,7 @@ public sealed record StructApi
     /// <summary>Returns true if this is an Options struct.</summary>
     [JsonIgnore]
     public bool IsOptionsType =>
-        Name.EndsWith("Options") || Name.EndsWith("Config") || Name.EndsWith("Params");
+        Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal) || Name.EndsWith("Params", StringComparison.Ordinal);
 
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
@@ -132,17 +137,25 @@ public sealed record StructApi
         {
             if (IsClientType) return 0;
             if (IsOptionsType) return 1;
-            if (Name.Contains("Error")) return 2;
+            if (Name.Contains("Error", StringComparison.Ordinal)) return 2;
             if (IsModelType) return 3;
             return 4;
         }
     }
 
-    /// <summary>Gets type names referenced in method signatures and fields.</summary>
+    /// <summary>Gets type names referenced in method signatures, fields, and embeds.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
         // Collect all identifier tokens from this type's signatures — O(total chars)
         HashSet<string> tokens = [];
+
+        // Embedded types are direct composition dependencies
+        foreach (var embed in Embeds ?? [])
+        {
+            var embedName = embed.Split('<')[0].TrimStart('*');
+            if (allTypeNames.Contains(embedName))
+                tokens.Add(embedName);
+        }
 
         foreach (var method in Methods ?? [])
         {
@@ -174,6 +187,11 @@ public sealed record IfaceApi
     public string? ReExportedFrom { get; init; }
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    /// <summary>Embedded interface names (Go interface composition).</summary>
+    [JsonPropertyName("embeds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Embeds { get; init; }
 
     [JsonPropertyName("methods")]
     public IReadOnlyList<FuncApi>? Methods { get; init; }

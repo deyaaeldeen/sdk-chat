@@ -119,7 +119,7 @@ public class SampleLanguageContextTests
         var context = new TypeScriptSampleLanguageContext(_fileHelper);
         var instructions = context.GetInstructions();
         Assert.Contains("TypeScript", instructions);
-        Assert.Contains("strict", instructions.ToLower());
+        Assert.Contains("strict", instructions.ToLowerInvariant());
     }
 
     #endregion

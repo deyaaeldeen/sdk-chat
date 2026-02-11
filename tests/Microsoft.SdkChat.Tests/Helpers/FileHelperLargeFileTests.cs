@@ -186,8 +186,8 @@ public class FileHelperLargeFileTests : IDisposable
 
         // Assert - should have section open, file content, section close
         Assert.True(chunks.Count >= 3);
-        Assert.Contains(chunks, c => c.Content.Contains("<source-code>"));
-        Assert.Contains(chunks, c => c.Content.Contains("</source-code>"));
-        Assert.Contains(chunks, c => c.Content.Contains("public class Test"));
+        Assert.Contains(chunks, c => c.Content.Contains("<source-code>", StringComparison.Ordinal));
+        Assert.Contains(chunks, c => c.Content.Contains("</source-code>", StringComparison.Ordinal));
+        Assert.Contains(chunks, c => c.Content.Contains("public class Test", StringComparison.Ordinal));
     }
 }

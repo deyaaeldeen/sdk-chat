@@ -944,9 +944,9 @@ public class SdkInfoTests : IDisposable
 
         // Assert — cookbook (3 imports) should rank above tutorials (1 import)
         var cookbookIdx = info.AllSamplesCandidates.ToList()
-            .FindIndex(c => c.Contains("cookbook"));
+            .FindIndex(c => c.Contains("cookbook", StringComparison.Ordinal));
         var tutorialsIdx = info.AllSamplesCandidates.ToList()
-            .FindIndex(c => c.Contains("tutorials"));
+            .FindIndex(c => c.Contains("tutorials", StringComparison.Ordinal));
 
         Assert.True(cookbookIdx >= 0, "cookbook should be a candidate");
         Assert.True(tutorialsIdx >= 0, "tutorials should be a candidate");

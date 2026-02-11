@@ -359,8 +359,8 @@ class Sample
         // Assert
         Assert.True(result.Success, $"Expected Success=true but got ErrorCode={result.ErrorCode}");
         Assert.NotEmpty(progressMessages);
-        Assert.Contains(progressMessages, m => m.Contains("Found"));
-        Assert.Contains(progressMessages, m => m.Contains("[1/1]"));
+        Assert.Contains(progressMessages, m => m.Contains("Found", StringComparison.Ordinal));
+        Assert.Contains(progressMessages, m => m.Contains("[1/1]", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -422,12 +422,12 @@ client.upload();
         Assert.Equal(2, result.Packages.Length);
 
         // pkg2 should be skipped (no samples)
-        var pkg2Result = result.Packages.FirstOrDefault(p => p.RelativePath?.Contains("keyvault") == true);
+        var pkg2Result = result.Packages.FirstOrDefault(p => p.RelativePath?.Contains("keyvault", StringComparison.Ordinal) == true);
         Assert.NotNull(pkg2Result);
         Assert.True(pkg2Result.SkippedNoSamples, "pkg2 should be skipped because it has no samples");
 
         // pkg1 has samples - it should either be analyzed or failed (depends on extractor availability)
-        var pkg1Result = result.Packages.FirstOrDefault(p => p.RelativePath?.Contains("storage") == true);
+        var pkg1Result = result.Packages.FirstOrDefault(p => p.RelativePath?.Contains("storage", StringComparison.Ordinal) == true);
         Assert.NotNull(pkg1Result);
         Assert.False(pkg1Result.SkippedNoSamples, "pkg1 should not be skipped - it has samples");
     }

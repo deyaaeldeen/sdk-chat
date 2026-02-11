@@ -202,6 +202,10 @@ public static class GoFormatter
                 if (!string.IsNullOrEmpty(iface.Doc))
                     sb.AppendLine($"// {iface.Doc}");
                 sb.AppendLine($"type {iface.Name} interface {{");
+                foreach (var embed in iface.Embeds ?? [])
+                {
+                    sb.AppendLine($"    {embed}");
+                }
                 foreach (var m in iface.Methods ?? [])
                 {
                     var ret = !string.IsNullOrEmpty(m.Ret) ? $" {m.Ret}" : "";
@@ -276,6 +280,10 @@ public static class GoFormatter
                     if (!string.IsNullOrEmpty(iface.Doc))
                         sb.AppendLine($"// {iface.Doc}");
                     sb.AppendLine($"type {iface.Name} interface {{");
+                    foreach (var embed in iface.Embeds ?? [])
+                    {
+                        sb.AppendLine($"    {embed}");
+                    }
                     foreach (var m in iface.Methods ?? [])
                     {
                         var ret = !string.IsNullOrEmpty(m.Ret) ? $" {m.Ret}" : "";
@@ -318,6 +326,13 @@ public static class GoFormatter
         if (!string.IsNullOrEmpty(s.Doc))
             sb.AppendLine($"// {s.Doc}");
         sb.AppendLine($"type {s.Name} struct {{");
+
+        // Embedded types (Go composition)
+        foreach (var embed in s.Embeds ?? [])
+        {
+            sb.AppendLine($"    {embed}");
+        }
+
         foreach (var f in s.Fields ?? [])
         {
             var tag = !string.IsNullOrEmpty(f.Tag) ? $" {f.Tag}" : "";

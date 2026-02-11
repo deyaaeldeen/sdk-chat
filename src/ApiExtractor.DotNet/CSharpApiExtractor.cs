@@ -689,7 +689,7 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
             if (ns.StartsWith(entryNs + ".", StringComparison.OrdinalIgnoreCase))
             {
                 var suffix = ns[(entryNs.Length + 1)..].ToLowerInvariant();
-                if (!suffix.Contains(".internal") && !suffix.Contains(".implementation"))
+                if (!suffix.Contains(".internal", StringComparison.Ordinal) && !suffix.Contains(".implementation", StringComparison.Ordinal))
                 {
                     // Direct children of entry namespace are entry points
                     // But deeper nested ones are typically supporting types
@@ -1125,8 +1125,8 @@ public class CSharpApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     private static bool ContainsSegment(string relativePath, string segment)
     {
-        return relativePath.Contains($"/{segment}/") || relativePath.Contains($"\\{segment}\\")
-            || relativePath.StartsWith($"{segment}/") || relativePath.StartsWith($"{segment}\\")
-            || relativePath.Contains($"/{segment}\\") || relativePath.Contains($"\\{segment}/");
+        return relativePath.Contains($"/{segment}/", StringComparison.Ordinal) || relativePath.Contains($"\\{segment}\\", StringComparison.Ordinal)
+            || relativePath.StartsWith($"{segment}/", StringComparison.Ordinal) || relativePath.StartsWith($"{segment}\\", StringComparison.Ordinal)
+            || relativePath.Contains($"/{segment}\\", StringComparison.Ordinal) || relativePath.Contains($"\\{segment}/", StringComparison.Ordinal);
     }
 }

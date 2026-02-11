@@ -84,7 +84,7 @@ public sealed class CliOptions
             
             Options:
               --json              Output as JSON
-              --stub              Output as {language.ToLower()} stubs (default)
+              --stub              Output as {language.ToLowerInvariant()} stubs (default)
               --pretty, -p        Pretty-print JSON with indentation
               -o, --output <file> Write output to file instead of stdout
               -h, --help          Show this help

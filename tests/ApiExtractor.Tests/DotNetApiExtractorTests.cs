@@ -184,7 +184,7 @@ public class DotNetApiExtractorTests
     {
         var api = await _extractor.ExtractAsync(TestFixturesPath);
         var types = api.Namespaces.SelectMany(n => n.Types).ToList();
-        var genericType = types.FirstOrDefault(t => t.Name.Contains("<") || t.Name.Contains("Result"));
+        var genericType = types.FirstOrDefault(t => t.Name.Contains('<') || t.Name.Contains("Result", StringComparison.Ordinal));
         Assert.NotNull(genericType);
     }
 }

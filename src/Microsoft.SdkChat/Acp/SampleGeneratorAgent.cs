@@ -261,7 +261,7 @@ public sealed class SampleGeneratorAgent(
     {
         var userInput = ExtractUserText(request.Prompt).ToLowerInvariant();
 
-        if (userInput.Contains("cancel"))
+        if (userInput.Contains("cancel", StringComparison.Ordinal))
         {
             await SendTextAsync(connection, request.SessionId, "🚫 Cancelled.\n", ct);
             CleanupSession(session.SessionId);
@@ -269,8 +269,8 @@ public sealed class SampleGeneratorAgent(
         }
 
         if (!string.IsNullOrWhiteSpace(userInput)
-            && !userInput.Contains("generate")
-            && !userInput.Contains("yes")
+            && !userInput.Contains("generate", StringComparison.Ordinal)
+            && !userInput.Contains("yes", StringComparison.Ordinal)
             && !userInput.Equals("y", StringComparison.OrdinalIgnoreCase))
         {
             await SendTextAsync(connection, request.SessionId, "Please reply with 'generate' (or press Enter) to proceed, or 'cancel' to abort.\n", ct);

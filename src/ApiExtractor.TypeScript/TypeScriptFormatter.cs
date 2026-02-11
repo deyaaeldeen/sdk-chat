@@ -192,7 +192,7 @@ public static class TypeScriptFormatter
 
                 var importPath = exportPath == "."
                     ? index.Package
-                    : $"{index.Package}/{(exportPath.StartsWith("./") ? exportPath[2..] : exportPath)}";
+                    : $"{index.Package}/{(exportPath.StartsWith("./", StringComparison.Ordinal) ? exportPath[2..] : exportPath)}";
 
                 sb.AppendLine($"// ============================================================================");
                 sb.AppendLine($"// import {{ ... }} from \"{importPath}\"");

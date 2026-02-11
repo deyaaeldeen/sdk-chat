@@ -248,3 +248,59 @@ func BatchGetResources(ctx context.Context, client *SampleClient, ids []string) 
 	}
 	return results, nil
 }
+
+// --- Embedding examples ---
+
+// BaseModel provides common fields for all models.
+type BaseModel struct {
+	// ID is the unique identifier.
+	ID string
+	// ETag is the entity version tag for optimistic concurrency.
+	ETag string
+}
+
+// AuditInfo provides audit tracking fields.
+type AuditInfo struct {
+	// CreatedBy is the identity that created the resource.
+	CreatedBy string
+	// ModifiedBy is the identity that last modified the resource.
+	ModifiedBy string
+}
+
+// TrackedResource embeds both BaseModel and AuditInfo for composition.
+type TrackedResource struct {
+	BaseModel
+	AuditInfo
+	// DisplayName is the user-facing name.
+	DisplayName string
+}
+
+// Reader defines read operations.
+type Reader interface {
+	// Read reads data.
+	Read(ctx context.Context, id string) ([]byte, error)
+}
+
+// Writer defines write operations.
+type Writer interface {
+	// Write writes data.
+	Write(ctx context.Context, id string, data []byte) error
+}
+
+// ReadWriter composes Reader and Writer via interface embedding.
+type ReadWriter interface {
+	Reader
+	Writer
+}
+
+// Closer defines a Close method.
+type Closer interface {
+	// Close releases resources.
+	Close() error
+}
+
+// ReadWriteCloser composes ReadWriter and Closer.
+type ReadWriteCloser interface {
+	ReadWriter
+	Closer
+}

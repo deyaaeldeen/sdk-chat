@@ -48,6 +48,7 @@ type DependencyInfo struct {
 type StructApi struct {
 	Name           string     `json:"name"`
 	Doc            string     `json:"doc,omitempty"`
+	Embeds         []string   `json:"embeds,omitempty"`
 	Fields         []FieldApi `json:"fields,omitempty"`
 	Methods        []FuncApi  `json:"methods,omitempty"`
 	EntryPoint     bool       `json:"entryPoint,omitempty"`
@@ -57,6 +58,7 @@ type StructApi struct {
 type IfaceApi struct {
 	Name           string    `json:"name"`
 	Doc            string    `json:"doc,omitempty"`
+	Embeds         []string  `json:"embeds,omitempty"`
 	Methods        []FuncApi `json:"methods,omitempty"`
 	EntryPoint     bool      `json:"entryPoint,omitempty"`
 	ReExportedFrom string    `json:"reExportedFrom,omitempty"`
@@ -1450,11 +1452,8 @@ func extractStruct(t *doc.Type, st *ast.StructType) StructApi {
 		typeCollector.CollectFromExpr(field.Type)
 
 		if len(field.Names) == 0 {
-			// Embedded field
-			s.Fields = append(s.Fields, FieldApi{
-				Name: formatExpr(field.Type),
-				Type: formatExpr(field.Type),
-			})
+			// Embedded struct/interface (Go composition)
+			s.Embeds = append(s.Embeds, formatExpr(field.Type))
 			continue
 		}
 		for _, name := range field.Names {
@@ -1504,7 +1503,9 @@ func extractInterface(t *doc.Type, it *ast.InterfaceType) IfaceApi {
 
 	for _, m := range it.Methods.List {
 		if len(m.Names) == 0 {
-			continue // embedded interface
+			// Embedded interface (Go interface composition)
+			i.Embeds = append(i.Embeds, formatExpr(m.Type))
+			continue
 		}
 		for _, name := range m.Names {
 			if !isExported(name.Name) {

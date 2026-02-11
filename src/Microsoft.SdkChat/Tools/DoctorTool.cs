@@ -180,7 +180,7 @@ public sealed partial class DoctorTool
                 var (exitCode, output, _) = await RunCommandAsync(cmd, "--version", ct);
                 if (exitCode == 0)
                 {
-                    var version = output.Trim().Replace("Python ", "");
+                    var version = output.Trim().Replace("Python ", "", StringComparison.Ordinal);
                     var path = await GetCommandPathAsync(cmd, ct);
 
                     // Check for minimum version (3.9+)
@@ -377,7 +377,7 @@ public sealed partial class DoctorTool
 
     private static void PrintSecurityAdvisory(List<DependencyStatus> results)
     {
-        var warnings = results.Where(r => r.Warning != null && r.Warning.StartsWith("Security:")).ToList();
+        var warnings = results.Where(r => r.Warning != null && r.Warning.StartsWith("Security:", StringComparison.Ordinal)).ToList();
         if (warnings.Count == 0) return;
 
         Console.WriteLine();

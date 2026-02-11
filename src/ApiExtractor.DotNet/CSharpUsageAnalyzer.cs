@@ -37,8 +37,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             return new UsageIndex { FileCount = 0 };
 
         var files = Directory.EnumerateFiles(normalizedPath, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains("/obj/") && !f.Contains("\\obj\\")
-                     && !f.Contains("/bin/") && !f.Contains("\\bin\\"))
+            .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("\\obj\\", StringComparison.Ordinal)
+                     && !f.Contains("/bin/", StringComparison.Ordinal) && !f.Contains("\\bin\\", StringComparison.Ordinal))
             .ToList();
 
         List<SyntaxTree> syntaxTrees = [];

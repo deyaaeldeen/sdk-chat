@@ -409,7 +409,7 @@ public static class CSharpFormatter
     }
 
     private static string EscapeXml(string text) =>
-        text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+        text.Replace("&", "&amp;", StringComparison.Ordinal).Replace("<", "&lt;", StringComparison.Ordinal).Replace(">", "&gt;", StringComparison.Ordinal);
 
     /// <summary>
     /// Formats types with proper namespace wrapping.

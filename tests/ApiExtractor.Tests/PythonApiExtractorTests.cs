@@ -168,7 +168,7 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
             .ToList();
         // Private methods (start with _) should be excluded, but __init__ and __dunder__ are allowed
         var privateMethods = allMethods.Where(m =>
-            m.Name.StartsWith('_') && !m.Name.StartsWith("__"));
+            m.Name.StartsWith('_') && !m.Name.StartsWith("__", StringComparison.Ordinal));
         Assert.Empty(privateMethods);
     }
 

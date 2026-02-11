@@ -163,7 +163,7 @@ public record TypeInfo
     /// </summary>
     [JsonIgnore]
     public bool IsOptionsType =>
-        Name.EndsWith("Options") || Name.EndsWith("Settings") || Name.EndsWith("Config");
+        Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Settings", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal);
 
     /// <summary>
     /// Gets the priority for smart truncation.
@@ -176,7 +176,7 @@ public record TypeInfo
         {
             if (IsClientType) return 0;        // Clients are most important
             if (IsOptionsType) return 1;       // Options next (configure clients)
-            if (Name.Contains("Exception")) return 2; // Exceptions for error handling
+            if (Name.Contains("Exception", StringComparison.Ordinal)) return 2; // Exceptions for error handling
             if (Kind == "enum") return 3;      // Enums usually small, include them
             if (IsModelType) return 4;         // Models are common but secondary
             return 5;                          // Everything else

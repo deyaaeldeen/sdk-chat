@@ -149,7 +149,7 @@ public class LanguageContextIntegrationTests
             // Either extracted or raw source should contain relevant content
             Assert.Contains("SampleClient", content);
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("Failed to extract"))
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Failed to extract", StringComparison.Ordinal))
         {
             // Skip if extraction fails due to resource contention in parallel test runs
             if (true) Assert.Skip($"Extraction failed (likely parallel test contention): {ex.Message}");
@@ -286,7 +286,7 @@ public class LanguageContextIntegrationTests
                     Assert.Contains(expectedType, content, StringComparison.OrdinalIgnoreCase);
                 }
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("Failed to extract"))
+            catch (InvalidOperationException ex) when (ex.Message.Contains("Failed to extract", StringComparison.Ordinal))
             {
                 // Skip this language if extraction fails due to resource contention
                 // This can happen when parallel test runs compete for JBang/Node resources

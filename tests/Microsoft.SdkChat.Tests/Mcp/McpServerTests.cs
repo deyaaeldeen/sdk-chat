@@ -320,7 +320,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync(transport.ToLower(), port, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts.Token);
+                await McpServer.RunAsync(transport.ToLowerInvariant(), port, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -331,7 +331,7 @@ public class McpServerTests
         await Task.Delay(200);
 
         // Assert - Verify lowercase transport name is accepted and server keeps running
-        Assert.False(taskLower.IsCompleted, $"Transport '{transport.ToLower()}' should be accepted");
+        Assert.False(taskLower.IsCompleted, $"Transport '{transport.ToLowerInvariant()}' should be accepted");
 
         // Ensure cleanup - cancel explicitly
         await cts.CancelAsync();
@@ -353,7 +353,7 @@ public class McpServerTests
         {
             try
             {
-                await McpServer.RunAsync(transport.ToUpper(), port2, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts2.Token);
+                await McpServer.RunAsync(transport.ToUpperInvariant(), port2, "127.0.0.1", "error", useOpenAi: false, cancellationToken: cts2.Token);
             }
             catch (OperationCanceledException)
             {
@@ -364,7 +364,7 @@ public class McpServerTests
         await Task.Delay(200);
 
         // Assert - Verify uppercase transport name is accepted and server keeps running
-        Assert.False(taskUpper.IsCompleted, $"Transport '{transport.ToUpper()}' should be accepted");
+        Assert.False(taskUpper.IsCompleted, $"Transport '{transport.ToUpperInvariant()}' should be accepted");
 
         // Ensure cleanup - cancel explicitly
         await cts2.CancelAsync();

@@ -36,15 +36,15 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
         var name = Path.GetFileName(file.FilePath).ToLowerInvariant();
 
         // Deprioritize generated code - load human-written code first
-        var isGenerated = path.Contains("/generated/") ||
-                          path.Contains("/implementation/") ||
-                          name.Contains("generated");
+        var isGenerated = path.Contains("/generated/", StringComparison.Ordinal) ||
+                          path.Contains("/implementation/", StringComparison.Ordinal) ||
+                          name.Contains("generated", StringComparison.Ordinal);
         var basePriority = isGenerated ? 100 : 0;
 
         // Within each category, prioritize key files
-        if (name.Contains("client")) return basePriority + 1;
-        if (name.Contains("builder")) return basePriority + 2;
-        if (name.Contains("model")) return basePriority + 3;
+        if (name.Contains("client", StringComparison.Ordinal)) return basePriority + 1;
+        if (name.Contains("builder", StringComparison.Ordinal)) return basePriority + 2;
+        if (name.Contains("model", StringComparison.Ordinal)) return basePriority + 3;
         return basePriority + 10;
     }
 

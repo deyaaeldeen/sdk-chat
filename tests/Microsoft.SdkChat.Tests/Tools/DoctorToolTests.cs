@@ -144,7 +144,7 @@ public class DoctorToolTests
             // Non-verbose mode should not show paths (unless there's a warning)
             // Note: Security warnings may still show paths
             var lines = output.Split('\n');
-            var pathLines = lines.Count(l => l.Trim().StartsWith("Path:"));
+            var pathLines = lines.Count(l => l.Trim().StartsWith("Path:", StringComparison.Ordinal));
             // In non-verbose, we shouldn't have "Path:" lines for normal entries
             // (security warnings are different)
         }
@@ -315,8 +315,8 @@ public class DoctorToolTests
                 // If a line shows a missing tool (starts with ✗ and has a tool name pattern),
                 // it must also contain "NOT FOUND"
                 if (line.TrimStart().StartsWith('✗') &&
-                    (line.Contains(".NET") || line.Contains("Python") || line.Contains("Go") ||
-                     line.Contains("JBang") || line.Contains("Node")))
+                    (line.Contains(".NET", StringComparison.Ordinal) || line.Contains("Python", StringComparison.Ordinal) || line.Contains("Go", StringComparison.Ordinal) ||
+                     line.Contains("JBang", StringComparison.Ordinal) || line.Contains("Node", StringComparison.Ordinal)))
                 {
                     Assert.Contains("NOT FOUND", line);
                 }
@@ -379,9 +379,9 @@ public class DoctorToolTests
             var output = sw.ToString();
 
             // Should have one of the summary messages
-            var hasSummary = output.Contains("fully operational") ||
-                            output.Contains("extractors unavailable") ||
-                            output.Contains("Critical dependencies");
+            var hasSummary = output.Contains("fully operational", StringComparison.Ordinal) ||
+                            output.Contains("extractors unavailable", StringComparison.Ordinal) ||
+                            output.Contains("Critical dependencies", StringComparison.Ordinal);
             Assert.True(hasSummary, "Expected a summary message at the end");
         }
         finally

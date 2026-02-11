@@ -361,6 +361,13 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     {
         HashSet<string> tokens = new(StringComparer.OrdinalIgnoreCase);
 
+        // Embedded interfaces are direct composition dependencies
+        foreach (var embed in iface.Embeds ?? [])
+        {
+            if (allTypeNames.Contains(embed))
+                tokens.Add(embed);
+        }
+
         foreach (var method in iface.Methods ?? [])
         {
             SignatureTokenizer.TokenizeInto(method.Sig, tokens);

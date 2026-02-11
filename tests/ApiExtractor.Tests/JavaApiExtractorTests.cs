@@ -134,7 +134,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
         var enums = api.Packages.SelectMany(p => p.Enums ?? []).ToList();
         var serviceVersion = enums.FirstOrDefault(e => e.Name == "ServiceVersion");
         Assert.NotNull(serviceVersion);
-        Assert.Contains(serviceVersion.Values!, v => v.Contains("V2024_01_01"));
+        Assert.Contains(serviceVersion.Values!, v => v.Contains("V2024_01_01", StringComparison.Ordinal));
     }
 
     [Fact]

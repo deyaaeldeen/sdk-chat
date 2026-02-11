@@ -197,6 +197,57 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
     }
 
     [Fact]
+    public void Extract_FindsStructEmbeds()
+    {
+        var api = GetApi();
+        var structs = api.Packages.SelectMany(p => p.Structs ?? []).ToList();
+        var tracked = structs.FirstOrDefault(s => s.Name == "TrackedResource");
+        Assert.NotNull(tracked);
+        Assert.NotNull(tracked.Embeds);
+        Assert.Contains("BaseModel", tracked.Embeds);
+        Assert.Contains("AuditInfo", tracked.Embeds);
+    }
+
+    [Fact]
+    public void Extract_StructEmbedsNotInFields()
+    {
+        var api = GetApi();
+        var structs = api.Packages.SelectMany(p => p.Structs ?? []).ToList();
+        var tracked = structs.FirstOrDefault(s => s.Name == "TrackedResource");
+        Assert.NotNull(tracked);
+        // Embedded types should NOT appear as regular fields
+        var fieldNames = (tracked.Fields ?? []).Select(f => f.Name).ToList();
+        Assert.DoesNotContain("BaseModel", fieldNames);
+        Assert.DoesNotContain("AuditInfo", fieldNames);
+        // But regular fields should still be present
+        Assert.Contains("DisplayName", fieldNames);
+    }
+
+    [Fact]
+    public void Extract_FindsInterfaceEmbeds()
+    {
+        var api = GetApi();
+        var interfaces = api.Packages.SelectMany(p => p.Interfaces ?? []).ToList();
+        var readWriter = interfaces.FirstOrDefault(i => i.Name == "ReadWriter");
+        Assert.NotNull(readWriter);
+        Assert.NotNull(readWriter.Embeds);
+        Assert.Contains("Reader", readWriter.Embeds);
+        Assert.Contains("Writer", readWriter.Embeds);
+    }
+
+    [Fact]
+    public void Extract_InterfaceEmbedsChained()
+    {
+        var api = GetApi();
+        var interfaces = api.Packages.SelectMany(p => p.Interfaces ?? []).ToList();
+        var rwc = interfaces.FirstOrDefault(i => i.Name == "ReadWriteCloser");
+        Assert.NotNull(rwc);
+        Assert.NotNull(rwc.Embeds);
+        Assert.Contains("ReadWriter", rwc.Embeds);
+        Assert.Contains("Closer", rwc.Embeds);
+    }
+
+    [Fact]
     public void Extract_ProducesSmallerOutputThanSource()
     {
         // For small test fixtures, API surface can be 80-120% of source size
@@ -205,7 +256,7 @@ public class GoApiExtractorTests : IClassFixture<GoExtractorFixture>
         var api = GetApi();
         var json = JsonSerializer.Serialize(api);
         var sourceSize = Directory.GetFiles(_fixture.FixturePath, "*.go", SearchOption.AllDirectories)
-            .Where(f => !f.EndsWith("_test.go"))
+            .Where(f => !f.EndsWith("_test.go", StringComparison.Ordinal))
             .Sum(f => new FileInfo(f).Length);
         var maxAllowedSize = (int)(sourceSize * 1.2); // Allow 20% overhead for small fixtures
         Assert.True(json.Length <= maxAllowedSize,

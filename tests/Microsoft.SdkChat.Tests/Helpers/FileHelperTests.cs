@@ -87,7 +87,7 @@ public class FileHelperTests : IDisposable
             includeExtensions: [".cs"],
             excludeGlobPatterns: [],
             relativeTo: _testDir,
-            priorityFunc: f => f.RelativePath.Contains("high") ? 1 : 10);
+            priorityFunc: f => f.RelativePath.Contains("high", StringComparison.Ordinal) ? 1 : 10);
 
         // Assert
         Assert.Equal(4, files.Count);
@@ -282,8 +282,8 @@ public class FileHelperTests : IDisposable
         var result = await CollectStreamedContent(groups);
 
         // Assert - sections appear in order provided
-        var samplesIndex = result.IndexOf("<existing-samples>");
-        var sourceIndex = result.IndexOf("<source-code>");
+        var samplesIndex = result.IndexOf("<existing-samples>", StringComparison.Ordinal);
+        var sourceIndex = result.IndexOf("<source-code>", StringComparison.Ordinal);
         Assert.True(samplesIndex < sourceIndex, "Samples section should appear before source section");
     }
 
@@ -301,15 +301,15 @@ public class FileHelperTests : IDisposable
                 [new SourceInputSpec(_testDir, [".cs"])],
                 Budget: 10000,
                 PerFileLimit: 5000,
-                PriorityFunc: f => f.RelativePath.Contains("high") ? 1 : 10)
+                PriorityFunc: f => f.RelativePath.Contains("high", StringComparison.Ordinal) ? 1 : 10)
         };
 
         // Act
         var result = await CollectStreamedContent(groups);
 
         // Assert
-        var highIndex = result.IndexOf("high.cs");
-        var lowIndex = result.IndexOf("low.cs");
+        var highIndex = result.IndexOf("high.cs", StringComparison.Ordinal);
+        var lowIndex = result.IndexOf("low.cs", StringComparison.Ordinal);
         Assert.True(highIndex < lowIndex, "High priority file should appear first");
     }
 
@@ -554,7 +554,7 @@ public class FileHelperTests : IDisposable
 
         // Assert
         var contentChunks = chunks.Where(c => !c.IsHeader && !c.IsFooter).ToList();
-        Assert.Contains(contentChunks, c => c.RelativePath.Contains("nested"));
+        Assert.Contains(contentChunks, c => c.RelativePath.Contains("nested", StringComparison.Ordinal));
     }
 
     [Fact]

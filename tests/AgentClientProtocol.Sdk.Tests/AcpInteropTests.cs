@@ -251,7 +251,7 @@ public class AcpInteropTests : IDisposable
 
         // Parse the result from stderr (stdout is used for ACP transport)
         var resultLine = ctx.Stderr.ToString().Split('\n')
-            .FirstOrDefault(l => l.StartsWith("__RESULT__"));
+            .FirstOrDefault(l => l.StartsWith("__RESULT__", StringComparison.Ordinal));
 
         Assert.NotNull(resultLine);
 
@@ -481,7 +481,7 @@ public class AcpInteropTests : IDisposable
             if (e.Data != null)
             {
                 _output.WriteLine($"[ts-stderr] {e.Data}");
-                if (e.Data.Contains("Starting ACP"))
+                if (e.Data.Contains("Starting ACP", StringComparison.Ordinal))
                 {
                     ready.TrySetResult(true);
                 }

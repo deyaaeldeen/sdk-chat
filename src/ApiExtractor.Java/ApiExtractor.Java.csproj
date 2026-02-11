@@ -39,7 +39,8 @@
           Condition="'$(JBangExitCode)' == '0' and Exists('$(OutputPath)ExtractApi.java')" 
           StandardOutputImportance="low"
           StandardErrorImportance="low"
-          IgnoreExitCode="true" />
+          IgnoreExitCode="true"
+          IgnoreStandardErrorWarningFormat="true" />
 
     <Message Importance="normal" 
              Text="JBang dependencies cached successfully." 

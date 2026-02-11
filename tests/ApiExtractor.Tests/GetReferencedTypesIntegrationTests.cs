@@ -100,7 +100,7 @@ public class GetReferencedTypesIntegrationTests : IDisposable
         Assert.Contains("UnusedModel", stubs);
 
         // Client should appear before its dependencies (or at worst, same section)
-        var clientPos = stubs.IndexOf("WidgetClient");
+        var clientPos = stubs.IndexOf("WidgetClient", StringComparison.Ordinal);
         Assert.True(clientPos >= 0);
     }
 

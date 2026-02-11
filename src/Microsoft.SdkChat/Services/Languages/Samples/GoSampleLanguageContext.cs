@@ -35,14 +35,14 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
 
         // Deprioritize generated code - load human-written code first
         // Go SDKs commonly use zz_ prefix for generated files
-        var isGenerated = path.Contains("/generated/") ||
-                          name.StartsWith("zz_") ||
-                          name.Contains("_autorest");
+        var isGenerated = path.Contains("/generated/", StringComparison.Ordinal) ||
+                          name.StartsWith("zz_", StringComparison.Ordinal) ||
+                          name.Contains("_autorest", StringComparison.Ordinal);
         var basePriority = isGenerated ? 100 : 0;
 
         // Within each category, prioritize key files
-        if (name.Contains("client")) return basePriority + 1;
-        if (name.Contains("models")) return basePriority + 2;
+        if (name.Contains("client", StringComparison.Ordinal)) return basePriority + 1;
+        if (name.Contains("models", StringComparison.Ordinal)) return basePriority + 2;
         return basePriority + 10;
     }
 

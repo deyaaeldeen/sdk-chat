@@ -1179,8 +1179,8 @@ public class SdkInfo
             if (!string.IsNullOrEmpty(sourceDir))
             {
                 // Maven paths may use ${project.basedir} or ${basedir} - resolve them
-                sourceDir = sourceDir.Replace("${project.basedir}", "")
-                                     .Replace("${basedir}", "")
+                sourceDir = sourceDir.Replace("${project.basedir}", "", StringComparison.Ordinal)
+                                     .Replace("${basedir}", "", StringComparison.Ordinal)
                                      .TrimStart('/', '\\');
                 if (!string.IsNullOrEmpty(sourceDir))
                     return NormalizeParsedPath(projectRoot, sourceDir);
@@ -1477,7 +1477,7 @@ public class SdkInfo
     private static string? NormalizeParsedPath(string projectRoot, string relativePath)
     {
         // Strip leading "./ " or ".\\ " prefixes (but preserve ".." for rejection below)
-        while (relativePath.StartsWith("./") || relativePath.StartsWith(".\\"))
+        while (relativePath.StartsWith("./", StringComparison.Ordinal) || relativePath.StartsWith(".\\", StringComparison.Ordinal))
             relativePath = relativePath[2..];
         relativePath = relativePath.TrimEnd('/', '\\');
 

@@ -206,7 +206,7 @@ public class CliFixture : IAsyncLifetime
     private static string DetectConfiguration()
     {
         var baseDir = AppContext.BaseDirectory;
-        if (baseDir.Contains("/Release/") || baseDir.Contains("\\Release\\"))
+        if (baseDir.Contains("/Release/", StringComparison.Ordinal) || baseDir.Contains("\\Release\\", StringComparison.Ordinal))
             return "Release";
         return "Debug";
     }

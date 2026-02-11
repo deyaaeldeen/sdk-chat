@@ -123,7 +123,7 @@ public sealed record ClassInfo
     [JsonIgnore]
     public bool IsModelType =>
         !(Methods?.Any(m => m.Modifiers?.Contains("public") == true) ?? false) ||
-        (Methods?.All(m => m.Name.StartsWith("get") || m.Name.StartsWith("set") || m.Name.StartsWith("is")) ?? false);
+        (Methods?.All(m => m.Name.StartsWith("get", StringComparison.Ordinal) || m.Name.StartsWith("set", StringComparison.Ordinal) || m.Name.StartsWith("is", StringComparison.Ordinal)) ?? false);
 
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
@@ -132,8 +132,8 @@ public sealed record ClassInfo
         get
         {
             if (IsClientType) return 0;
-            if (Name.EndsWith("Options") || Name.EndsWith("Config") || Name.EndsWith("Builder")) return 1;
-            if (Name.Contains("Exception")) return 2;
+            if (Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal) || Name.EndsWith("Builder", StringComparison.Ordinal)) return 1;
+            if (Name.Contains("Exception", StringComparison.Ordinal)) return 2;
             if (IsModelType) return 3;
             return 4;
         }

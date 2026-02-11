@@ -371,7 +371,7 @@ public sealed class PackageInfoService : IPackageInfoService
             async (index, innerCt) =>
             {
                 var packagePath = packages[index];
-                var relativePath = Path.GetRelativePath(rootPath, packagePath).Replace("\\", "/");
+                var relativePath = Path.GetRelativePath(rootPath, packagePath).Replace("\\", "/", StringComparison.Ordinal);
                 var samplesFolder = samplesPath;
 
                 progress?.Report($"[{Interlocked.Increment(ref completed)}/{packages.Length}] {relativePath}: analyzing");
@@ -652,7 +652,7 @@ public sealed class PackageInfoService : IPackageInfoService
 
         // For most project types, the project file is at the package root
         // Exception: .NET projects are often in src/ subdirectory
-        if (pattern.EndsWith(".csproj") || pattern.EndsWith(".fsproj"))
+        if (pattern.EndsWith(".csproj", StringComparison.Ordinal) || pattern.EndsWith(".fsproj", StringComparison.Ordinal))
         {
             // Check if we're in a src/ subdirectory
             var parentDir = Path.GetDirectoryName(projectDir);

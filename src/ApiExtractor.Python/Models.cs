@@ -89,8 +89,8 @@ public sealed record ClassInfo
         get
         {
             if (IsClientType) return 0;
-            if (Name.EndsWith("Options") || Name.EndsWith("Config")) return 1;
-            if (Name.Contains("Exception") || Name.Contains("Error")) return 2;
+            if (Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal)) return 1;
+            if (Name.Contains("Exception", StringComparison.Ordinal) || Name.Contains("Error", StringComparison.Ordinal)) return 2;
             if (IsModelType) return 3;
             return 4;
         }

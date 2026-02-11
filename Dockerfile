@@ -25,6 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip \
     # Go extractor
     golang-go \
+    # Java extractor (JDK for JBang to compile .java scripts)
+    default-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Volta and Node.js 20+ (system nodejs is too old for ESM / ts-morph)

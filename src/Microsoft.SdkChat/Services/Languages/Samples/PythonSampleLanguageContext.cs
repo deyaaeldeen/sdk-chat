@@ -39,15 +39,15 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
         var name = Path.GetFileName(file.FilePath).ToLowerInvariant();
 
         // Deprioritize generated code - load human-written code first
-        var isGenerated = path.Contains("/_generated/") ||
-                          path.Contains("/generated/") ||
+        var isGenerated = path.Contains("/_generated/", StringComparison.Ordinal) ||
+                          path.Contains("/generated/", StringComparison.Ordinal) ||
                           name.StartsWith('_');
         var basePriority = isGenerated ? 100 : 0;
 
         // Within each category, prioritize key files
-        if (name.Contains("client")) return basePriority + 1;
-        if (name.Contains("_models")) return basePriority + 2;
-        if (name.Contains("operations")) return basePriority + 3;
+        if (name.Contains("client", StringComparison.Ordinal)) return basePriority + 1;
+        if (name.Contains("_models", StringComparison.Ordinal)) return basePriority + 2;
+        if (name.Contains("operations", StringComparison.Ordinal)) return basePriority + 3;
         return basePriority + 10;
     }
 

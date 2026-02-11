@@ -100,7 +100,7 @@ public class CliTests
 
         // Should return JSON or path info
         Assert.True(
-            output.Contains("\"") || output.Contains("/"),
+            output.Contains('"') || output.Contains('/'),
             $"[{language}] Expected structured output. Got: {output}");
     }
 

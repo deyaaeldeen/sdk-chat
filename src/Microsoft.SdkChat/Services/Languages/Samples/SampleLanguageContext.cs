@@ -148,12 +148,12 @@ public abstract class SampleLanguageContext
 
     /// <summary>
     /// Streams context for sample generation with optional coverage analysis.
-    /// 
+    ///
     /// Language-specific contexts OVERRIDE this to:
     /// 1. Extract API surface using language-specific extractors (~70% token savings)
     /// 2. Analyze coverage to show which APIs are already demonstrated
     /// 3. Use FormatWithCoverage for compact, merged output
-    /// 
+    ///
     /// If API extraction fails, they call base.StreamContextAsync which falls back to
     /// streaming raw source files and samples.
     /// </summary>
@@ -212,7 +212,7 @@ public abstract class SampleLanguageContext
     {
         // Extract extensions from patterns like "**/*.cs" -> ".cs"
         return patterns
-            .Where(p => p.Contains("*."))
+            .Where(p => p.Contains("*.", StringComparison.Ordinal))
             .Select(p => $".{p.Split("*.").Last().TrimEnd('*', '/')}")
             .Distinct()
             .ToArray();

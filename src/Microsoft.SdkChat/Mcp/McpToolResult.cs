@@ -122,7 +122,7 @@ public sealed record McpToolResult
         OperationCanceledException => ["Retry the operation", "Check if the operation timed out"],
         TimeoutException => ["Retry with a longer timeout", "Check network connectivity"],
         UnauthorizedAccessException => ["Check file/folder permissions", "Run with appropriate privileges"],
-        NotSupportedException nsex when nsex.Message.Contains("Language") =>
+        NotSupportedException nsex when nsex.Message.Contains("Language", StringComparison.Ordinal) =>
             ["Supported languages: dotnet, python, java, typescript, javascript, go"],
         _ => null
     };

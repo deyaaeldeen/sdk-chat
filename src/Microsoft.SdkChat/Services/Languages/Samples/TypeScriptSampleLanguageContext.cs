@@ -37,13 +37,13 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
         var name = Path.GetFileName(file.FilePath).ToLowerInvariant();
 
         // Deprioritize generated code - load human-written code first
-        var isGenerated = path.Contains("/generated/") ||
-                          name.Contains(".generated.");
+        var isGenerated = path.Contains("/generated/", StringComparison.Ordinal) ||
+                          name.Contains(".generated.", StringComparison.Ordinal);
         var basePriority = isGenerated ? 100 : 0;
 
         // Within each category, prioritize key files
-        if (name.Contains("client")) return basePriority + 1;
-        if (name.Contains("model")) return basePriority + 2;
+        if (name.Contains("client", StringComparison.Ordinal)) return basePriority + 1;
+        if (name.Contains("model", StringComparison.Ordinal)) return basePriority + 2;
         if (name == "index.ts") return basePriority + 3;
         return basePriority + 10;
     }
