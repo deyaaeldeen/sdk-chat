@@ -25,9 +25,9 @@ public sealed record ApiIndex : IApiIndex
     public IEnumerable<ClassInfo> GetAllClasses() =>
         Packages.SelectMany(p => p.Classes ?? []);
 
-    /// <summary>Gets all types (classes + interfaces) in the API.</summary>
+    /// <summary>Gets all types (classes + interfaces + annotations) in the API.</summary>
     public IEnumerable<ClassInfo> GetAllTypes() =>
-        Packages.SelectMany(p => (p.Classes ?? []).Concat(p.Interfaces ?? []));
+        Packages.SelectMany(p => (p.Classes ?? []).Concat(p.Interfaces ?? []).Concat(p.Annotations ?? []));
 
     /// <summary>Gets all interfaces in the API.</summary>
     public IEnumerable<ClassInfo> GetAllInterfaces() =>
@@ -81,13 +81,22 @@ public sealed record PackageInfo
 
     [JsonPropertyName("enums")]
     public IReadOnlyList<EnumInfo>? Enums { get; init; }
+
+    [JsonPropertyName("annotations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ClassInfo>? Annotations { get; init; }
 }
 
-/// <summary>A class or interface.</summary>
+/// <summary>A class, interface, record, or annotation type.</summary>
 public sealed record ClassInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
+
+    /// <summary>The kind of type: "class", "record", or "annotation". Null for classes/interfaces.</summary>
+    [JsonPropertyName("kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Kind { get; init; }
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }

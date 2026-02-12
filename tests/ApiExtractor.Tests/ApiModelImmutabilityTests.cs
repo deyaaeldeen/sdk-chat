@@ -2,10 +2,12 @@
 // Licensed under the MIT License.
 
 using ApiExtractor.DotNet;
+using System.Text.Json;
 using Xunit;
 
 using GoModels = ApiExtractor.Go;
 using JavaModels = ApiExtractor.Java;
+using PyModels = ApiExtractor.Python;
 using TsModels = ApiExtractor.TypeScript;
 
 namespace ApiExtractor.Tests;
@@ -263,6 +265,266 @@ public class ApiModelImmutabilityTests
         var results = tasks.Select(t => t.Result).Distinct().ToList();
         Assert.Single(results);
         Assert.Contains("@test/pkg", results[0]);
+    }
+
+    #endregion
+
+    #region Java Model — Kind and Annotation Support
+
+    [Fact]
+    public void Java_ClassInfo_HasKindProperty()
+    {
+        var cls = new JavaModels.ClassInfo { Name = "Foo", Kind = "class" };
+        Assert.Equal("class", cls.Kind);
+
+        var record = new JavaModels.ClassInfo { Name = "Bar", Kind = "record" };
+        Assert.Equal("record", record.Kind);
+
+        var annotation = new JavaModels.ClassInfo { Name = "Baz", Kind = "annotation" };
+        Assert.Equal("annotation", annotation.Kind);
+    }
+
+    [Fact]
+    public void Java_ClassInfo_EntryPoint_SetsIsClientType()
+    {
+        var classInfo = new JavaModels.ClassInfo
+        {
+            Name = "ServiceClient",
+            EntryPoint = true,
+            Methods = [new JavaModels.MethodInfo { Name = "list", Sig = "()", Ret = "void" }]
+        };
+
+        Assert.True(classInfo.EntryPoint);
+        Assert.True(classInfo.IsClientType);
+    }
+
+    [Fact]
+    public void Java_ClassInfo_NonEntryPoint_HasNoEntryPointFlag()
+    {
+        var classInfo = new JavaModels.ClassInfo
+        {
+            Name = "SomeModel",
+            Methods = [new JavaModels.MethodInfo { Name = "get", Sig = "()", Ret = "String" }]
+        };
+
+        Assert.Null(classInfo.EntryPoint);
+        Assert.False(classInfo.IsClientType);
+    }
+
+    [Fact]
+    public void Java_RecordKind_IsSupported()
+    {
+        var record = new JavaModels.ClassInfo
+        {
+            Name = "Point",
+            Kind = "record",
+            Fields =
+            [
+                new JavaModels.FieldInfo { Name = "x", Type = "int" },
+                new JavaModels.FieldInfo { Name = "y", Type = "int" }
+            ]
+        };
+
+        Assert.Equal("record", record.Kind);
+        Assert.Equal(2, record.Fields!.Count);
+    }
+
+    [Fact]
+    public void Java_AnnotationKind_IsSupported()
+    {
+        var annotation = new JavaModels.ClassInfo
+        {
+            Name = "MyAnnotation",
+            Kind = "annotation"
+        };
+
+        Assert.Equal("annotation", annotation.Kind);
+    }
+
+    #endregion
+
+    #region Go Model — TypeParams
+
+    [Fact]
+    public void Go_TypeParams_DefaultsToNull()
+    {
+        var structApi = new GoModels.StructApi { Name = "Simple" };
+        Assert.Null(structApi.TypeParams);
+
+        var funcApi = new GoModels.FuncApi { Name = "DoThing" };
+        Assert.Null(funcApi.TypeParams);
+    }
+
+    [Fact]
+    public void Go_StructApi_TypeParams_RoundtripsViaJson()
+    {
+        var original = new GoModels.StructApi
+        {
+            Name = "Set",
+            TypeParams = ["T comparable"]
+        };
+
+        var json = JsonSerializer.Serialize(original);
+        Assert.Contains("\"typeParams\"", json);
+        Assert.Contains("T comparable", json);
+    }
+
+    [Fact]
+    public void Go_FuncApi_TypeParams_SerializesCorrectly()
+    {
+        var func = new GoModels.FuncApi
+        {
+            Name = "Transform",
+            TypeParams = ["T", "U"],
+            Sig = "input T",
+            Ret = "U"
+        };
+
+        var json = JsonSerializer.Serialize(func);
+        Assert.Contains("\"typeParams\"", json);
+        Assert.Contains("\"T\"", json);
+        Assert.Contains("\"U\"", json);
+    }
+
+    [Fact]
+    public void Go_StructApi_TypeParams_OmittedWhenNull()
+    {
+        var structApi = new GoModels.StructApi { Name = "Simple" };
+        var json = JsonSerializer.Serialize(structApi);
+        Assert.DoesNotContain("typeParams", json);
+    }
+
+    #endregion
+
+    #region Python Model — Case-Sensitive Names
+
+    [Fact]
+    public void Python_CaseSensitiveNames()
+    {
+        var api = new PyModels.ApiIndex("test-sdk",
+        [
+            new PyModels.ModuleInfo("mod",
+            [
+                new PyModels.ClassInfo
+                {
+                    Name = "MyClient",
+                    EntryPoint = true,
+                    Methods =
+                    [
+                        new PyModels.MethodInfo("get_data", "self", null, false, null, null, "Data")
+                    ]
+                },
+                new PyModels.ClassInfo
+                {
+                    Name = "myclient",
+                    Methods =
+                    [
+                        new PyModels.MethodInfo("other", "self", null, false, null, null, null)
+                    ]
+                }
+            ], null)
+        ]);
+
+        var allClasses = api.GetAllClasses().ToList();
+        Assert.Equal(2, allClasses.Count);
+        var clients = api.GetClientClasses().ToList();
+        Assert.Single(clients);
+        Assert.Equal("MyClient", clients[0].Name);
+    }
+
+    #endregion
+
+    #region TypeScript Model — InterfaceInfo EntryPoint
+
+    [Fact]
+    public void TypeScript_InterfaceInfo_HasEntryPoint()
+    {
+        var iface = new TsModels.InterfaceInfo
+        {
+            Name = "TestInterface",
+            EntryPoint = true,
+            Methods =
+            [
+                new TsModels.MethodInfo { Name = "doWork", Sig = "()" }
+            ]
+        };
+
+        Assert.True(iface.EntryPoint);
+    }
+
+    [Fact]
+    public void TypeScript_InterfaceInfo_IsClientType()
+    {
+        var iface = new TsModels.InterfaceInfo
+        {
+            Name = "ServiceClient",
+            EntryPoint = true,
+            Methods =
+            [
+                new TsModels.MethodInfo { Name = "listResources", Sig = "()" }
+            ]
+        };
+
+        Assert.True(iface.EntryPoint);
+        Assert.True(iface.Methods?.Any());
+    }
+
+    [Fact]
+    public void TypeScript_InterfaceInfo_WithoutEntryPoint_IsNotClient()
+    {
+        var iface = new TsModels.InterfaceInfo
+        {
+            Name = "Options",
+            Properties =
+            [
+                new TsModels.PropertyInfo { Name = "timeout", Type = "number" }
+            ]
+        };
+
+        Assert.Null(iface.EntryPoint);
+    }
+
+    #endregion
+
+    #region Fix #17: Go global state eliminated
+
+    [Fact]
+    public void Go_ExtractApi_NoGlobalMutableState()
+    {
+        // Verify the Go extractor script no longer uses module-level mutable variables
+        // for typeCollector and importMap. They should only exist as fields in the
+        // extractionContext struct.
+        var goScript = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..",
+            "src", "ApiExtractor.Go", "extract_api.go");
+
+        if (!File.Exists(goScript))
+        {
+            // Fall back to workspace-relative path for CI environments
+            goScript = Path.GetFullPath(Path.Combine(
+                Directory.GetCurrentDirectory(), "..", "..", "..", "..", "..",
+                "src", "ApiExtractor.Go", "extract_api.go"));
+        }
+
+        Assert.True(File.Exists(goScript), $"Go script not found: {goScript}");
+
+        var lines = File.ReadAllLines(goScript);
+
+        // There should be no "var typeCollector =" or "var importMap =" at global scope.
+        // The only appearances should be as struct fields or inside newExtractionContext().
+        var globalVarLines = lines
+            .Select((line, idx) => (line: line.Trim(), idx))
+            .Where(x => x.line.StartsWith("var typeCollector ", StringComparison.Ordinal)
+                     || x.line.StartsWith("var importMap ", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Empty(globalVarLines);
+
+        // Verify extractionContext struct exists
+        Assert.Contains(lines, l => l.Contains("type extractionContext struct"));
+
+        // Verify newExtractionContext function exists
+        Assert.Contains(lines, l => l.Contains("func newExtractionContext()"));
     }
 
     #endregion

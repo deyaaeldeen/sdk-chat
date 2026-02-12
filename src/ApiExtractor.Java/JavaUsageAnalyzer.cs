@@ -67,11 +67,17 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     File = c.File ?? "",
                     Line = c.Line
                 }).ToList() ?? [],
-                UncoveredOperations = result.Uncovered?.Select(u => new UncoveredOperation
+                UncoveredOperations = result.Uncovered?.Select(u =>
                 {
-                    ClientType = u.Client ?? "",
-                    Operation = u.Method ?? "",
-                    Signature = u.Sig ?? $"{u.Method}(...)"
+                    var sig = u.Sig;
+                    if (sig is null)
+                        sig = BuildSignatureLookup(apiIndex).GetValueOrDefault($"{u.Client}.{u.Method}") ?? $"{u.Method}(...)";
+                    return new UncoveredOperation
+                    {
+                        ClientType = u.Client ?? "",
+                        Operation = u.Method ?? "",
+                        Signature = sig
+                    };
                 }).ToList() ?? []
             };
         }
@@ -205,6 +211,7 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         {
             Name = c.Name.Split('<')[0],
             HasOperations = c.Methods?.Any() ?? false,
+            IsExplicitEntryPoint = c.EntryPoint == true,
             IsRootCandidate = !interfaceNames.Contains(c.Name.Split('<')[0]),
             ReferencedTypes = c.GetReferencedTypes(allTypeNames)
         }).ToList();
@@ -216,5 +223,31 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             .GroupBy(c => c.Name.Split('<')[0], StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First())
             .ToList();
+    }
+
+    /// <summary>
+    /// Builds a lookup from "TypeName.MethodName" → "ReturnType MethodName(Sig)" using the API index,
+    /// so uncovered operations get real signatures when the script fails to provide one.
+    /// </summary>
+    internal static Dictionary<string, string> BuildSignatureLookup(ApiIndex apiIndex)
+    {
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pkg in apiIndex.Packages)
+        {
+            foreach (var cls in pkg.Classes ?? [])
+                foreach (var method in cls.Methods ?? [])
+                {
+                    var ret = !string.IsNullOrEmpty(method.Ret) ? $"{method.Ret} " : "";
+                    lookup.TryAdd($"{cls.Name}.{method.Name}", $"{ret}{method.Name}{method.Sig}");
+                }
+
+            foreach (var iface in pkg.Interfaces ?? [])
+                foreach (var method in iface.Methods ?? [])
+                {
+                    var ret = !string.IsNullOrEmpty(method.Ret) ? $"{method.Ret} " : "";
+                    lookup.TryAdd($"{iface.Name}.{method.Name}", $"{ret}{method.Name}{method.Sig}");
+                }
+        }
+        return lookup;
     }
 }

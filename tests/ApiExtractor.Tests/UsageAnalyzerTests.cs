@@ -5,6 +5,11 @@ using ApiExtractor.Contracts;
 using ApiExtractor.DotNet;
 using Xunit;
 
+using GoModels = ApiExtractor.Go;
+using JavaModels = ApiExtractor.Java;
+using PyModels = ApiExtractor.Python;
+using TsModels = ApiExtractor.TypeScript;
+
 namespace ApiExtractor.Tests;
 
 /// <summary>
@@ -538,6 +543,426 @@ public class UsageAnalyzerTests
         {
             Directory.Delete(tempDir, true);
         }
+    }
+
+    #endregion
+
+    #region C# Case-Sensitive Variable Names
+
+    [Fact]
+    public async Task CSharp_CaseSensitiveVarNames_DistinguishVariables()
+    {
+        var (tempDir, _) = await SetupTestFilesAsync(
+            ("sample.cs", """
+                using System;
+                var Client = new ChatClient();
+                Client.GetCompletionAsync("test");
+                """));
+
+        try
+        {
+            var apiIndex = new ApiIndex
+            {
+                Package = "Test",
+                Namespaces =
+                [
+                    new NamespaceInfo
+                    {
+                        Name = "Test",
+                        Types =
+                        [
+                            new TypeInfo
+                            {
+                                Name = "ChatClient",
+                                Kind = "class",
+                                Members =
+                                [
+                                    new MemberInfo { Name = "GetCompletionAsync", Kind = "method", Signature = "Task<string> GetCompletionAsync(string prompt)" }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
+            Assert.NotEmpty(result.CoveredOperations);
+            Assert.Equal("ChatClient", result.CoveredOperations[0].ClientType);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    #endregion
+
+    #region C# Nullable Type Resolution
+
+    [Fact]
+    public async Task CSharp_NullableType_InVariableDeclaration_Resolves()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"nullable_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "sample.cs"), """
+                ChatClient? client = new ChatClient();
+                client.GetCompletionAsync("test");
+                """);
+
+            var apiIndex = new ApiIndex
+            {
+                Package = "Test",
+                Namespaces =
+                [
+                    new NamespaceInfo
+                    {
+                        Name = "Test",
+                        Types =
+                        [
+                            new TypeInfo
+                            {
+                                Name = "ChatClient",
+                                Kind = "class",
+                                Members =
+                                [
+                                    new MemberInfo { Name = "GetCompletionAsync", Kind = "method", Signature = "Task<string> GetCompletionAsync(string prompt)" }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            var result = await _analyzer.AnalyzeAsync(tempDir, apiIndex);
+            Assert.NotEmpty(result.CoveredOperations);
+            Assert.Equal("ChatClient", result.CoveredOperations[0].ClientType);
+            Assert.Equal("GetCompletionAsync", result.CoveredOperations[0].Operation);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    #endregion
+
+    #region Reachability with Explicit Entry Points
+
+    [Fact]
+    public void ReachabilityAnalyzer_WithExplicitEntryPoint_FindsReachableTypes()
+    {
+        var typeNodes = new List<ReachabilityAnalyzer.TypeNode>
+        {
+            new()
+            {
+                Name = "ServiceClient",
+                HasOperations = true,
+                IsExplicitEntryPoint = true,
+                IsRootCandidate = true,
+                ReferencedTypes = new HashSet<string> { "Options", "Response" }
+            },
+            new()
+            {
+                Name = "Options",
+                HasOperations = false,
+                IsRootCandidate = true,
+                ReferencedTypes = new HashSet<string>()
+            },
+            new()
+            {
+                Name = "Response",
+                HasOperations = false,
+                IsRootCandidate = true,
+                ReferencedTypes = new HashSet<string>()
+            },
+            new()
+            {
+                Name = "InternalHelper",
+                HasOperations = true,
+                IsRootCandidate = true,
+                ReferencedTypes = new HashSet<string>()
+            }
+        };
+
+        var reachable = ReachabilityAnalyzer.FindReachable(
+            typeNodes,
+            new Dictionary<string, List<string>>(),
+            StringComparer.Ordinal);
+
+        Assert.Contains("ServiceClient", reachable);
+        Assert.Contains("Options", reachable);
+        Assert.Contains("Response", reachable);
+    }
+
+    #endregion
+
+    #region Fix #16: BuildSignatureLookup tests
+
+    [Fact]
+    public void TypeScript_BuildSignatureLookup_ProducesCorrectSignatures()
+    {
+        // Arrange: TS API index with classes and interfaces in modules
+        var apiIndex = new TsModels.ApiIndex
+        {
+            Package = "test-pkg",
+            Modules =
+            [
+                new TsModels.ModuleInfo
+                {
+                    Name = "main",
+                    Classes =
+                    [
+                        new TsModels.ClassInfo
+                        {
+                            Name = "BlobClient",
+                            Methods =
+                            [
+                                new TsModels.MethodInfo { Name = "download", Sig = "(offset?: number, count?: number)" },
+                                new TsModels.MethodInfo { Name = "upload", Sig = "(data: Buffer)" }
+                            ]
+                        }
+                    ],
+                    Interfaces =
+                    [
+                        new TsModels.InterfaceInfo
+                        {
+                            Name = "BlobOptions",
+                            Methods =
+                            [
+                                new TsModels.MethodInfo { Name = "validate", Sig = "(strict: boolean)" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        // Act
+        var lookup = TsModels.TypeScriptUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        // Assert: key = "TypeName.MethodName", value = "MethodName(Sig)"
+        Assert.Equal("download(offset?: number, count?: number)", lookup["BlobClient.download"]);
+        Assert.Equal("upload(data: Buffer)", lookup["BlobClient.upload"]);
+        Assert.Equal("validate(strict: boolean)", lookup["BlobOptions.validate"]);
+    }
+
+    [Fact]
+    public void TypeScript_BuildSignatureLookup_CaseInsensitive()
+    {
+        var apiIndex = new TsModels.ApiIndex
+        {
+            Package = "test",
+            Modules =
+            [
+                new TsModels.ModuleInfo
+                {
+                    Name = "m",
+                    Classes = [new TsModels.ClassInfo { Name = "Client", Methods = [new TsModels.MethodInfo { Name = "Get", Sig = "()" }] }]
+                }
+            ]
+        };
+
+        var lookup = TsModels.TypeScriptUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        // OrdinalIgnoreCase comparer
+        Assert.True(lookup.ContainsKey("client.get"));
+        Assert.True(lookup.ContainsKey("CLIENT.GET"));
+    }
+
+    [Fact]
+    public void Python_BuildSignatureLookup_ProducesCorrectSignatures()
+    {
+        var apiIndex = new PyModels.ApiIndex(
+            "azure-storage-blob",
+            [
+                new PyModels.ModuleInfo("main",
+                    Classes:
+                    [
+                        new PyModels.ClassInfo
+                        {
+                            Name = "BlobClient",
+                            Methods =
+                            [
+                                new PyModels.MethodInfo("download_blob", "self, offset=None, length=None", null, null, null, null),
+                                new PyModels.MethodInfo("upload_blob", "self, data, **kwargs", null, null, null, null)
+                            ]
+                        }
+                    ],
+                    Functions: null)
+            ]);
+
+        var lookup = PyModels.PythonUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        Assert.Equal("download_blob(self, offset=None, length=None)", lookup["BlobClient.download_blob"]);
+        Assert.Equal("upload_blob(self, data, **kwargs)", lookup["BlobClient.upload_blob"]);
+    }
+
+    [Fact]
+    public void Python_BuildSignatureLookup_CaseSensitive()
+    {
+        var apiIndex = new PyModels.ApiIndex(
+            "test",
+            [new PyModels.ModuleInfo("m",
+                Classes: [new PyModels.ClassInfo { Name = "Client", Methods = [new PyModels.MethodInfo("get_item", "self", null, null, null, null)] }],
+                Functions: null)]);
+
+        var lookup = PyModels.PythonUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        Assert.True(lookup.ContainsKey("Client.get_item"));
+        // Python uses Ordinal (case-sensitive)
+        Assert.False(lookup.ContainsKey("client.get_item"));
+    }
+
+    [Fact]
+    public void Go_BuildSignatureLookup_ProducesCorrectSignatures()
+    {
+        var apiIndex = new GoModels.ApiIndex
+        {
+            Package = "azblob",
+            Packages =
+            [
+                new GoModels.PackageApi
+                {
+                    Name = "azblob",
+                    Structs =
+                    [
+                        new GoModels.StructApi
+                        {
+                            Name = "Client",
+                            Methods =
+                            [
+                                new GoModels.FuncApi { Name = "Download", Sig = "ctx context.Context, name string", Ret = "*DownloadResponse, error" },
+                                new GoModels.FuncApi { Name = "Delete", Sig = "ctx context.Context", Ret = "" }
+                            ]
+                        }
+                    ],
+                    Interfaces =
+                    [
+                        new GoModels.IfaceApi
+                        {
+                            Name = "Sizer",
+                            Methods = [new GoModels.FuncApi { Name = "Size", Sig = "", Ret = "int64" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var lookup = GoModels.GoUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        // value = "MethodName(Sig) Ret" (with leading space before Ret)
+        Assert.Equal("Download(ctx context.Context, name string) *DownloadResponse, error", lookup["Client.Download"]);
+        // Empty Ret → no trailing space
+        Assert.Equal("Delete(ctx context.Context)", lookup["Client.Delete"]);
+        Assert.Equal("Size() int64", lookup["Sizer.Size"]);
+    }
+
+    [Fact]
+    public void Go_BuildSignatureLookup_CaseSensitive()
+    {
+        var apiIndex = new GoModels.ApiIndex
+        {
+            Package = "test",
+            Packages = [new GoModels.PackageApi
+            {
+                Name = "test",
+                Structs = [new GoModels.StructApi { Name = "Client", Methods = [new GoModels.FuncApi { Name = "Get", Sig = "" }] }]
+            }]
+        };
+
+        var lookup = GoModels.GoUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        Assert.True(lookup.ContainsKey("Client.Get"));
+        // Go uses Ordinal (case-sensitive)
+        Assert.False(lookup.ContainsKey("client.get"));
+    }
+
+    [Fact]
+    public void Java_BuildSignatureLookup_ProducesCorrectSignatures()
+    {
+        var apiIndex = new JavaModels.ApiIndex
+        {
+            Package = "com.azure.storage.blob",
+            Packages =
+            [
+                new JavaModels.PackageInfo
+                {
+                    Name = "com.azure.storage.blob",
+                    Classes =
+                    [
+                        new JavaModels.ClassInfo
+                        {
+                            Name = "BlobClient",
+                            Methods =
+                            [
+                                new JavaModels.MethodInfo { Name = "download", Sig = "(OutputStream stream)", Ret = "void" },
+                                new JavaModels.MethodInfo { Name = "exists", Sig = "()", Ret = "boolean" }
+                            ]
+                        }
+                    ],
+                    Interfaces =
+                    [
+                        new JavaModels.ClassInfo
+                        {
+                            Name = "BlobTier",
+                            Methods =
+                            [
+                                new JavaModels.MethodInfo { Name = "getValue", Sig = "()", Ret = "String" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var lookup = JavaModels.JavaUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        // value = "Ret MethodName(Sig)" with Ret prefix
+        Assert.Equal("void download(OutputStream stream)", lookup["BlobClient.download"]);
+        Assert.Equal("boolean exists()", lookup["BlobClient.exists"]);
+        Assert.Equal("String getValue()", lookup["BlobTier.getValue"]);
+    }
+
+    [Fact]
+    public void Java_BuildSignatureLookup_CaseInsensitive()
+    {
+        var apiIndex = new JavaModels.ApiIndex
+        {
+            Package = "test",
+            Packages = [new JavaModels.PackageInfo
+            {
+                Name = "test",
+                Classes = [new JavaModels.ClassInfo { Name = "Client", Methods = [new JavaModels.MethodInfo { Name = "get", Sig = "()" }] }]
+            }]
+        };
+
+        var lookup = JavaModels.JavaUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        // OrdinalIgnoreCase
+        Assert.True(lookup.ContainsKey("Client.get"));
+        Assert.True(lookup.ContainsKey("CLIENT.GET"));
+    }
+
+    [Fact]
+    public void BuildSignatureLookup_EmptyApiIndex_ReturnsEmptyDictionary()
+    {
+        // All languages handle empty indexes gracefully
+        var tsLookup = TsModels.TypeScriptUsageAnalyzer.BuildSignatureLookup(
+            new TsModels.ApiIndex { Package = "", Modules = [] });
+        var pyLookup = PyModels.PythonUsageAnalyzer.BuildSignatureLookup(
+            new PyModels.ApiIndex("", []));
+        var goLookup = GoModels.GoUsageAnalyzer.BuildSignatureLookup(
+            new GoModels.ApiIndex { Package = "", Packages = [] });
+        var javaLookup = JavaModels.JavaUsageAnalyzer.BuildSignatureLookup(
+            new JavaModels.ApiIndex { Package = "", Packages = [] });
+
+        Assert.Empty(tsLookup);
+        Assert.Empty(pyLookup);
+        Assert.Empty(goLookup);
+        Assert.Empty(javaLookup);
     }
 
     #endregion

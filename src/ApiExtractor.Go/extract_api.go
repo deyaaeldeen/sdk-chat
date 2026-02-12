@@ -48,6 +48,7 @@ type DependencyInfo struct {
 type StructApi struct {
 	Name           string     `json:"name"`
 	Doc            string     `json:"doc,omitempty"`
+	TypeParams     []string   `json:"typeParams,omitempty"`
 	Embeds         []string   `json:"embeds,omitempty"`
 	Fields         []FieldApi `json:"fields,omitempty"`
 	Methods        []FuncApi  `json:"methods,omitempty"`
@@ -65,14 +66,15 @@ type IfaceApi struct {
 }
 
 type FuncApi struct {
-	Name           string `json:"name"`
-	EntryPoint     bool   `json:"entryPoint,omitempty"`
-	ReExportedFrom string `json:"reExportedFrom,omitempty"`
-	Sig            string `json:"sig"`
-	Ret            string `json:"ret,omitempty"`
-	Doc            string `json:"doc,omitempty"`
-	IsMethod       bool   `json:"method,omitempty"`
-	Receiver       string `json:"recv,omitempty"`
+	Name           string   `json:"name"`
+	EntryPoint     bool     `json:"entryPoint,omitempty"`
+	ReExportedFrom string   `json:"reExportedFrom,omitempty"`
+	TypeParams     []string `json:"typeParams,omitempty"`
+	Sig            string   `json:"sig"`
+	Ret            string   `json:"ret,omitempty"`
+	Doc            string   `json:"doc,omitempty"`
+	IsMethod       bool     `json:"method,omitempty"`
+	Receiver       string   `json:"recv,omitempty"`
 }
 
 type FieldApi struct {
@@ -996,9 +998,8 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 	packageName := detectPackageName(absPath)
 	packages := make(map[string]*PackageApi)
 
-	// Reset the type collector and import map for this extraction
-	typeCollector = NewTypeReferenceCollector()
-	importMap = make(map[string]string)
+	// Create a fresh extraction context for this extraction
+	ctx := newExtractionContext()
 
 	// Find all Go packages
 	fset := token.NewFileSet()
@@ -1032,7 +1033,7 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 		// Collect import mappings from all files in the package
 		for _, astPkg := range pkgs {
 			for _, file := range astPkg.Files {
-				collectImports(file)
+				collectImports(ctx, file)
 			}
 		}
 
@@ -1043,7 +1044,7 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 
 			docPkg := doc.New(astPkg, dir, doc.AllDecls)
 
-			pkgApi := extractPkg(docPkg, fset)
+			pkgApi := extractPkg(ctx, docPkg, fset)
 			pkgApi.Name = relDir
 			if pkgApi.Name == "" || pkgApi.Name == "." {
 				pkgApi.Name = pkgName
@@ -1089,7 +1090,7 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 	}
 
 	// Resolve transitive dependencies
-	deps := resolveTransitiveDependencies()
+	deps := resolveTransitiveDependencies(ctx)
 	if len(deps) > 0 {
 		api.Dependencies = deps
 	}
@@ -1221,15 +1222,23 @@ func (c *TypeReferenceCollector) GetExternalRefs() map[string]bool {
 	return result
 }
 
-// Global collector (reset per extraction)
-var typeCollector = NewTypeReferenceCollector()
+// extractionContext holds per-extraction mutable state, eliminating global variables.
+// A fresh context is created for each extractPackage call.
+type extractionContext struct {
+	typeCollector *TypeReferenceCollector
+	importMap     map[string]string
+}
 
-// importMap maps package aliases to full import paths (collected during extraction)
-var importMap = make(map[string]string)
+func newExtractionContext() *extractionContext {
+	return &extractionContext{
+		typeCollector: NewTypeReferenceCollector(),
+		importMap:     make(map[string]string),
+	}
+}
 
 // collectImports extracts import alias -> path mappings from a Go file's AST.
 // This enables rigorous resolution of package aliases to their full import paths.
-func collectImports(file *ast.File) {
+func collectImports(ctx *extractionContext, file *ast.File) {
 	for _, imp := range file.Imports {
 		// Get the import path (strip quotes)
 		importPath := strings.Trim(imp.Path.Value, "\"")
@@ -1249,17 +1258,17 @@ func collectImports(file *ast.File) {
 		}
 
 		// Map alias to full path (later imports override earlier ones, which is correct Go behavior)
-		importMap[alias] = importPath
+		ctx.importMap[alias] = importPath
 	}
 }
 
-func collectTypeReferences() map[string]bool {
+func collectTypeReferences(ctx *extractionContext) map[string]bool {
 	// Use the AST-collected references instead
-	return typeCollector.GetExternalRefs()
+	return ctx.typeCollector.GetExternalRefs()
 }
 
-func resolveTransitiveDependencies() []DependencyInfo {
-	refs := collectTypeReferences()
+func resolveTransitiveDependencies(ctx *extractionContext) []DependencyInfo {
+	refs := collectTypeReferences(ctx)
 	if len(refs) == 0 {
 		return nil
 	}
@@ -1275,7 +1284,7 @@ func resolveTransitiveDependencies() []DependencyInfo {
 
 			// Resolve alias to full import path using collected imports
 			fullPath := pkgAlias
-			if resolved, ok := importMap[pkgAlias]; ok {
+			if resolved, ok := ctx.importMap[pkgAlias]; ok {
 				fullPath = resolved
 			}
 
@@ -1303,7 +1312,7 @@ func resolveTransitiveDependencies() []DependencyInfo {
 	return deps
 }
 
-func extractPkg(pkg *doc.Package, fset *token.FileSet) *PackageApi {
+func extractPkg(ctx *extractionContext, pkg *doc.Package, fset *token.FileSet) *PackageApi {
 	api := &PackageApi{
 		Doc: firstLine(pkg.Doc),
 	}
@@ -1319,8 +1328,8 @@ func extractPkg(pkg *doc.Package, fset *token.FileSet) *PackageApi {
 			if !isExported(f.Name) {
 				continue
 			}
-			api.Functions = append(api.Functions, extractFunc(f.Decl, f.Doc))
-		}
+			api.Functions = append(api.Functions, extractFunc(ctx, f.Decl, f.Doc))
+		} 
 
 		// Add type-associated constants to top-level constants
 		for _, c := range t.Consts {
@@ -1357,17 +1366,18 @@ func extractPkg(pkg *doc.Package, fset *token.FileSet) *PackageApi {
 
 			switch st := ts.Type.(type) {
 			case *ast.StructType:
-				s := extractStruct(t, st)
+				s := extractStruct(ctx, t, st)
+				s.TypeParams = extractTypeParams(ts.TypeParams)
 				api.Structs = append(api.Structs, s)
 
 			case *ast.InterfaceType:
-				i := extractInterface(t, st)
+				i := extractInterface(ctx, t, st)
 				api.Interfaces = append(api.Interfaces, i)
 
 			default:
 				// Type alias - collect type reference and register as defined
-				typeCollector.AddDefinedType(t.Name)
-				typeCollector.CollectFromExpr(ts.Type)
+				ctx.typeCollector.AddDefinedType(t.Name)
+				ctx.typeCollector.CollectFromExpr(ts.Type)
 				api.Types = append(api.Types, TypeApi{
 					Name: t.Name,
 					Type: formatExpr(ts.Type),
@@ -1382,7 +1392,7 @@ func extractPkg(pkg *doc.Package, fset *token.FileSet) *PackageApi {
 		if !isExported(f.Name) {
 			continue
 		}
-		api.Functions = append(api.Functions, extractFunc(f.Decl, f.Doc))
+		api.Functions = append(api.Functions, extractFunc(ctx, f.Decl, f.Doc))
 	}
 
 	// Constants
@@ -1437,19 +1447,19 @@ func extractPkg(pkg *doc.Package, fset *token.FileSet) *PackageApi {
 	return api
 }
 
-func extractStruct(t *doc.Type, st *ast.StructType) StructApi {
+func extractStruct(ctx *extractionContext, t *doc.Type, st *ast.StructType) StructApi {
 	s := StructApi{
 		Name: t.Name,
 		Doc:  firstLine(t.Doc),
 	}
 
 	// Register as defined type
-	typeCollector.AddDefinedType(t.Name)
+	ctx.typeCollector.AddDefinedType(t.Name)
 
 	// Fields
 	for _, field := range st.Fields.List {
 		// Collect type references from AST
-		typeCollector.CollectFromExpr(field.Type)
+		ctx.typeCollector.CollectFromExpr(field.Type)
 
 		if len(field.Names) == 0 {
 			// Embedded struct/interface (Go composition)
@@ -1476,7 +1486,7 @@ func extractStruct(t *doc.Type, st *ast.StructType) StructApi {
 		if !isExported(m.Name) {
 			continue
 		}
-		s.Methods = append(s.Methods, extractFunc(m.Decl, m.Doc))
+		s.Methods = append(s.Methods, extractFunc(ctx, m.Decl, m.Doc))
 	}
 
 	// Constructor functions (like NewSampleClient)
@@ -1484,7 +1494,7 @@ func extractStruct(t *doc.Type, st *ast.StructType) StructApi {
 		if !isExported(f.Name) {
 			continue
 		}
-		fn := extractFunc(f.Decl, f.Doc)
+		fn := extractFunc(ctx, f.Decl, f.Doc)
 		fn.IsMethod = false // These are constructors, not methods
 		s.Methods = append(s.Methods, fn)
 	}
@@ -1492,14 +1502,14 @@ func extractStruct(t *doc.Type, st *ast.StructType) StructApi {
 	return s
 }
 
-func extractInterface(t *doc.Type, it *ast.InterfaceType) IfaceApi {
+func extractInterface(ctx *extractionContext, t *doc.Type, it *ast.InterfaceType) IfaceApi {
 	i := IfaceApi{
 		Name: t.Name,
 		Doc:  firstLine(t.Doc),
 	}
 
 	// Register as defined type
-	typeCollector.AddDefinedType(t.Name)
+	ctx.typeCollector.AddDefinedType(t.Name)
 
 	for _, m := range it.Methods.List {
 		if len(m.Names) == 0 {
@@ -1516,8 +1526,8 @@ func extractInterface(t *doc.Type, it *ast.InterfaceType) IfaceApi {
 				continue
 			}
 			// Collect type references from method params and results
-			typeCollector.CollectFromFieldList(ft.Params)
-			typeCollector.CollectFromFieldList(ft.Results)
+			ctx.typeCollector.CollectFromFieldList(ft.Params)
+			ctx.typeCollector.CollectFromFieldList(ft.Results)
 
 			i.Methods = append(i.Methods, FuncApi{
 				Name: name.Name,
@@ -1530,26 +1540,46 @@ func extractInterface(t *doc.Type, it *ast.InterfaceType) IfaceApi {
 	return i
 }
 
-func extractFunc(decl *ast.FuncDecl, docStr string) FuncApi {
+func extractFunc(ctx *extractionContext, decl *ast.FuncDecl, docStr string) FuncApi {
 	// Collect type references from params and results
-	typeCollector.CollectFromFieldList(decl.Type.Params)
-	typeCollector.CollectFromFieldList(decl.Type.Results)
+	ctx.typeCollector.CollectFromFieldList(decl.Type.Params)
+	ctx.typeCollector.CollectFromFieldList(decl.Type.Results)
 
 	f := FuncApi{
-		Name: decl.Name.Name,
-		Sig:  formatParams(decl.Type.Params),
-		Ret:  formatResults(decl.Type.Results),
-		Doc:  firstLine(docStr),
+		Name:       decl.Name.Name,
+		Sig:        formatParams(decl.Type.Params),
+		Ret:        formatResults(decl.Type.Results),
+		Doc:        firstLine(docStr),
+		TypeParams: extractTypeParams(decl.Type.TypeParams),
 	}
 
 	if decl.Recv != nil && len(decl.Recv.List) > 0 {
 		f.IsMethod = true
 		f.Receiver = formatExpr(decl.Recv.List[0].Type)
 		// Collect receiver type reference
-		typeCollector.CollectFromFieldList(decl.Recv)
+		ctx.typeCollector.CollectFromFieldList(decl.Recv)
 	}
 
 	return f
+}
+
+// extractTypeParams extracts type parameter names and constraints from a TypeParamList (Go 1.18+).
+func extractTypeParams(tpl *ast.FieldList) []string {
+	if tpl == nil || len(tpl.List) == 0 {
+		return nil
+	}
+	var params []string
+	for _, field := range tpl.List {
+		constraint := formatExpr(field.Type)
+		for _, name := range field.Names {
+			if constraint != "" && constraint != "any" {
+				params = append(params, name.Name+" "+constraint)
+			} else {
+				params = append(params, name.Name)
+			}
+		}
+	}
+	return params
 }
 
 func formatParams(fl *ast.FieldList) string {

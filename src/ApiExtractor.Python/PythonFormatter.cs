@@ -87,6 +87,48 @@ public static class PythonFormatter
             sb.Append(classContent);
             currentLength += classContent.Length;
             includedClasses.Add(cls.Name);
+
+            // Include supporting dependency types referenced by uncovered methods
+            var deps = filteredClass.GetReferencedTypes(
+                allClasses.Select(c => c.Name).ToHashSet());
+            foreach (var depName in deps)
+            {
+                if (includedClasses.Contains(depName))
+                    continue;
+
+                var depClass = allClasses.FirstOrDefault(c => c.Name == depName);
+                if (depClass == null)
+                    continue;
+
+                var depContent = FormatClassToString(depClass);
+                if (currentLength + depContent.Length > maxLength - 100)
+                    break;
+
+                sb.Append(depContent);
+                currentLength += depContent.Length;
+                includedClasses.Add(depName);
+            }
+        }
+
+        // Include dependency types from external packages if space permits
+        if (index.Dependencies?.Count > 0)
+        {
+            foreach (var dep in index.Dependencies)
+            {
+                foreach (var cls in dep.Classes ?? [])
+                {
+                    if (includedClasses.Contains(cls.Name))
+                        continue;
+
+                    var depContent = FormatClassToString(cls);
+                    if (currentLength + depContent.Length > maxLength - 100)
+                        break;
+
+                    sb.Append(depContent);
+                    currentLength += depContent.Length;
+                    includedClasses.Add(cls.Name);
+                }
+            }
         }
 
         return sb.ToString();

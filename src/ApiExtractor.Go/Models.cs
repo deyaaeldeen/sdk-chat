@@ -101,6 +101,11 @@ public sealed record StructApi
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
+    /// <summary>Type parameters for generic structs (Go 1.18+).</summary>
+    [JsonPropertyName("typeParams")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TypeParams { get; init; }
+
     /// <summary>Embedded struct/interface names (Go composition pattern).</summary>
     [JsonPropertyName("embeds")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -209,6 +214,11 @@ public sealed record FuncApi
     /// <summary>External module this function is re-exported from.</summary>
     [JsonPropertyName("reExportedFrom")]
     public string? ReExportedFrom { get; init; }
+
+    /// <summary>Type parameters for generic functions (Go 1.18+).</summary>
+    [JsonPropertyName("typeParams")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TypeParams { get; init; }
 
     [JsonPropertyName("sig")]
     public string Sig { get; init; } = "";

@@ -71,11 +71,17 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     File = c.File ?? "",
                     Line = c.Line
                 }).ToList() ?? [],
-                UncoveredOperations = result.Uncovered?.Select(u => new UncoveredOperation
+                UncoveredOperations = result.Uncovered?.Select(u =>
                 {
-                    ClientType = u.Client ?? "",
-                    Operation = u.Method ?? "",
-                    Signature = u.Sig ?? $"{u.Method}(...)"
+                    var sig = u.Sig;
+                    if (sig is null)
+                        sig = BuildSignatureLookup(apiIndex).GetValueOrDefault($"{u.Client}.{u.Method}") ?? $"{u.Method}(...)";
+                    return new UncoveredOperation
+                    {
+                        ClientType = u.Client ?? "",
+                        Operation = u.Method ?? "",
+                        Signature = sig
+                    };
                 }).ToList() ?? []
             };
         }
@@ -175,10 +181,10 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         var allClasses = apiIndex.GetAllClasses().ToList();
         var allTypeNames = allClasses
             .Select(c => c.Name.Split('[')[0])
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(StringComparer.Ordinal);
 
         // Build base→derived edges for BFS (Python uses inheritance, not interfaces)
-        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var cls in allClasses)
         {
             if (string.IsNullOrWhiteSpace(cls.Base))
@@ -202,12 +208,25 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             ReferencedTypes = c.GetReferencedTypes(allTypeNames)
         }).ToList();
 
-        var reachable = ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.OrdinalIgnoreCase);
+        var reachable = ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.Ordinal);
 
         return allClasses
             .Where(c => reachable.Contains(c.Name.Split('[')[0]) && (c.Methods?.Any() ?? false))
-            .GroupBy(c => c.Name.Split('[')[0], StringComparer.OrdinalIgnoreCase)
+            .GroupBy(c => c.Name.Split('[')[0], StringComparer.Ordinal)
             .Select(g => g.First())
             .ToList();
+    }
+
+    /// <summary>
+    /// Builds a lookup from "TypeName.MethodName" → "MethodName(Signature)" using the API index,
+    /// so uncovered operations get real signatures when the script fails to provide one.
+    /// </summary>
+    internal static Dictionary<string, string> BuildSignatureLookup(ApiIndex apiIndex)
+    {
+        var lookup = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var cls in apiIndex.GetAllClasses())
+            foreach (var method in cls.Methods ?? [])
+                lookup.TryAdd($"{cls.Name}.{method.Name}", $"{method.Name}({method.Signature})");
+        return lookup;
     }
 }

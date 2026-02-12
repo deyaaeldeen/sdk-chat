@@ -486,7 +486,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         Dictionary<string, string> methodReturnTypeMap,
         Dictionary<string, string> allTypeNames)
     {
-        var varTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var varTypes = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var declaration in root.DescendantNodes().OfType<VariableDeclaratorSyntax>())
         {
@@ -724,6 +724,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             IdentifierNameSyntax id => id.Identifier.Text,
             QualifiedNameSyntax qualified => qualified.Right.Identifier.Text,
             GenericNameSyntax generic => generic.Identifier.Text,
+            NullableTypeSyntax nullable => GetSimpleTypeName(nullable.ElementType),
             _ => null
         };
     }

@@ -62,11 +62,17 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     File = c.File ?? "",
                     Line = c.Line
                 }).ToList() ?? [],
-                UncoveredOperations = result.Uncovered?.Select(u => new UncoveredOperation
+                UncoveredOperations = result.Uncovered?.Select(u =>
                 {
-                    ClientType = u.Client ?? "",
-                    Operation = u.Method ?? "",
-                    Signature = u.Sig ?? $"{u.Method}(...)"
+                    var sig = u.Sig;
+                    if (sig is null)
+                        sig = BuildSignatureLookup(apiIndex).GetValueOrDefault($"{u.Client}.{u.Method}") ?? $"{u.Method}(...)";
+                    return new UncoveredOperation
+                    {
+                        ClientType = u.Client ?? "",
+                        Operation = u.Method ?? "",
+                        Signature = sig
+                    };
                 }).ToList() ?? []
             };
         }
@@ -268,5 +274,31 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
         tokens.IntersectWith(allTypeNames);
         return tokens;
+    }
+
+    /// <summary>
+    /// Builds a lookup from "TypeName.MethodName" → "MethodName(Sig) Ret" using the API index,
+    /// so uncovered operations get real signatures when the script fails to provide one.
+    /// </summary>
+    internal static Dictionary<string, string> BuildSignatureLookup(ApiIndex apiIndex)
+    {
+        var lookup = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pkg in apiIndex.Packages ?? [])
+        {
+            foreach (var strct in pkg.Structs ?? [])
+                foreach (var method in strct.Methods ?? [])
+                {
+                    var ret = !string.IsNullOrEmpty(method.Ret) ? $" {method.Ret}" : "";
+                    lookup.TryAdd($"{strct.Name}.{method.Name}", $"{method.Name}({method.Sig}){ret}");
+                }
+
+            foreach (var iface in pkg.Interfaces ?? [])
+                foreach (var method in iface.Methods ?? [])
+                {
+                    var ret = !string.IsNullOrEmpty(method.Ret) ? $" {method.Ret}" : "";
+                    lookup.TryAdd($"{iface.Name}.{method.Name}", $"{method.Name}({method.Sig}){ret}");
+                }
+        }
+        return lookup;
     }
 }

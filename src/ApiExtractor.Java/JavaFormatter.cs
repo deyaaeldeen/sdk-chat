@@ -113,9 +113,19 @@ public static class JavaFormatter
     private static string FormatClassToString(ClassInfo cls)
     {
         var sb = new StringBuilder();
-        FormatType(sb, cls, "class");
+        FormatType(sb, cls, GetKeyword(cls));
         return sb.ToString();
     }
+
+    /// <summary>Returns the Java keyword for the type based on its Kind property.</summary>
+    private static string GetKeyword(ClassInfo type, bool isInterface = false) =>
+        type.Kind switch
+        {
+            "record" => "record",
+            "annotation" => "@interface",
+            "interface" => "interface",
+            _ => isInterface ? "interface" : "class"
+        };
 
     /// <summary>
     /// Formats with smart truncation to fit within budget.
@@ -159,7 +169,7 @@ public static class JavaFormatter
         foreach (var pkg in api.Packages)
         {
             var pkgClasses = orderedClasses
-                .Where(c => (pkg.Classes?.Contains(c) == true) || (pkg.Interfaces?.Contains(c) == true))
+                .Where(c => (pkg.Classes?.Contains(c) == true) || (pkg.Interfaces?.Contains(c) == true) || (pkg.Annotations?.Contains(c) == true))
                 .ToList();
 
             if (pkgClasses.Count == 0 && (pkg.Enums?.Count ?? 0) == 0)
@@ -228,7 +238,7 @@ public static class JavaFormatter
                 foreach (var cls in dep.Classes ?? [])
                 {
                     if (sb.Length >= maxLength) break;
-                    FormatType(sb, cls, "class");
+                    FormatType(sb, cls, GetKeyword(cls));
                 }
 
                 foreach (var e in dep.Enums ?? [])
@@ -249,7 +259,7 @@ public static class JavaFormatter
         var ifaceSet = pkgInterfaces != null ? new HashSet<ClassInfo>(pkgInterfaces) : null;
         foreach (var type in types)
         {
-            var keyword = ifaceSet?.Contains(type) == true ? "interface" : "class";
+            var keyword = GetKeyword(type, ifaceSet?.Contains(type) == true);
             FormatType(sb, type, keyword);
         }
         return sb.ToString();

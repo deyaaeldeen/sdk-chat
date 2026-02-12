@@ -152,7 +152,6 @@ public static class GoFormatter
             .ToList();
 
         HashSet<string> includedStructs = [];
-        var currentLength = sb.Length;
 
         foreach (var pkg in index.Packages ?? [])
         {
@@ -251,14 +250,13 @@ public static class GoFormatter
 
                 var structContent = FormatStructsToString(structsToAdd);
 
-                if (currentLength + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
+                if (sb.Length + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
                 {
                     sb.AppendLine($"// ... truncated ({allStructs.Count - includedStructs.Count} structs omitted)");
                     return sb.ToString();
                 }
 
                 sb.Append(structContent);
-                currentLength += structContent.Length;
 
                 foreach (var st in structsToAdd)
                     includedStructs.Add(st.Name);
@@ -270,7 +268,8 @@ public static class GoFormatter
                 if (!string.IsNullOrEmpty(f.Doc))
                     sb.AppendLine($"// {f.Doc}");
                 var ret = !string.IsNullOrEmpty(f.Ret) ? $" {f.Ret}" : "";
-                sb.AppendLine($"func {f.Name}({f.Sig}){ret}");
+                var funcTypeParams = f.TypeParams?.Count > 0 ? $"[{string.Join(", ", f.TypeParams)}]" : "";
+                sb.AppendLine($"func {f.Name}{funcTypeParams}({f.Sig}){ret}");
                 sb.AppendLine();
             }
         }
@@ -342,7 +341,8 @@ public static class GoFormatter
     {
         if (!string.IsNullOrEmpty(s.Doc))
             sb.AppendLine($"// {s.Doc}");
-        sb.AppendLine($"type {s.Name} struct {{");
+        var typeParams = s.TypeParams?.Count > 0 ? $"[{string.Join(", ", s.TypeParams)}]" : "";
+        sb.AppendLine($"type {s.Name}{typeParams} struct {{");
 
         // Embedded types (Go composition)
         foreach (var embed in s.Embeds ?? [])
@@ -361,14 +361,15 @@ public static class GoFormatter
         foreach (var m in s.Methods ?? [])
         {
             var ret = !string.IsNullOrEmpty(m.Ret) ? $" {m.Ret}" : "";
+            var funcTypeParams = m.TypeParams?.Count > 0 ? $"[{string.Join(", ", m.TypeParams)}]" : "";
             if (!string.IsNullOrEmpty(m.Receiver))
             {
-                sb.AppendLine($"func ({m.Receiver}) {m.Name}({m.Sig}){ret}");
+                sb.AppendLine($"func ({m.Receiver}) {m.Name}{funcTypeParams}({m.Sig}){ret}");
             }
             else
             {
                 // Constructor function — render as package-level func, not as method with fake receiver
-                sb.AppendLine($"func {m.Name}({m.Sig}){ret}");
+                sb.AppendLine($"func {m.Name}{funcTypeParams}({m.Sig}){ret}");
             }
         }
         sb.AppendLine();

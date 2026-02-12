@@ -1099,6 +1099,20 @@ public class ExtractApi {
             List<Map<String, Object>> list = (List<Map<String, Object>>)
                 pkgInfo.computeIfAbsent(key, k -> new ArrayList<>());
             list.add(info);
+        } else if (type instanceof RecordDeclaration) {
+            RecordDeclaration rd = (RecordDeclaration) type;
+            Map<String, Object> info = extractRecord(rd);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> list = (List<Map<String, Object>>)
+                pkgInfo.computeIfAbsent("classes", k -> new ArrayList<>());
+            list.add(info);
+        } else if (type instanceof AnnotationDeclaration) {
+            AnnotationDeclaration ad = (AnnotationDeclaration) type;
+            Map<String, Object> info = extractAnnotationType(ad);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> list = (List<Map<String, Object>>)
+                pkgInfo.computeIfAbsent("annotations", k -> new ArrayList<>());
+            list.add(info);
         } else if (type instanceof EnumDeclaration) {
             Map<String, Object> info = extractEnum((EnumDeclaration) type);
             @SuppressWarnings("unchecked")
@@ -1206,6 +1220,100 @@ public class ExtractApi {
         return info;
     }
 
+    static Map<String, Object> extractRecord(RecordDeclaration rd) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        String typeName = rd.getNameAsString();
+        info.put("name", typeName);
+        info.put("kind", "record");
+
+        // Register this type as defined
+        typeCollector.addDefinedType(typeName);
+
+        List<String> mods = getModifiers(rd);
+        if (!mods.isEmpty()) info.put("modifiers", mods);
+
+        if (!rd.getTypeParameters().isEmpty()) {
+            info.put("typeParams", rd.getTypeParameters().stream()
+                .map(tp -> tp.toString())
+                .collect(Collectors.joining(", ")));
+            for (var tp : rd.getTypeParameters()) {
+                for (var bound : tp.getTypeBound()) {
+                    typeCollector.collectFromType(bound);
+                }
+            }
+        }
+
+        if (!rd.getImplementedTypes().isEmpty()) {
+            info.put("implements", rd.getImplementedTypes().stream()
+                .map(t -> t.toString())
+                .collect(Collectors.toList()));
+            for (ClassOrInterfaceType implType : rd.getImplementedTypes()) {
+                typeCollector.collectFromType(implType);
+            }
+        }
+
+        getDocString(rd).ifPresent(doc -> info.put("doc", doc));
+
+        // Record components (parameters)
+        List<Map<String, Object>> components = new ArrayList<>();
+        for (Parameter param : rd.getParameters()) {
+            Map<String, Object> comp = new LinkedHashMap<>();
+            comp.put("name", param.getNameAsString());
+            comp.put("type", param.getTypeAsString());
+            typeCollector.collectFromType(param.getType());
+            components.add(comp);
+        }
+        if (!components.isEmpty()) info.put("components", components);
+
+        // Explicit methods (beyond auto-generated accessors)
+        List<Map<String, Object>> methods = new ArrayList<>();
+        for (MethodDeclaration md : rd.getMethods()) {
+            if (!isPublicOrProtected(md)) continue;
+            methods.add(extractMethod(md));
+        }
+        if (!methods.isEmpty()) info.put("methods", methods);
+
+        // Constructors (compact constructors and custom constructors)
+        List<Map<String, Object>> constructors = new ArrayList<>();
+        for (ConstructorDeclaration cd : rd.getConstructors()) {
+            if (!isPublicOrProtected(cd)) continue;
+            constructors.add(extractMethod(cd));
+        }
+        if (!constructors.isEmpty()) info.put("constructors", constructors);
+
+        return info;
+    }
+
+    static Map<String, Object> extractAnnotationType(AnnotationDeclaration ad) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        String typeName = ad.getNameAsString();
+        info.put("name", typeName);
+        info.put("kind", "annotation");
+
+        // Register this type as defined
+        typeCollector.addDefinedType(typeName);
+
+        getDocString(ad).ifPresent(doc -> info.put("doc", doc));
+
+        // Annotation members (elements)
+        List<Map<String, Object>> members = new ArrayList<>();
+        for (BodyDeclaration<?> member : ad.getMembers()) {
+            if (member instanceof AnnotationMemberDeclaration amd) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("name", amd.getNameAsString());
+                m.put("type", amd.getTypeAsString());
+                typeCollector.collectFromType(amd.getType());
+                if (amd.getDefaultValue().isPresent()) {
+                    m.put("default", amd.getDefaultValue().get().toString());
+                }
+                members.add(m);
+            }
+        }
+        if (!members.isEmpty()) info.put("members", members);
+
+        return info;
+    }
+
     static Map<String, Object> extractMethod(CallableDeclaration<?> cd) {
         Map<String, Object> info = new LinkedHashMap<>();
         info.put("name", cd.getNameAsString());
@@ -1309,26 +1417,32 @@ public class ExtractApi {
     }
 
     static String detectPackageName(Path root) throws Exception {
-        // Check pom.xml
+        // Check pom.xml using XML parser for robust extraction
         Path pom = root.resolve("pom.xml");
         if (Files.exists(pom)) {
-            String content = Files.readString(pom);
-            // Skip <parent> section to find the project's own <artifactId>
-            int searchFrom = 0;
-            int parentStart = content.indexOf("<parent>");
-            if (parentStart >= 0) {
-                int parentEnd = content.indexOf("</parent>", parentStart);
-                if (parentEnd >= 0) {
-                    // Search for <artifactId> after </parent>
-                    searchFrom = parentEnd + "</parent>".length();
+            try {
+                javax.xml.parsers.DocumentBuilderFactory factory =
+                    javax.xml.parsers.DocumentBuilderFactory.newInstance();
+                // Disable external entities for security
+                factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                javax.xml.parsers.DocumentBuilder builder = factory.newDocumentBuilder();
+                org.w3c.dom.Document doc = builder.parse(pom.toFile());
+                doc.getDocumentElement().normalize();
+
+                // Find the project-level <artifactId> (not inside <parent>)
+                org.w3c.dom.NodeList nodes = doc.getDocumentElement().getChildNodes();
+                for (int i = 0; i < nodes.getLength(); i++) {
+                    org.w3c.dom.Node node = nodes.item(i);
+                    if (node.getNodeType() == org.w3c.dom.Node.ELEMENT_NODE
+                        && "artifactId".equals(node.getNodeName())) {
+                        String artifactId = node.getTextContent().trim();
+                        if (!artifactId.isEmpty()) {
+                            return artifactId;
+                        }
+                    }
                 }
-            }
-            int idx = content.indexOf("<artifactId>", searchFrom);
-            if (idx > 0) {
-                int end = content.indexOf("</artifactId>", idx);
-                if (end > idx) {
-                    return content.substring(idx + 12, end).trim();
-                }
+            } catch (Exception e) {
+                // Fall through to directory name
             }
         }
         return root.getFileName().toString();

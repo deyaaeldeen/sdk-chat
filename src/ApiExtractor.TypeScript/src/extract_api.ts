@@ -265,39 +265,38 @@ function isBuiltinType(typeName: string): boolean {
         return false;
     }
 
-    // Try to resolve the type using the project's source files
-    // This catches types defined in node_modules/@types/* or typescript/lib/*
+    // Try to resolve the type using the project's type checker
+    // Uses getSourceFile() lookups instead of iterating all source files
     try {
-        for (const sourceFile of typeResolutionProject.getSourceFiles()) {
-            const filePath = sourceFile.getFilePath();
+        // Use the language service to find the symbol declaration
+        const checker = typeResolutionProject.getTypeChecker();
+        // Search through source files that match builtin path patterns first
+        const builtinFiles = typeResolutionProject.getSourceFiles()
+            .filter(sf => BUILTIN_PATH_PATTERNS.some(p => sf.getFilePath().includes(p)));
 
-            // Check interfaces, classes, type aliases, and enums
-            const iface = sourceFile.getInterface(baseName);
-            if (iface) {
-                const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
-                builtinTypeCache.set(baseName, isBuiltin);
-                return isBuiltin;
+        for (const sourceFile of builtinFiles) {
+            const found = sourceFile.getInterface(baseName)
+                ?? sourceFile.getClass(baseName)
+                ?? sourceFile.getTypeAlias(baseName)
+                ?? sourceFile.getEnum(baseName);
+            if (found) {
+                builtinTypeCache.set(baseName, true);
+                return true;
             }
+        }
 
-            const cls = sourceFile.getClass(baseName);
-            if (cls) {
-                const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
-                builtinTypeCache.set(baseName, isBuiltin);
-                return isBuiltin;
-            }
+        // Check non-builtin files to confirm it's NOT a builtin
+        const nonBuiltinFiles = typeResolutionProject.getSourceFiles()
+            .filter(sf => !BUILTIN_PATH_PATTERNS.some(p => sf.getFilePath().includes(p)));
 
-            const typeAlias = sourceFile.getTypeAlias(baseName);
-            if (typeAlias) {
-                const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
-                builtinTypeCache.set(baseName, isBuiltin);
-                return isBuiltin;
-            }
-
-            const enumDecl = sourceFile.getEnum(baseName);
-            if (enumDecl) {
-                const isBuiltin = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
-                builtinTypeCache.set(baseName, isBuiltin);
-                return isBuiltin;
+        for (const sourceFile of nonBuiltinFiles) {
+            const found = sourceFile.getInterface(baseName)
+                ?? sourceFile.getClass(baseName)
+                ?? sourceFile.getTypeAlias(baseName)
+                ?? sourceFile.getEnum(baseName);
+            if (found) {
+                builtinTypeCache.set(baseName, false);
+                return false;
             }
         }
     } catch {
@@ -545,6 +544,25 @@ function getDocString(node: JSDocableNode): string | undefined {
 
     const firstLine = text.split("\n")[0].trim();
     return firstLine.length > 120 ? firstLine.substring(0, 117) + "..." : firstLine;
+}
+
+/**
+ * Checks if a node has @internal or @hidden JSDoc tags, indicating it should be excluded
+ * from the public API surface.
+ */
+function hasInternalOrHiddenTag(node: JSDocableNode): boolean {
+    const jsDocs = node.getJsDocs();
+    if (!jsDocs?.length) return false;
+
+    for (const jsDoc of jsDocs) {
+        for (const tag of jsDoc.getTags()) {
+            const tagName = tag.getTagName();
+            if (tagName === "internal" || tagName === "hidden") {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 function simplifyType(type: string): string {
@@ -847,34 +865,34 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
 function extractModule(sourceFile: SourceFile, moduleName: string): ModuleInfo | null {
     const result: ModuleInfo = { name: moduleName };
 
-    // Get exported declarations
+    // Get exported declarations, filtering out @internal/@hidden tagged items
     const classes = sourceFile
         .getClasses()
-        .filter((c) => c.isExported() && c.getName())
+        .filter((c) => c.isExported() && c.getName() && !hasInternalOrHiddenTag(c))
         .map(extractClass);
     if (classes.length) result.classes = classes;
 
     const interfaces = sourceFile
         .getInterfaces()
-        .filter((i) => i.isExported())
+        .filter((i) => i.isExported() && !hasInternalOrHiddenTag(i))
         .map(extractInterface);
     if (interfaces.length) result.interfaces = interfaces;
 
     const enums = sourceFile
         .getEnums()
-        .filter((e) => e.isExported())
+        .filter((e) => e.isExported() && !hasInternalOrHiddenTag(e))
         .map(extractEnum);
     if (enums.length) result.enums = enums;
 
     const typeAliases = sourceFile
         .getTypeAliases()
-        .filter((t) => t.isExported())
+        .filter((t) => t.isExported() && !hasInternalOrHiddenTag(t))
         .map(extractTypeAlias);
     if (typeAliases.length) result.types = typeAliases;
 
     const functions = sourceFile
         .getFunctions()
-        .filter((f) => f.isExported())
+        .filter((f) => f.isExported() && !hasInternalOrHiddenTag(f))
         .map(extractFunction)
         .filter((f): f is FunctionInfo => f !== undefined);
     if (functions.length) result.functions = functions;
@@ -1419,6 +1437,11 @@ function resolveTypeFromPackage(packageName: string, typeName: string, nodeModul
 }
 
 /**
+ * Cache for dependency project instances to avoid creating one per type lookup.
+ */
+const depProjectCache = new Map<string, Project>();
+
+/**
  * Extracts a type from a dependency package's type definitions.
  */
 function extractTypeFromDependency(
@@ -1427,17 +1450,21 @@ function extractTypeFromDependency(
     packagePath: string
 ): ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | null {
     try {
-        // Create a minimal project for the dependency
-        const depProject = new Project({
-            skipAddingFilesFromTsConfig: true,
-            compilerOptions: {
-                allowJs: true,
-                declaration: true,
-                skipLibCheck: true,
-            },
-        });
+        // Reuse cached project for this package path
+        let depProject = depProjectCache.get(packagePath);
+        if (!depProject) {
+            depProject = new Project({
+                skipAddingFilesFromTsConfig: true,
+                compilerOptions: {
+                    allowJs: true,
+                    declaration: true,
+                    skipLibCheck: true,
+                },
+            });
 
-        depProject.addSourceFilesAtPaths(path.join(packagePath, "**/*.d.ts"));
+            depProject.addSourceFilesAtPaths(path.join(packagePath, "**/*.d.ts"));
+            depProjectCache.set(packagePath, depProject);
+        }
 
         // Search for the type in all source files
         for (const sourceFile of depProject.getSourceFiles()) {

@@ -4,6 +4,9 @@
 using ApiExtractor.Contracts;
 using ApiExtractor.Python;
 using Xunit;
+using Go = ApiExtractor.Go;
+using Java = ApiExtractor.Java;
+using TypeScript = ApiExtractor.TypeScript;
 
 namespace ApiExtractor.Tests;
 
@@ -452,6 +455,469 @@ public class FormatterTests
         // Should NOT throw
         var exception = Record.Exception(() => TypeScript.TypeScriptFormatter.FormatWithCoverage(api, coverage, int.MaxValue));
         Assert.Null(exception);
+    }
+
+    #endregion
+
+    #region Go Formatter — TypeParams
+
+    [Fact]
+    public void GoFormatter_RendersTypeParams_OnStructs()
+    {
+        var api = new Go.ApiIndex
+        {
+            Package = "collections",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "collections",
+                    Structs =
+                    [
+                        new Go.StructApi
+                        {
+                            Name = "Stack",
+                            TypeParams = ["T comparable"],
+                            Fields =
+                            [
+                                new Go.FieldApi { Name = "items", Type = "[]T" }
+                            ],
+                            Methods =
+                            [
+                                new Go.FuncApi
+                                {
+                                    Name = "Push",
+                                    Sig = "item T",
+                                    Receiver = "*Stack[T]"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var stubs = Go.GoFormatter.Format(api);
+        Assert.Contains("type Stack[T comparable] struct {", stubs);
+        Assert.Contains("items []T", stubs);
+    }
+
+    [Fact]
+    public void GoFormatter_RendersTypeParams_OnFunctions()
+    {
+        var api = new Go.ApiIndex
+        {
+            Package = "collections",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "collections",
+                    Functions =
+                    [
+                        new Go.FuncApi
+                        {
+                            Name = "Map",
+                            TypeParams = ["T", "U"],
+                            Sig = "items []T, fn func(T) U",
+                            Ret = "[]U"
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var stubs = Go.GoFormatter.Format(api);
+        Assert.Contains("func Map[T, U](items []T, fn func(T) U) []U", stubs);
+    }
+
+    [Fact]
+    public void GoFormatter_RendersTypeParams_OnMethods()
+    {
+        var api = new Go.ApiIndex
+        {
+            Package = "utils",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "utils",
+                    Structs =
+                    [
+                        new Go.StructApi
+                        {
+                            Name = "Converter",
+                            Methods =
+                            [
+                                new Go.FuncApi
+                                {
+                                    Name = "Convert",
+                                    TypeParams = ["T"],
+                                    Sig = "input interface{}",
+                                    Ret = "T",
+                                    Receiver = "*Converter",
+                                    IsMethod = true
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var stubs = Go.GoFormatter.Format(api);
+        Assert.Contains("func (*Converter) Convert[T](input interface{}) T", stubs);
+    }
+
+    #endregion
+
+    #region Go Formatter — Budget Tracking
+
+    [Fact]
+    public void GoFormatter_BudgetTracking_IncludesAllSections()
+    {
+        var api = new Go.ApiIndex
+        {
+            Package = "test",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "test",
+                    Constants =
+                    [
+                        new Go.ConstApi { Name = "Version", Type = "string", Value = "\"1.0\"" },
+                        new Go.ConstApi { Name = "MaxRetries", Type = "int", Value = "3" }
+                    ],
+                    Variables =
+                    [
+                        new Go.VarApi { Name = "ErrNotFound", Type = "error" }
+                    ],
+                    Interfaces =
+                    [
+                        new Go.IfaceApi
+                        {
+                            Name = "Handler",
+                            Methods =
+                            [
+                                new Go.FuncApi { Name = "Handle", Sig = "ctx context.Context", Ret = "error" }
+                            ]
+                        }
+                    ],
+                    Structs =
+                    [
+                        new Go.StructApi
+                        {
+                            Name = "Client",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new Go.FuncApi { Name = "Do", Sig = "ctx context.Context", Ret = "error", Receiver = "*Client" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var fullOutput = Go.GoFormatter.Format(api);
+        var tightBudget = Go.GoFormatter.Format(api, 200);
+
+        Assert.Contains("const (", fullOutput);
+        Assert.Contains("var (", fullOutput);
+        Assert.Contains("type Handler interface", fullOutput);
+        Assert.True(tightBudget.Length <= fullOutput.Length);
+    }
+
+    [Fact]
+    public void GoFormatter_TruncatesCorrectly_WithManyStructs()
+    {
+        var largeStructs = Enumerable.Range(0, 20).Select(i =>
+            new Go.StructApi
+            {
+                Name = $"Model{i}",
+                Fields =
+                [
+                    new Go.FieldApi { Name = "ID", Type = "string", Doc = "The identifier" },
+                    new Go.FieldApi { Name = "Value", Type = "int64", Doc = "The value" }
+                ],
+                Methods =
+                [
+                    new Go.FuncApi { Name = "GetID", Sig = "", Ret = "string", Receiver = $"*Model{i}" }
+                ]
+            }).ToList();
+
+        largeStructs.Insert(0, new Go.StructApi
+        {
+            Name = "BigClient",
+            EntryPoint = true,
+            Methods =
+            [
+                new Go.FuncApi { Name = "Do", Sig = "ctx context.Context", Ret = "error", Receiver = "*BigClient" }
+            ]
+        });
+
+        var api = new Go.ApiIndex
+        {
+            Package = "big",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "big",
+                    Structs = largeStructs
+                }
+            ]
+        };
+
+        var fullOutput = Go.GoFormatter.Format(api, int.MaxValue);
+        var output = Go.GoFormatter.Format(api, 500);
+        Assert.True(output.Length < fullOutput.Length, $"Truncated output ({output.Length}) should be shorter than full ({fullOutput.Length})");
+        Assert.Contains("truncated", output);
+    }
+
+    #endregion
+
+    #region Java Formatter — Record and Annotation Kinds
+
+    [Fact]
+    public void JavaFormatter_RendersRecordKind()
+    {
+        var api = new Java.ApiIndex
+        {
+            Package = "com.example",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.example",
+                    Classes =
+                    [
+                        new Java.ClassInfo
+                        {
+                            Name = "Point",
+                            Kind = "record",
+                            Fields =
+                            [
+                                new Java.FieldInfo { Name = "x", Type = "int" },
+                                new Java.FieldInfo { Name = "y", Type = "int" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var stubs = Java.JavaFormatter.Format(api);
+        Assert.Contains("record Point", stubs);
+    }
+
+    [Fact]
+    public void JavaFormatter_RendersAnnotationKind()
+    {
+        var api = new Java.ApiIndex
+        {
+            Package = "com.example",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.example",
+                    Annotations =
+                    [
+                        new Java.ClassInfo
+                        {
+                            Name = "MyAnnotation",
+                            Kind = "annotation",
+                            Methods =
+                            [
+                                new Java.MethodInfo { Name = "value", Sig = "()", Ret = "String" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var stubs = Java.JavaFormatter.Format(api);
+        Assert.Contains("@interface MyAnnotation", stubs);
+    }
+
+    #endregion
+
+    #region Python Formatter — FormatWithCoverage Dependency Inclusion
+
+    [Fact]
+    public void PythonFormatter_FormatWithCoverage_IncludesReferencedClasses()
+    {
+        var api = new ApiIndex("test-sdk",
+        [
+            new ModuleInfo("mod",
+            [
+                new ClassInfo
+                {
+                    Name = "MyClient",
+                    EntryPoint = true,
+                    Methods =
+                    [
+                        new MethodInfo("get_item", "self, id: str, opts: Item", null, false, null, null, null)
+                    ]
+                },
+                new ClassInfo
+                {
+                    Name = "Item",
+                    Properties =
+                    [
+                        new PropertyInfo("Name", "str", null)
+                    ]
+                }
+            ], null)
+        ]);
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "MyClient", Operation = "get_item", Signature = "get_item(self, id: str)" }
+            ]
+        };
+
+        var result = PythonFormatter.FormatWithCoverage(api, coverage, int.MaxValue);
+        Assert.Contains("class MyClient", result);
+        Assert.Contains("class Item", result);
+    }
+
+    [Fact]
+    public void PythonFormatter_FormatWithCoverage_IncludesExternalDeps()
+    {
+        var api = new ApiIndex("test-sdk",
+        [
+            new ModuleInfo("mod",
+            [
+                new ClassInfo
+                {
+                    Name = "MyClient",
+                    EntryPoint = true,
+                    Methods =
+                    [
+                        new MethodInfo("create", "self", null, false, null, null, "Response")
+                    ]
+                }
+            ], null)
+        ],
+        [
+            new DependencyInfo
+            {
+                Package = "azure-core",
+                Classes =
+                [
+                    new ClassInfo { Name = "TokenCredential" }
+                ]
+            }
+        ]);
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "MyClient", Operation = "create", Signature = "create(self)" }
+            ]
+        };
+
+        var result = PythonFormatter.FormatWithCoverage(api, coverage, int.MaxValue);
+        Assert.Contains("class MyClient", result);
+        Assert.Contains("TokenCredential", result);
+    }
+
+    [Fact]
+    public void PythonFormatter_Format_IncludesDependencies()
+    {
+        var api = new ApiIndex("test-sdk",
+        [
+            new ModuleInfo("mod",
+            [
+                new ClassInfo { Name = "MyClient" }
+            ], null)
+        ],
+        [
+            new DependencyInfo
+            {
+                Package = "azure-core",
+                Classes =
+                [
+                    new ClassInfo
+                    {
+                        Name = "TokenCredential",
+                        Methods = [new MethodInfo("get_token", "self", null, false, null, null, "str")]
+                    }
+                ]
+            }
+        ]);
+
+        var stubs = PythonFormatter.Format(api);
+        Assert.Contains("Dependency Types", stubs);
+        Assert.Contains("azure-core", stubs);
+        Assert.Contains("TokenCredential", stubs);
+    }
+
+    #endregion
+
+    #region TypeScript Formatter — FormatWithCoverage Dependency Inclusion
+
+    [Fact]
+    public void TypeScriptFormatter_FormatWithCoverage_IncludesDependencyTypes()
+    {
+        var api = new TypeScript.ApiIndex
+        {
+            Package = "@azure/test",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "main",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "TestClient",
+                            EntryPoint = true,
+                            Methods =
+                            [
+                                new TypeScript.MethodInfo { Name = "getWidget", Sig = "(id: string)", Ret = "Widget" }
+                            ]
+                        }
+                    ],
+                    Interfaces =
+                    [
+                        new TypeScript.InterfaceInfo
+                        {
+                            Name = "Widget",
+                            Properties =
+                            [
+                                new TypeScript.PropertyInfo { Name = "name", Type = "string" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "TestClient", Operation = "getWidget", Signature = "getWidget(id: string)" }
+            ]
+        };
+
+        var result = TypeScript.TypeScriptFormatter.FormatWithCoverage(api, coverage, int.MaxValue);
+        Assert.Contains("TestClient", result);
     }
 
     #endregion
