@@ -62,7 +62,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         try
         {
             var (result, warnings) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
-            if (result != null)
+            if (result is not null)
             {
                 ExtractorTelemetry.RecordResult(activity, true, result.Modules.Count);
                 return ExtractorResult<ApiIndex>.CreateSuccess(result, warnings);
@@ -197,7 +197,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         return nodeResult;
     }
 
-    private static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)
+    internal static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)
     {
         var nodeModules = Path.Combine(scriptDir, "node_modules");
 

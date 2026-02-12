@@ -46,14 +46,14 @@ public sealed class ExtractionCache<TIndex> where TIndex : class, IApiIndex
         // Read cached state atomically
         lock (_lock)
         {
-            if (_cachedValue != null && _cachedFingerprint == fingerprint && _cachedPath == normalized)
+            if (_cachedValue is not null && _cachedFingerprint == fingerprint && _cachedPath == normalized)
                 return _cachedValue;
         }
 
         // Extraction runs outside the lock to avoid blocking concurrent readers
         var value = await _extractFunc(normalized, ct).ConfigureAwait(false);
 
-        if (value != null)
+        if (value is not null)
         {
             lock (_lock)
             {
@@ -74,7 +74,7 @@ public sealed class ExtractionCache<TIndex> where TIndex : class, IApiIndex
     {
         lock (_lock)
         {
-            if (_cachedValue == null || _cachedPath == null)
+            if (_cachedValue is null || _cachedPath is null)
                 return false;
 
             var normalized = Path.GetFullPath(rootPath);

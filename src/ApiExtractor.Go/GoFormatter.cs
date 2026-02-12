@@ -36,6 +36,7 @@ public static class GoFormatter
 
         HashSet<string> includedStructs = [];
         HashSet<string> reusableDeps = [];
+        var currentLength = sb.Length;
 
         foreach (var st in structsWithUncovered)
         {
@@ -56,13 +57,14 @@ public static class GoFormatter
 
             var structContent = FormatStructToString(filteredStruct);
 
-            if (sb.Length + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
+            if (currentLength + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
             {
                 sb.AppendLine($"// ... truncated ({structsWithUncovered.Count - includedStructs.Count} structs omitted)");
                 break;
             }
 
             sb.Append(structContent);
+            currentLength += structContent.Length;
             includedStructs.Add(st.Name);
 
             // Include supporting model/option types referenced by uncovered operations
@@ -72,9 +74,10 @@ public static class GoFormatter
                 if (!includedStructs.Contains(depName) && structsByName.TryGetValue(depName, out var depStruct))
                 {
                     var depContent = FormatStructToString(depStruct);
-                    if (sb.Length + depContent.Length > maxLength - 100)
+                    if (currentLength + depContent.Length > maxLength - 100)
                         break;
                     sb.Append(depContent);
+                    currentLength += depContent.Length;
                     includedStructs.Add(depName);
                 }
             }
@@ -91,9 +94,10 @@ public static class GoFormatter
                         continue;
 
                     var depContent = FormatStructToString(st);
-                    if (sb.Length + depContent.Length > maxLength - 100)
+                    if (currentLength + depContent.Length > maxLength - 100)
                         break;
                     sb.Append(depContent);
+                    currentLength += depContent.Length;
                     includedStructs.Add(st.Name);
                 }
             }
@@ -151,6 +155,7 @@ public static class GoFormatter
 
         HashSet<string> includedStructs = [];
         HashSet<string> reusableDeps3 = [];
+        var currentLength = sb.Length;
 
         foreach (var pkg in index.Packages ?? [])
         {
@@ -249,13 +254,14 @@ public static class GoFormatter
 
                 var structContent = FormatStructsToString(structsToAdd);
 
-                if (sb.Length + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
+                if (currentLength + structContent.Length > maxLength - 100 && includedStructs.Count > 0)
                 {
                     sb.AppendLine($"// ... truncated ({allStructs.Count - includedStructs.Count} structs omitted)");
                     return sb.ToString();
                 }
 
                 sb.Append(structContent);
+                currentLength += structContent.Length;
 
                 foreach (var st in structsToAdd)
                     includedStructs.Add(st.Name);

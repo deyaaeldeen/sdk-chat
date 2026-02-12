@@ -6,7 +6,7 @@ using ApiExtractor.TypeScript;
 
 var options = CliOptions.Parse(args);
 
-if (options.ShowHelp || options.Path == null)
+if (options.ShowHelp || options.Path is null)
 {
     Console.WriteLine(CliOptions.GetHelpText("TypeScript", "ApiExtractor.TypeScript"));
     return options.ShowHelp ? 0 : 1;
@@ -46,7 +46,7 @@ else
     output = extractor.ToStubs(index);
 }
 
-if (options.OutputFile != null)
+if (options.OutputFile is not null)
 {
     await File.WriteAllTextAsync(options.OutputFile, output);
     Console.Error.WriteLine($"Wrote {output.Length:N0} chars to {options.OutputFile}");

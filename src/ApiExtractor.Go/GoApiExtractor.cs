@@ -66,7 +66,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         try
         {
             var (result, warnings) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
-            if (result != null)
+            if (result is not null)
             {
                 ExtractorTelemetry.RecordResult(activity, true, result.Packages.Count);
                 return ExtractorResult<ApiIndex>.CreateSuccess(result, warnings);
@@ -138,7 +138,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         {
             result = await ProcessSandbox.ExecuteAsync(
                 availability.ExecutablePath!,
-                [outputFlag, rootPath],
+                [rootPath, outputFlag],
                 cancellationToken: ct
             ).ConfigureAwait(false);
         }
@@ -147,7 +147,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             var binaryPath = await EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
             result = await ProcessSandbox.ExecuteAsync(
                 binaryPath,
-                [outputFlag, rootPath],
+                [rootPath, outputFlag],
                 cancellationToken: ct
             ).ConfigureAwait(false);
         }
@@ -156,7 +156,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
             result = await DockerSandbox.ExecuteAsync(
                 availability.DockerImageName!,
                 rootPath,
-                [outputFlag, rootPath],
+                [rootPath, outputFlag],
                 cancellationToken: ct
             ).ConfigureAwait(false);
         }
@@ -190,7 +190,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         }
 
         // Fast path: binary already cached in memory
-        if (_cachedBinaryPath != null && File.Exists(_cachedBinaryPath))
+        if (_cachedBinaryPath is not null && File.Exists(_cachedBinaryPath))
         {
             return _cachedBinaryPath;
         }
@@ -199,7 +199,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
         try
         {
             // Double-check after acquiring lock
-            if (_cachedBinaryPath != null && File.Exists(_cachedBinaryPath))
+            if (_cachedBinaryPath is not null && File.Exists(_cachedBinaryPath))
             {
                 return _cachedBinaryPath;
             }

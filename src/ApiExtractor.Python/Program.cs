@@ -6,7 +6,7 @@ using ApiExtractor.Python;
 
 var options = CliOptions.Parse(args);
 
-if (options.ShowHelp || options.Path == null)
+if (options.ShowHelp || options.Path is null)
 {
     Console.WriteLine(CliOptions.GetHelpText("Python", "ApiExtractor.Python"));
     return options.ShowHelp ? 0 : 1;
@@ -46,7 +46,7 @@ else
     output = extractor.ToStubs(index);
 }
 
-if (options.OutputFile != null)
+if (options.OutputFile is not null)
 {
     await File.WriteAllTextAsync(options.OutputFile, output);
     Console.Error.WriteLine($"Wrote {output.Length:N0} chars to {options.OutputFile}");

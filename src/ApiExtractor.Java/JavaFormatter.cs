@@ -190,7 +190,7 @@ public static class JavaFormatter
             sb.AppendLine();
 
             // Enums first (usually small)
-            if (pkg.Enums != null)
+            if (pkg.Enums is not null)
                 FormatEnums(sb, pkg.Enums);
 
             foreach (var cls in pkgClasses)
@@ -267,7 +267,7 @@ public static class JavaFormatter
     {
         var sb = new StringBuilder();
         // Use a HashSet for O(1) interface membership checks instead of O(n) IReadOnlyList.Contains
-        var ifaceSet = pkgInterfaces != null ? new HashSet<ClassInfo>(pkgInterfaces) : null;
+        var ifaceSet = pkgInterfaces is not null ? new HashSet<ClassInfo>(pkgInterfaces) : null;
         foreach (var type in types)
         {
             var keyword = GetKeyword(type, ifaceSet?.Contains(type) == true);
@@ -281,7 +281,7 @@ public static class JavaFormatter
         if (!string.IsNullOrEmpty(type.Doc))
             sb.AppendLine($"/** {type.Doc} */");
 
-        var mods = type.Modifiers != null ? string.Join(" ", type.Modifiers) + " " : "";
+        var mods = type.Modifiers is not null ? string.Join(" ", type.Modifiers) + " " : "";
         var typeParams = !string.IsNullOrEmpty(type.TypeParams) ? $"<{type.TypeParams}>" : "";
         var ext = !string.IsNullOrEmpty(type.Extends) ? $" extends {type.Extends}" : "";
         var impl = type.Implements?.Count > 0 ? $" implements {string.Join(", ", type.Implements)}" : "";
@@ -289,25 +289,25 @@ public static class JavaFormatter
         sb.AppendLine($"{mods}{keyword} {type.Name}{typeParams}{ext}{impl} {{");
 
         // Fields
-        if (type.Fields != null)
+        if (type.Fields is not null)
         {
             foreach (var f in type.Fields)
             {
-                var fm = f.Modifiers != null ? string.Join(" ", f.Modifiers) + " " : "";
+                var fm = f.Modifiers is not null ? string.Join(" ", f.Modifiers) + " " : "";
                 var val = !string.IsNullOrEmpty(f.Value) ? $" = {f.Value}" : "";
                 sb.AppendLine($"    {fm}{f.Type} {f.Name}{val};");
             }
         }
 
         // Constructors
-        if (type.Constructors != null)
+        if (type.Constructors is not null)
         {
             foreach (var c in type.Constructors)
                 FormatMethod(sb, type.Name, c, isCtor: true);
         }
 
         // Methods
-        if (type.Methods != null)
+        if (type.Methods is not null)
         {
             foreach (var m in type.Methods)
                 FormatMethod(sb, m.Name, m, isCtor: false);
@@ -329,7 +329,7 @@ public static class JavaFormatter
             if (e.Values?.Count > 0)
                 sb.AppendLine($"    {string.Join(", ", e.Values)};");
 
-            if (e.Methods != null)
+            if (e.Methods is not null)
             {
                 foreach (var m in e.Methods)
                     FormatMethod(sb, m.Name, m, isCtor: false);
@@ -345,7 +345,7 @@ public static class JavaFormatter
         if (!string.IsNullOrEmpty(m.Doc))
             sb.AppendLine($"    /** {m.Doc} */");
 
-        var mods = m.Modifiers != null ? string.Join(" ", m.Modifiers) + " " : "";
+        var mods = m.Modifiers is not null ? string.Join(" ", m.Modifiers) + " " : "";
         var typeParams = !string.IsNullOrEmpty(m.TypeParams) ? $"<{m.TypeParams}> " : "";
         var ret = !isCtor && !string.IsNullOrEmpty(m.Ret) ? $"{m.Ret} " : "";
         var throws = m.Throws?.Count > 0 ? $" throws {string.Join(", ", m.Throws)}" : "";

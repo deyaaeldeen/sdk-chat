@@ -542,6 +542,18 @@ def extract_class(
     methods = []
     properties = []
 
+    # Collect @overload-decorated signatures so we emit those instead of
+    # the generic implementation signature (which is often just *args/**kwargs).
+    overload_map: dict[str, list[dict[str, Any]]] = {}
+
+    def _is_overload_decorated(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        for dec in func_node.decorator_list:
+            if isinstance(dec, ast.Name) and dec.id == "overload":
+                return True
+            if isinstance(dec, ast.Attribute) and dec.attr == "overload":
+                return True
+        return False
+
     for item in node.body:
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
             # Skip private (single underscore) but keep dunder methods
@@ -549,6 +561,11 @@ def extract_class(
                 continue
             # Skip private dunders (double underscore not ending with double)
             if item.name.startswith('__') and not item.name.endswith('__'):
+                continue
+
+            if _is_overload_decorated(item):
+                func_info = extract_function(item)
+                overload_map.setdefault(item.name, []).append(func_info)
                 continue
 
             func_info = extract_function(item)
@@ -561,7 +578,25 @@ def extract_class(
                     prop_type = sig.split(" -> ")[-1] if " -> " in sig else None
                 properties.append({"name": func_info["name"], "type": prop_type, "doc": func_info.get("doc")})
             else:
-                methods.append(func_info)
+                # If we have @overload signatures for this method, emit those
+                # instead of the (typically generic *args/**kwargs) implementation.
+                if item.name in overload_map:
+                    overloads = overload_map.pop(item.name)
+                    # Carry over docstring from implementation if overloads lack one
+                    impl_doc = func_info.get("doc")
+                    for ol in overloads:
+                        if not ol.get("doc") and impl_doc:
+                            ol["doc"] = impl_doc
+                        ol["overload"] = True
+                        methods.append(ol)
+                else:
+                    methods.append(func_info)
+
+    # Append any remaining @overload signatures that had no implementation body
+    for overloads in overload_map.values():
+        for ol in overloads:
+            ol["overload"] = True
+            methods.append(ol)
 
     if methods:
         result["methods"] = methods
@@ -591,6 +626,15 @@ def extract_module(
 
     classes = []
     functions = []
+    overload_map: dict[str, list[dict[str, Any]]] = {}
+
+    def _is_overload_decorated(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        for dec in func_node.decorator_list:
+            if isinstance(dec, ast.Name) and dec.id == "overload":
+                return True
+            if isinstance(dec, ast.Attribute) and dec.attr == "overload":
+                return True
+        return False
 
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.ClassDef):
@@ -598,7 +642,27 @@ def extract_module(
                 classes.append(extract_class(node, entry_point_symbols, external_reexports))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if not node.name.startswith('_'):
-                functions.append(extract_function(node, entry_point_symbols, external_reexports))
+                if _is_overload_decorated(node):
+                    func_info = extract_function(node, entry_point_symbols, external_reexports)
+                    overload_map.setdefault(node.name, []).append(func_info)
+                else:
+                    func_info = extract_function(node, entry_point_symbols, external_reexports)
+                    if node.name in overload_map:
+                        overloads = overload_map.pop(node.name)
+                        impl_doc = func_info.get("doc")
+                        for ol in overloads:
+                            if not ol.get("doc") and impl_doc:
+                                ol["doc"] = impl_doc
+                            ol["overload"] = True
+                            functions.append(ol)
+                    else:
+                        functions.append(func_info)
+
+    # Append any remaining @overload signatures without implementation
+    for overloads in overload_map.values():
+        for ol in overloads:
+            ol["overload"] = True
+            functions.append(ol)
 
     if not classes and not functions:
         return {}
@@ -839,6 +903,8 @@ def format_python_stubs(api: dict[str, Any]) -> str:
         for func in module.get("functions", []):
             if func.get("doc"):
                 lines.append(f'"""{func["doc"]}"""')
+            if func.get("overload"):
+                lines.append("@overload")
             async_prefix = "async " if func.get("async") else ""
             ret_type = f' -> {func["ret"]}' if func.get("ret") else ""
             lines.append(f'{async_prefix}def {func["name"]}({func["sig"]}){ret_type}: ...')
@@ -858,6 +924,8 @@ def format_python_stubs(api: dict[str, Any]) -> str:
                 if method.get("doc"):
                     lines.append(f'    """{method["doc"]}"""')
                 decorators = []
+                if method.get("overload"):
+                    decorators.append("@overload")
                 if method.get("classmethod"):
                     decorators.append("@classmethod")
                 if method.get("staticmethod"):
@@ -900,6 +968,8 @@ def format_python_stubs(api: dict[str, Any]) -> str:
                     if method.get("doc"):
                         lines.append(f'    """{method["doc"]}"""')
                     decorators = []
+                    if method.get("overload"):
+                        decorators.append("@overload")
                     if method.get("classmethod"):
                         decorators.append("@classmethod")
                     if method.get("staticmethod"):

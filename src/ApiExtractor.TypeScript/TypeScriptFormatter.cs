@@ -187,11 +187,11 @@ public static class TypeScriptFormatter
 
         // Group entry points by export path
         HashSet<string> exportPaths = [];
-        foreach (var cls in allClasses.Where(c => c.ExportPath != null))
+        foreach (var cls in allClasses.Where(c => c.ExportPath is not null))
             exportPaths.Add(cls.ExportPath!);
-        foreach (var iface in allInterfaces.Where(i => i.ExportPath != null))
+        foreach (var iface in allInterfaces.Where(i => i.ExportPath is not null))
             exportPaths.Add(iface.ExportPath!);
-        foreach (var fn in allFunctions.Where(f => f.ExportPath != null))
+        foreach (var fn in allFunctions.Where(f => f.ExportPath is not null))
             exportPaths.Add(fn.ExportPath!);
 
         // Sort export paths: "." first, then alphabetically
@@ -364,7 +364,7 @@ public static class TypeScriptFormatter
 
         // Include remaining functions if space permits (limit to first 20)
         int funcCount = 0;
-        foreach (var fn in allFunctions.Where(f => f.ExportPath == null).Take(20))
+        foreach (var fn in allFunctions.Where(f => f.ExportPath is null).Take(20))
         {
             if (sb.Length >= maxLength) break;
             var fnStr = FormatFunction(fn);
@@ -377,7 +377,7 @@ public static class TypeScriptFormatter
         }
 
         // Include dependency types if present and space permits
-        if (index.Dependencies != null && index.Dependencies.Count > 0 && sb.Length < maxLength)
+        if (index.Dependencies is not null && index.Dependencies.Count > 0 && sb.Length < maxLength)
         {
             sb.AppendLine();
             sb.AppendLine("// ============================================================================");
@@ -564,7 +564,7 @@ public static class TypeScriptFormatter
             sb.AppendLine($"/** {e.Doc} */");
         var export = exportKeyword ? "export " : "";
         sb.AppendLine($"{export}enum {e.Name} {{");
-        if (e.Values != null)
+        if (e.Values is not null)
             sb.AppendLine($"    {string.Join(", ", e.Values)}");
         sb.AppendLine("}");
         sb.AppendLine();

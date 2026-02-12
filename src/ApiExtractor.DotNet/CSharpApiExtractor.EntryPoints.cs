@@ -28,7 +28,7 @@ public partial class CSharpApiExtractor
         var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
                   ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
 
-        if (csproj != null)
+        if (csproj is not null)
         {
             try
             {

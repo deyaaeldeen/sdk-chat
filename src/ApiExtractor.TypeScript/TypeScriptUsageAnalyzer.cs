@@ -45,6 +45,13 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         var apiJson = JsonSerializer.Serialize(apiIndex, SourceGenerationContext.Default.ApiIndex);
         var scriptDir = AppContext.BaseDirectory;
 
+        // In RuntimeInterpreter mode, ensure npm dependencies are installed
+        // before invoking the script (mirrors TypeScriptApiExtractor.RunExtractorAsync).
+        if (availability.Mode == ExtractorMode.RuntimeInterpreter)
+        {
+            await TypeScriptApiExtractor.EnsureDependenciesAsync(scriptDir, ct).ConfigureAwait(false);
+        }
+
         var analysisResult = await ScriptUsageAnalyzerHelper.AnalyzeAsync(new ScriptUsageAnalyzerHelper.ScriptInvocationConfig
         {
             Language = Language,
@@ -60,6 +67,13 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             },
             SignatureLookup = BuildSignatureLookup(apiIndex)
         }, ct).ConfigureAwait(false);
+
+        if (analysisResult.Errors.Count > 0)
+        {
+            var errorMsg = string.Join("; ", analysisResult.Errors);
+            ExtractorTelemetry.RecordResult(activity, false, error: errorMsg);
+            return analysisResult.Index ?? new UsageIndex { FileCount = 0 };
+        }
 
         ExtractorTelemetry.RecordResult(activity, true, analysisResult.Index?.CoveredOperations.Count ?? 0);
         return analysisResult.Index ?? new UsageIndex { FileCount = 0 };

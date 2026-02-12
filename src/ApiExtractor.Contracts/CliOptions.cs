@@ -60,7 +60,7 @@ public sealed class CliOptions
             {
                 options.OutputFile = args[++i];
             }
-            else if (!arg.StartsWith('-') && options.Path == null)
+            else if (!arg.StartsWith('-') && options.Path is null)
             {
                 options.Path = System.IO.Path.GetFullPath(arg);
             }

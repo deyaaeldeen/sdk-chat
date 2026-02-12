@@ -60,7 +60,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         try
         {
             var (result, warnings) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
-            if (result != null)
+            if (result is not null)
             {
                 ExtractorTelemetry.RecordResult(activity, true, result.Packages.Count);
                 return ExtractorResult<ApiIndex>.CreateSuccess(result, warnings);

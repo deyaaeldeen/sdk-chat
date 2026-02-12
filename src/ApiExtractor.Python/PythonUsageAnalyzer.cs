@@ -62,6 +62,13 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             SignatureLookup = BuildSignatureLookup(apiIndex)
         }, ct).ConfigureAwait(false);
 
+        if (analysisResult.Errors.Count > 0)
+        {
+            var errorMsg = string.Join("; ", analysisResult.Errors);
+            ExtractorTelemetry.RecordResult(activity, false, error: errorMsg);
+            return analysisResult.Index ?? new UsageIndex { FileCount = 0 };
+        }
+
         ExtractorTelemetry.RecordResult(activity, true, analysisResult.Index?.CoveredOperations.Count ?? 0);
         return analysisResult.Index ?? new UsageIndex { FileCount = 0 };
     }

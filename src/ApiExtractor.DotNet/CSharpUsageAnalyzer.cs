@@ -44,7 +44,10 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
         var files = Directory.EnumerateFiles(normalizedPath, "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("\\obj\\", StringComparison.Ordinal)
-                     && !f.Contains("/bin/", StringComparison.Ordinal) && !f.Contains("\\bin\\", StringComparison.Ordinal))
+                     && !f.Contains("/bin/", StringComparison.Ordinal) && !f.Contains("\\bin\\", StringComparison.Ordinal)
+                     && !f.Contains("/.git/", StringComparison.Ordinal) && !f.Contains("\\.git\\", StringComparison.Ordinal)
+                     && !f.Contains("/.vs/", StringComparison.Ordinal) && !f.Contains("\\.vs\\", StringComparison.Ordinal)
+                     && !f.Contains("/node_modules/", StringComparison.Ordinal) && !f.Contains("\\node_modules\\", StringComparison.Ordinal))
             .ToList();
 
         List<SyntaxTree> syntaxTrees = [];
@@ -232,7 +235,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             HasOperations = t.Members?.Any(m => m.Kind == "method") ?? false,
             IsExplicitEntryPoint = t.EntryPoint == true,
             IsRootCandidate = t.Kind.Equals("class", StringComparison.OrdinalIgnoreCase)
-                           || t.Kind.Equals("struct", StringComparison.OrdinalIgnoreCase),
+                           || t.Kind.Equals("struct", StringComparison.OrdinalIgnoreCase)
+                           || t.Kind.StartsWith("record", StringComparison.OrdinalIgnoreCase),
             ReferencedTypes = t.GetReferencedTypes(allTypeNames)
         }).ToList();
 

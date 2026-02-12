@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"go/ast"
 	"go/doc"
@@ -189,31 +188,68 @@ func isStdlibPackage(pkgPath string) bool {
 }
 
 func main() {
-	var outputJson, outputStub, pretty bool
-	var usageApiFile string
-	flag.BoolVar(&outputJson, "json", false, "Output JSON")
-	flag.BoolVar(&outputStub, "stub", false, "Output Go stubs")
-	flag.BoolVar(&pretty, "pretty", false, "Pretty print JSON")
-	flag.StringVar(&usageApiFile, "usage", "", "Analyze samples usage: -usage <api_json_file> <samples_path>")
-	flag.Parse()
+	args := os.Args[1:]
 
-	// Handle --usage mode
-	if usageApiFile != "" {
-		if flag.NArg() < 1 {
-			fmt.Fprintln(os.Stderr, "Usage: go run extract_api.go -usage <api_json_file> <samples_path>")
-			os.Exit(1)
-		}
-		analyzeUsage(usageApiFile, flag.Arg(0))
-		return
-	}
-
-	if flag.NArg() < 1 {
+	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "Usage: go run extract_api.go <path> [--json] [--stub] [--pretty]")
-		fmt.Fprintln(os.Stderr, "       go run extract_api.go -usage <api_json_file> <samples_path>")
+		fmt.Fprintln(os.Stderr, "       go run extract_api.go --usage <api_json_file> <samples_path>")
 		os.Exit(1)
 	}
 
-	rootPath := flag.Arg(0)
+	// Scan for flags (position-independent, like Python/Java/TypeScript extractors)
+	hasFlag := func(name string) bool {
+		for _, a := range args {
+			if a == "--"+name || a == "-"+name {
+				return true
+			}
+		}
+		return false
+	}
+	flagValue := func(name string) string {
+		for i, a := range args {
+			if (a == "--"+name || a == "-"+name) && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+
+	// Collect positional args (skip flags and their values)
+	usageFile := flagValue("usage")
+	var positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--usage" || a == "-usage" {
+			i++ // skip the value
+			continue
+		}
+		if strings.HasPrefix(a, "--") || strings.HasPrefix(a, "-") {
+			continue
+		}
+		positional = append(positional, a)
+	}
+
+	// Handle --usage mode
+	if usageFile != "" {
+		if len(positional) < 1 {
+			fmt.Fprintln(os.Stderr, "Usage: go run extract_api.go --usage <api_json_file> <samples_path>")
+			os.Exit(1)
+		}
+		analyzeUsage(usageFile, positional[0])
+		return
+	}
+
+	if len(positional) < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: go run extract_api.go <path> [--json] [--stub] [--pretty]")
+		fmt.Fprintln(os.Stderr, "       go run extract_api.go --usage <api_json_file> <samples_path>")
+		os.Exit(1)
+	}
+
+	outputJson := hasFlag("json")
+	outputStub := hasFlag("stub")
+	pretty := hasFlag("pretty")
+
+	rootPath := positional[0]
 	if !outputJson && !outputStub {
 		outputStub = true
 	}
