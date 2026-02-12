@@ -9,8 +9,10 @@ import (
 	"go/doc"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -105,35 +107,58 @@ type VarApi struct {
 }
 
 // =============================================================================
-// Builtin Type Detection
+// Builtin Type Detection (dynamic, version-aware)
 // =============================================================================
 
-// Go standard library packages (not external dependencies)
-var goStdlibPackages = map[string]bool{
-	"archive": true, "bufio": true, "builtin": true, "bytes": true,
-	"compress": true, "container": true, "context": true, "crypto": true,
-	"database": true, "debug": true, "embed": true, "encoding": true,
-	"errors": true, "expvar": true, "flag": true, "fmt": true,
-	"go": true, "hash": true, "html": true, "image": true,
-	"index": true, "internal": true, "io": true, "log": true,
-	"maps": true, "math": true, "mime": true, "net": true,
-	"os": true, "path": true, "plugin": true, "reflect": true,
-	"regexp": true, "runtime": true, "slices": true, "sort": true,
-	"strconv": true, "strings": true, "sync": true, "syscall": true,
-	"testing": true, "text": true, "time": true, "unicode": true,
-	"unsafe": true,
+// goBuiltinTypes is populated from go/types.Universe at init time, ensuring
+// it stays current with the Go version used to compile this binary.
+var goBuiltinTypes map[string]bool
+
+// goStdlibTopLevel maps top-level stdlib directory names (e.g., "net", "io",
+// "crypto"). Discovered dynamically from GOROOT/src at init time.
+var goStdlibTopLevel map[string]bool
+
+func init() {
+	// Populate builtin types from the compiler's own Universe scope.
+	// This includes all predeclared types (bool, int, string, error, any, ...)
+	// and automatically picks up additions in newer Go versions.
+	goBuiltinTypes = make(map[string]bool)
+	for _, name := range types.Universe.Names() {
+		goBuiltinTypes[name] = true
+	}
+
+	// Discover stdlib top-level packages from GOROOT/src.
+	goStdlibTopLevel = discoverStdlibTopLevel()
 }
 
-// Go builtin types
-var goBuiltinTypes = map[string]bool{
-	// Basic types
-	"bool": true, "string": true,
-	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
-	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
-	"uintptr": true, "byte": true, "rune": true,
-	"float32": true, "float64": true,
-	"complex64": true, "complex128": true,
-	"error": true, "any": true, "comparable": true,
+// discoverStdlibTopLevel scans GOROOT/src to find all top-level stdlib
+// directory names. Returns nil if Go is not on PATH (e.g., precompiled
+// binary running without Go installed).
+func discoverStdlibTopLevel() map[string]bool {
+	out, err := exec.Command("go", "env", "GOROOT").Output()
+	if err != nil {
+		return nil
+	}
+	goroot := strings.TrimSpace(string(out))
+	if goroot == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(filepath.Join(goroot, "src"))
+	if err != nil {
+		return nil
+	}
+	result := make(map[string]bool)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() && !strings.HasPrefix(name, ".") && !strings.HasPrefix(name, "_") &&
+			name != "vendor" && name != "testdata" && name != "cmd" {
+			result[name] = true
+		}
+	}
+	if len(result) > 10 { // sanity check
+		return result
+	}
+	return nil
 }
 
 func isBuiltinType(typeName string) bool {
@@ -167,10 +192,10 @@ func isBuiltinType(typeName string) bool {
 		return true // malformed, treat as builtin
 	}
 
-	// Check if it's a stdlib package reference
+	// Check if it's a stdlib package reference (e.g., "time.Time", "io.Reader")
 	if strings.Contains(typeName, ".") {
 		parts := strings.SplitN(typeName, ".", 2)
-		if goStdlibPackages[parts[0]] {
+		if isStdlibPackage(parts[0]) {
 			return true
 		}
 	}
@@ -178,13 +203,41 @@ func isBuiltinType(typeName string) bool {
 	return goBuiltinTypes[typeName]
 }
 
+// isStdlibPackage checks whether a package path or import alias belongs to
+// the Go standard library.
+//
+// For full import paths (e.g., "net/http", "github.com/foo/bar"): uses the
+// canonical Go convention that stdlib paths never have a dot in the first
+// path element, while module paths always do.
+//
+// For bare aliases (e.g., "http", "context"): checks against the stdlib
+// top-level directory names discovered from GOROOT. Falls back to the
+// dot-check convention when GOROOT is unavailable.
 func isStdlibPackage(pkgPath string) bool {
 	if pkgPath == "" {
 		return false
 	}
-	// Get the first path component
-	parts := strings.SplitN(pkgPath, "/", 2)
-	return goStdlibPackages[parts[0]]
+
+	// Split into first path element
+	firstElement := pkgPath
+	if i := strings.IndexByte(pkgPath, '/'); i >= 0 {
+		firstElement = pkgPath[:i]
+	}
+
+	// External packages always have a dot in the first element (domain-based)
+	if strings.Contains(firstElement, ".") {
+		return false
+	}
+
+	// Use GOROOT-discovered names when available (handles aliases precisely)
+	if goStdlibTopLevel != nil {
+		return goStdlibTopLevel[firstElement]
+	}
+
+	// Fallback: no dots in first element → stdlib by Go convention.
+	// Correct for full import paths; may have rare false positives for aliases,
+	// but in practice Go import aliases match stdlib package names.
+	return true
 }
 
 func main() {

@@ -1,7 +1,7 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //DEPS com.github.javaparser:javaparser-core:3.26.3
 //DEPS com.google.code.gson:gson:2.10.1
-//NATIVE_OPTIONS -O3 --no-fallback --initialize-at-build-time=com.github.javaparser --initialize-at-run-time=
+//NATIVE_OPTIONS -O3 --no-fallback --initialize-at-build-time=com.github.javaparser,ExtractApi --initialize-at-run-time=
 
 import com.github.javaparser.*;
 import com.github.javaparser.ast.*;
@@ -14,6 +14,7 @@ import com.github.javaparser.ast.visitor.*;
 import com.github.javaparser.ast.nodeTypes.*;
 import com.google.gson.*;
 import java.io.*;
+import java.net.URI;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.*;
@@ -814,91 +815,66 @@ public class ExtractApi {
 
     // ===== Transitive Dependency Resolution =====
 
-    // Java builtin types - types from java.lang and common java.* packages
-    private static final Set<String> JAVA_BUILTINS = Set.of(
-        // Primitives and wrappers
-        "boolean", "byte", "char", "short", "int", "long", "float", "double", "void",
-        "Boolean", "Byte", "Character", "Short", "Integer", "Long", "Float", "Double", "Void",
-        "Number", "Object", "String", "Class", "Enum",
+    // =========================================================================
+    // Builtin Type Detection (dynamic, version-aware)
+    // =========================================================================
 
-        // Collections
-        "Collection", "List", "Set", "Map", "Queue", "Deque", "Iterator", "Iterable",
-        "ArrayList", "LinkedList", "HashSet", "TreeSet", "LinkedHashSet",
-        "HashMap", "TreeMap", "LinkedHashMap", "Hashtable",
-        "Vector", "Stack", "Properties", "EnumSet", "EnumMap",
-        "Collections", "Arrays",
-
-        // Streams
-        "Stream", "IntStream", "LongStream", "DoubleStream",
-        "Optional", "OptionalInt", "OptionalLong", "OptionalDouble",
-        "Collector", "Collectors",
-
-        // Functions
-        "Function", "BiFunction", "Consumer", "BiConsumer", "Supplier",
-        "Predicate", "BiPredicate", "UnaryOperator", "BinaryOperator",
-        "Runnable", "Callable", "Comparator",
-
-        // Exceptions
-        "Exception", "RuntimeException", "Error", "Throwable",
-        "IllegalArgumentException", "IllegalStateException", "NullPointerException",
-        "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException",
-        "ClassCastException", "UnsupportedOperationException", "NoSuchElementException",
-        "IOException", "FileNotFoundException", "EOFException",
-        "InterruptedException", "TimeoutException", "ExecutionException",
-
-        // IO/NIO
-        "InputStream", "OutputStream", "Reader", "Writer",
-        "File", "Path", "Paths", "Files", "URI", "URL",
-        "ByteBuffer", "CharBuffer", "Channel", "FileChannel",
-        "Closeable", "AutoCloseable", "Flushable",
-
-        // Time
-        "Date", "Calendar", "TimeZone",
-        "Instant", "Duration", "Period", "LocalDate", "LocalTime", "LocalDateTime",
-        "ZonedDateTime", "OffsetDateTime", "OffsetTime", "ZoneId", "ZoneOffset",
-        "DateTimeFormatter", "ChronoUnit", "TemporalUnit",
-
-        // Concurrency
-        "Thread", "ThreadLocal", "Executor", "ExecutorService",
-        "Future", "CompletableFuture", "CompletionStage",
-        "Lock", "ReentrantLock", "Semaphore", "CountDownLatch",
-        "AtomicBoolean", "AtomicInteger", "AtomicLong", "AtomicReference",
-        "ConcurrentHashMap", "ConcurrentLinkedQueue", "BlockingQueue",
-
-        // Reflection
-        "Method", "Field", "Constructor", "Annotation", "Type", "ParameterizedType",
-
-        // Misc
-        "StringBuilder", "StringBuffer", "Pattern", "Matcher",
-        "Random", "UUID", "Objects", "Math", "System",
-        "Serializable", "Cloneable", "Comparable", "Appendable", "CharSequence",
-        "BigInteger", "BigDecimal"
+    // Java primitive types (language-level, never change)
+    private static final Set<String> JAVA_PRIMITIVES = Set.of(
+        "boolean", "byte", "char", "short", "int", "long", "float", "double", "void"
     );
 
-    // Java standard library packages
-    private static final Set<String> JAVA_STDLIB_PACKAGES = Set.of(
-        "java.lang", "java.util", "java.io", "java.nio", "java.net",
-        "java.time", "java.math", "java.text", "java.security", "java.sql",
-        "java.beans", "java.awt", "java.applet", "javax.swing", "javax.xml",
-        "javax.crypto", "javax.net", "javax.security", "javax.sql",
-        "sun.", "com.sun.", "jdk."
-    );
+    // System packages discovered from ModuleLayer.boot() — precise and version-aware.
+    // Covers java.*, javax.*, jdk.*, sun.*, com.sun.*, etc. automatically.
+    private static final Set<String> JAVA_SYSTEM_PACKAGES;
+
+    // Simple class names from system modules, discovered via JRT filesystem.
+    // Used for short-name builtin checks (e.g., "String", "List", "Map").
+    private static final Set<String> JAVA_SYSTEM_SIMPLE_NAMES;
+
+    static {
+        // 1. Discover all system packages from the module layer
+        Set<String> pkgs = new HashSet<>();
+        try {
+            ModuleLayer.boot().modules().forEach(m -> pkgs.addAll(m.getPackages()));
+        } catch (Exception e) {
+            // Shouldn't happen on Java 9+
+        }
+        JAVA_SYSTEM_PACKAGES = Collections.unmodifiableSet(pkgs);
+
+        // 2. Discover all system class simple names from JRT filesystem
+        Set<String> names = new HashSet<>(JAVA_PRIMITIVES);
+        try {
+            FileSystem jrt = FileSystems.getFileSystem(URI.create("jrt:/"));
+            try (var stream = Files.walk(jrt.getPath("/modules"))) {
+                stream.filter(p -> p.toString().endsWith(".class"))
+                    .forEach(p -> {
+                        String fileName = p.getFileName().toString();
+                        String simpleName = fileName.substring(0, fileName.length() - 6);
+                        if (!simpleName.contains("$") &&
+                            !simpleName.equals("package-info") &&
+                            !simpleName.equals("module-info")) {
+                            names.add(simpleName);
+                        }
+                    });
+            }
+        } catch (Exception e) {
+            // JRT not available (e.g., unusual runtime) — names will have primitives only,
+            // which is still correct for the most critical cases.
+        }
+        JAVA_SYSTEM_SIMPLE_NAMES = Collections.unmodifiableSet(names);
+    }
 
     private static boolean isBuiltinType(String typeName) {
         if (typeName == null || typeName.isEmpty()) return true;
         String baseName = typeName.contains("<") ? typeName.substring(0, typeName.indexOf('<')) : typeName;
         baseName = baseName.contains(".") ? baseName.substring(baseName.lastIndexOf('.') + 1) : baseName;
-        return JAVA_BUILTINS.contains(baseName);
+        return JAVA_SYSTEM_SIMPLE_NAMES.contains(baseName);
     }
 
     private static boolean isStdlibPackage(String pkgName) {
         if (pkgName == null || pkgName.isEmpty()) return true;
-        for (String stdlib : JAVA_STDLIB_PACKAGES) {
-            if (pkgName.equals(stdlib) || pkgName.startsWith(stdlib + ".")) {
-                return true;
-            }
-        }
-        return false;
+        return JAVA_SYSTEM_PACKAGES.contains(pkgName);
     }
 
     // =========================================================================
