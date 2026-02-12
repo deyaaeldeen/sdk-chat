@@ -31,6 +31,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
 
+        using var activity = ExtractorTelemetry.StartUsageAnalysis(Language, normalizedPath);
+
         var clientMethods = BuildClientMethodMap(apiIndex);
         if (clientMethods.Count == 0)
             return new UsageIndex { FileCount = 0 };
@@ -57,9 +59,11 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             filePathMap[tree] = Path.GetRelativePath(normalizedPath, file);
         }
 
-        // Create compilation for semantic analysis with basic references
-        // This enables proper type resolution for method receivers
-        var references = GetBasicMetadataReferences();
+        // Create compilation for semantic analysis.
+        // Prefer cached references from the API extractor (includes NuGet package DLLs
+        // for richer type resolution of SDK types in sample code).
+        // Falls back to basic runtime references if extraction hasn't run.
+        var references = CSharpApiExtractor.CachedMetadataReferences ?? GetBasicMetadataReferences();
         var compilation = CSharpCompilation.Create(
             "UsageAnalysis",
             syntaxTrees,
@@ -128,12 +132,15 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
         var uncoveredOperations = BuildUncoveredList(clientMethods, seenOperations, apiIndex);
 
-        return new UsageIndex
+        var result = new UsageIndex
         {
             FileCount = files.Count,
             CoveredOperations = coveredOperations,
             UncoveredOperations = uncoveredOperations
         };
+
+        ExtractorTelemetry.RecordResult(activity, true, result.CoveredOperations.Count);
+        return result;
     }
 
     /// <summary>

@@ -65,6 +65,8 @@ public static class ProcessSandbox
     /// <param name="arguments">Arguments - will be passed via ArgumentList for safety.</param>
     /// <param name="workingDirectory">Optional working directory.</param>
     /// <param name="timeout">Timeout override. Uses ExtractorTimeout.Value if not specified.</param>
+    /// <param name="stdinData">Optional data to write to the process's standard input. When provided,
+    /// the data is written and stdin is closed, signaling EOF to the child process.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Process result with exit code, stdout, and stderr.</returns>
     public static async Task<ProcessResult> ExecuteAsync(
@@ -72,6 +74,7 @@ public static class ProcessSandbox
         IEnumerable<string>? arguments = null,
         string? workingDirectory = null,
         TimeSpan? timeout = null,
+        string? stdinData = null,
         CancellationToken cancellationToken = default)
     {
         ValidateFileName(fileName);
@@ -118,7 +121,12 @@ public static class ProcessSandbox
                 return ProcessResult.Failed(-1, "", $"Failed to start process: {fileName}");
             }
 
-            // Close stdin immediately - most extractors don't need it
+            // Write stdin data if provided, then close stdin to signal EOF
+            if (stdinData is not null)
+            {
+                await process.StandardInput.WriteAsync(stdinData).ConfigureAwait(false);
+                await process.StandardInput.FlushAsync(effectiveCt).ConfigureAwait(false);
+            }
             process.StandardInput.Close();
 
             // Read streams in parallel to prevent deadlocks

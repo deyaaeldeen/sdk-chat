@@ -99,29 +99,37 @@ public sealed record ClassInfo
     /// <summary>Gets type names referenced in method signatures.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        // Collect all identifier tokens from this type's signatures — O(total chars)
         HashSet<string> tokens = [];
+        CollectReferencedTypes(allTypeNames, tokens);
+        return tokens;
+    }
+
+    /// <summary>
+    /// Populates <paramref name="result"/> with referenced type names.
+    /// Clears the set first so callers can reuse it across iterations.
+    /// </summary>
+    public void CollectReferencedTypes(HashSet<string> allTypeNames, HashSet<string> result)
+    {
+        result.Clear();
 
         if (!string.IsNullOrEmpty(Base))
         {
             var baseName = Base.Split('[')[0];
             if (allTypeNames.Contains(baseName))
-                tokens.Add(baseName);
+                result.Add(baseName);
         }
 
         foreach (var method in Methods ?? [])
         {
-            SignatureTokenizer.TokenizeInto(method.Signature, tokens);
+            SignatureTokenizer.TokenizeInto(method.Signature, result);
         }
 
         foreach (var prop in Properties ?? [])
         {
-            SignatureTokenizer.TokenizeInto(prop.Type, tokens);
+            SignatureTokenizer.TokenizeInto(prop.Type, result);
         }
 
-        // Intersect with known type names — O(min(|tokens|, |allTypeNames|))
-        tokens.IntersectWith(allTypeNames);
-        return tokens;
+        result.IntersectWith(allTypeNames);
     }
 }
 

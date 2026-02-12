@@ -266,4 +266,40 @@ public class ExtractionCacheTests : IDisposable
         Assert.Equal(2, callCount);
         Assert.NotEqual(r1!.Package, r2!.Package);
     }
+
+    [Fact]
+    public async Task ExtractAsync_ConcurrentAccess_IsThreadSafe()
+    {
+        File.WriteAllText(Path.Combine(_tempDir, "file.py"), "x = 1");
+
+        var callCount = 0;
+        var cache = new ExtractionCache<StubApiIndex>(
+            async (path, ct) =>
+            {
+                Interlocked.Increment(ref callCount);
+                await Task.Delay(50, ct); // Simulate work to increase contention window
+                return new StubApiIndex(path);
+            },
+            [".py"]);
+
+        // Fire multiple concurrent extractions against the same path
+        var tasks = Enumerable.Range(0, 10)
+            .Select(_ => Task.Run(() => cache.ExtractAsync(_tempDir)))
+            .ToArray();
+
+        var results = await Task.WhenAll(tasks);
+
+        // All results should be non-null and consistent
+        Assert.All(results, r => Assert.NotNull(r));
+        Assert.All(results, r => Assert.Equal(_tempDir, r!.Package));
+
+        // Verify extraction ran at least once
+        Assert.True(callCount >= 1, $"Expected at least 1 extraction call, got {callCount}");
+
+        // After concurrent burst, subsequent calls should hit cache (fingerprint unchanged)
+        callCount = 0;
+        var cached = await cache.ExtractAsync(_tempDir);
+        Assert.NotNull(cached);
+        Assert.Equal(0, callCount);
+    }
 }

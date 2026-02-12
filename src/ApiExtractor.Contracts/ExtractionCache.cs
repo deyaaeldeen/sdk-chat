@@ -12,6 +12,7 @@ public sealed class ExtractionCache<TIndex> where TIndex : class, IApiIndex
 {
     private readonly Func<string, CancellationToken, Task<TIndex?>> _extractFunc;
     private readonly string[] _extensions;
+    private readonly Lock _lock = new();
 
     private string? _cachedFingerprint;
     private TIndex? _cachedValue;
@@ -34,22 +35,32 @@ public sealed class ExtractionCache<TIndex> where TIndex : class, IApiIndex
     /// Returns a cached result if the directory fingerprint hasn't changed,
     /// otherwise performs a full extraction and caches the result.
     /// Only non-null results are cached.
+    /// Thread-safe: concurrent callers may both trigger extraction, but cached
+    /// state updates are atomic.
     /// </summary>
     public async Task<TIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
         var normalized = Path.GetFullPath(rootPath);
         var fingerprint = DirectoryFingerprint.Compute(normalized, _extensions);
 
-        if (_cachedValue != null && _cachedFingerprint == fingerprint && _cachedPath == normalized)
-            return _cachedValue;
+        // Read cached state atomically
+        lock (_lock)
+        {
+            if (_cachedValue != null && _cachedFingerprint == fingerprint && _cachedPath == normalized)
+                return _cachedValue;
+        }
 
+        // Extraction runs outside the lock to avoid blocking concurrent readers
         var value = await _extractFunc(normalized, ct).ConfigureAwait(false);
 
         if (value != null)
         {
-            _cachedValue = value;
-            _cachedFingerprint = fingerprint;
-            _cachedPath = normalized;
+            lock (_lock)
+            {
+                _cachedValue = value;
+                _cachedFingerprint = fingerprint;
+                _cachedPath = normalized;
+            }
         }
 
         return value;
@@ -61,15 +72,18 @@ public sealed class ExtractionCache<TIndex> where TIndex : class, IApiIndex
     /// </summary>
     public bool IsCached(string rootPath)
     {
-        if (_cachedValue == null || _cachedPath == null)
-            return false;
+        lock (_lock)
+        {
+            if (_cachedValue == null || _cachedPath == null)
+                return false;
 
-        var normalized = Path.GetFullPath(rootPath);
-        if (_cachedPath != normalized)
-            return false;
+            var normalized = Path.GetFullPath(rootPath);
+            if (_cachedPath != normalized)
+                return false;
 
-        var fingerprint = DirectoryFingerprint.Compute(normalized, _extensions);
-        return _cachedFingerprint == fingerprint;
+            var fingerprint = DirectoryFingerprint.Compute(normalized, _extensions);
+            return _cachedFingerprint == fingerprint;
+        }
     }
 
     /// <summary>
@@ -77,8 +91,11 @@ public sealed class ExtractionCache<TIndex> where TIndex : class, IApiIndex
     /// </summary>
     public void Invalidate()
     {
-        _cachedValue = null;
-        _cachedFingerprint = null;
-        _cachedPath = null;
+        lock (_lock)
+        {
+            _cachedValue = null;
+            _cachedFingerprint = null;
+            _cachedPath = null;
+        }
     }
 }

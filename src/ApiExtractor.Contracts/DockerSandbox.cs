@@ -89,8 +89,9 @@ public static class DockerSandbox
         string hostPath,
         string[] arguments,
         TimeSpan? timeout = null,
+        string? stdinData = null,
         CancellationToken cancellationToken = default)
-        => ExecuteAsync(imageName, [hostPath], arguments, timeout, cancellationToken);
+        => ExecuteAsync(imageName, [hostPath], arguments, timeout, stdinData, cancellationToken);
 
     /// <summary>
     /// Execute an extractor inside its per-language Docker container with multiple volume mounts.
@@ -102,11 +103,16 @@ public static class DockerSandbox
         string[] hostPaths,
         string[] arguments,
         TimeSpan? timeout = null,
+        string? stdinData = null,
         CancellationToken cancellationToken = default)
     {
-        // docker run --rm -v <path1>:<path1>:ro [-v ...] <image> <args...>
+        // docker run --rm [-i] -v <path1>:<path1>:ro [-v ...] <image> <args...>
         // Entrypoint is baked into the image as /extractor
         List<string> dockerArgs = ["run", "--rm"];
+
+        // Add -i flag when piping stdin to allow interactive input
+        if (stdinData is not null)
+            dockerArgs.Add("-i");
 
         // Deduplicate and add volume mounts
         foreach (var path in hostPaths.Distinct(StringComparer.Ordinal))
@@ -124,6 +130,7 @@ public static class DockerSandbox
             "docker",
             dockerArgs,
             timeout: effectiveTimeout,
+            stdinData: stdinData,
             cancellationToken: cancellationToken
         );
     }

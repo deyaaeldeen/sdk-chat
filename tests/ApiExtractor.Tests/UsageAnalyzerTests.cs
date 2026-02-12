@@ -966,4 +966,96 @@ public class UsageAnalyzerTests
     }
 
     #endregion
+
+    #region Availability
+
+    [Fact]
+    public void CSharpUsageAnalyzer_IsAvailable_ReturnsTrue()
+    {
+        var analyzer = new CSharpUsageAnalyzer();
+        Assert.True(analyzer.IsAvailable());
+    }
+
+    [Fact]
+    public void AllUsageAnalyzers_HaveLanguageProperty()
+    {
+        Assert.Equal("csharp", new CSharpUsageAnalyzer().Language);
+        Assert.Equal("go", new GoModels.GoUsageAnalyzer().Language);
+        Assert.Equal("java", new JavaModels.JavaUsageAnalyzer().Language);
+        Assert.Equal("python", new PyModels.PythonUsageAnalyzer().Language);
+        Assert.Equal("typescript", new TsModels.TypeScriptUsageAnalyzer().Language);
+    }
+
+    #endregion
+
+    #region Telemetry
+
+    [Fact]
+    public void StartUsageAnalysis_ReturnsActivity()
+    {
+        // Activity may be null if no listener is configured, but the method should not throw.
+        var activity = ExtractorTelemetry.StartUsageAnalysis("csharp", "/some/path");
+        activity?.Dispose();
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// Tests for <see cref="ScriptUsageAnalyzerHelper"/> shared helper records.
+/// </summary>
+public class ScriptUsageAnalyzerHelperTests
+{
+    [Fact]
+    public void AnalysisResult_DefaultErrors_IsEmpty()
+    {
+        var result = new ScriptUsageAnalyzerHelper.AnalysisResult();
+        Assert.Empty(result.Errors);
+        Assert.Null(result.Index);
+    }
+
+    [Fact]
+    public void AnalysisResult_WithErrors_ReturnsErrors()
+    {
+        var result = new ScriptUsageAnalyzerHelper.AnalysisResult
+        {
+            Errors = ["Error 1", "Error 2"]
+        };
+        Assert.Equal(2, result.Errors.Count);
+    }
+
+    [Fact]
+    public void ScriptArgs_DefaultWorkingDirectory_IsNull()
+    {
+        var args = new ScriptUsageAnalyzerHelper.ScriptArgs(["--api", "/tmp/api.json"]);
+        Assert.Null(args.WorkingDirectory);
+        Assert.Equal(2, args.Arguments.Count());
+    }
+
+    [Fact]
+    public void ScriptArgs_WithWorkingDirectory_SetsIt()
+    {
+        var args = new ScriptUsageAnalyzerHelper.ScriptArgs(
+            ["--api", "/tmp/api.json"],
+            "/some/dir"
+        );
+        Assert.Equal("/some/dir", args.WorkingDirectory);
+    }
+
+    [Fact]
+    public void ScriptInvocationConfig_RequiredProperties_AreSet()
+    {
+        var config = new ScriptUsageAnalyzerHelper.ScriptInvocationConfig
+        {
+            Language = "python",
+            Availability = ExtractorAvailabilityResult.NativeBinary("/usr/bin/python3"),
+            ApiJson = "{}",
+            SamplesPath = "/samples",
+            BuildArgs = (avail, samplesPath) =>
+                new ScriptUsageAnalyzerHelper.ScriptArgs(["-", samplesPath])
+        };
+
+        Assert.Equal("python", config.Language);
+        Assert.Null(config.SignatureLookup);
+    }
 }

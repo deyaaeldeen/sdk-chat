@@ -23,35 +23,9 @@ public static class GoFormatter
     {
         var sb = new StringBuilder();
 
-        // Section 1: Compact summary of what's already covered
-        var coveredByClient = coverage.CoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-
-        if (coveredByClient.Count > 0)
-        {
-            var totalCovered = coverage.CoveredOperations.Count;
-            sb.AppendLine($"// ALREADY COVERED ({totalCovered} calls across {coverage.FileCount} files) - DO NOT DUPLICATE:");
-            foreach (var (client, ops) in coveredByClient.OrderBy(kv => kv.Key))
-            {
-                sb.AppendLine($"//   {client}: {string.Join(", ", ops.Take(10))}{(ops.Count > 10 ? $" (+{ops.Count - 10} more)" : "")}");
-            }
-            sb.AppendLine();
-        }
-
-        // Section 2: Full signatures for types containing uncovered operations
-        var uncoveredByClient = coverage.UncoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-
-        if (uncoveredByClient.Count == 0)
-        {
-            sb.AppendLine("// All operations are covered in existing samples.");
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        if (uncoveredByClient is null)
             return sb.ToString();
-        }
-
-        sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
-        sb.AppendLine();
 
         var allStructs = index.GetAllStructs().ToList();
         var structsWithUncovered = allStructs.Where(s => uncoveredByClient.ContainsKey(s.Name)).ToList();
@@ -61,6 +35,7 @@ public static class GoFormatter
         var structsByName = allStructs.ToDictionary(s => s.Name);
 
         HashSet<string> includedStructs = [];
+        HashSet<string> reusableDeps = [];
 
         foreach (var st in structsWithUncovered)
         {
@@ -91,8 +66,8 @@ public static class GoFormatter
             includedStructs.Add(st.Name);
 
             // Include supporting model/option types referenced by uncovered operations
-            var deps = filteredStruct.GetReferencedTypes(allTypeNames);
-            foreach (var depName in deps)
+            filteredStruct.CollectReferencedTypes(allTypeNames, reusableDeps);
+            foreach (var depName in reusableDeps)
             {
                 if (!includedStructs.Contains(depName) && structsByName.TryGetValue(depName, out var depStruct))
                 {
@@ -136,9 +111,13 @@ public static class GoFormatter
         // Get client dependencies first
         var clients = allStructs.Where(s => s.IsClientType).ToList();
         HashSet<string> clientDeps = [];
+        HashSet<string> reusableDeps2 = [];
         foreach (var client in clients)
-            foreach (var dep in client.GetReferencedTypes(allTypeNames))
+        {
+            client.CollectReferencedTypes(allTypeNames, reusableDeps2);
+            foreach (var dep in reusableDeps2)
                 clientDeps.Add(dep);
+        }
 
         // Prioritize structs
         var orderedStructs = allStructs
@@ -152,6 +131,7 @@ public static class GoFormatter
             .ToList();
 
         HashSet<string> includedStructs = [];
+        HashSet<string> reusableDeps3 = [];
 
         foreach (var pkg in index.Packages ?? [])
         {
@@ -239,8 +219,8 @@ public static class GoFormatter
 
                 // Include struct + dependencies
                 List<StructApi> structsToAdd = [s];
-                var deps = s.GetReferencedTypes(allTypeNames);
-                foreach (var depName in deps)
+                s.CollectReferencedTypes(allTypeNames, reusableDeps3);
+                foreach (var depName in reusableDeps3)
                 {
                     if (!includedStructs.Contains(depName) && structsByName.TryGetValue(depName, out var depStruct))
                     {

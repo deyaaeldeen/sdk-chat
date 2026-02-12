@@ -23,40 +23,19 @@ public static class PythonFormatter
     {
         var sb = new StringBuilder();
 
-        // Section 1: Compact summary of what's already covered
-        var coveredByClient = coverage.CoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-
-        if (coveredByClient.Count > 0)
-        {
-            var totalCovered = coverage.CoveredOperations.Count;
-            sb.AppendLine($"# ALREADY COVERED ({totalCovered} calls across {coverage.FileCount} files) - DO NOT DUPLICATE:");
-            foreach (var (client, ops) in coveredByClient.OrderBy(kv => kv.Key))
-            {
-                sb.AppendLine($"#   {client}: {string.Join(", ", ops.Take(10))}{(ops.Count > 10 ? $" (+{ops.Count - 10} more)" : "")}");
-            }
-            sb.AppendLine();
-        }
-
-        // Section 2: Full signatures for types containing uncovered operations
-        var uncoveredByClient = coverage.UncoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-
-        if (uncoveredByClient.Count == 0)
-        {
-            sb.AppendLine("# All operations are covered in existing samples.");
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage, "#");
+        if (uncoveredByClient is null)
             return sb.ToString();
-        }
-
-        sb.AppendLine($"# UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
-        sb.AppendLine();
 
         var allClasses = index.GetAllClasses().ToList();
+        var allTypeNames = allClasses.Select(c => c.Name).ToHashSet();
+        var classesByName = new Dictionary<string, ClassInfo>();
+        foreach (var c in allClasses)
+            classesByName.TryAdd(c.Name, c);
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
         HashSet<string> includedClasses = [];
+        HashSet<string> reusableDeps = [];
         var currentLength = sb.Length;
 
         foreach (var cls in classesWithUncovered)
@@ -89,15 +68,13 @@ public static class PythonFormatter
             includedClasses.Add(cls.Name);
 
             // Include supporting dependency types referenced by uncovered methods
-            var deps = filteredClass.GetReferencedTypes(
-                allClasses.Select(c => c.Name).ToHashSet());
-            foreach (var depName in deps)
+            filteredClass.CollectReferencedTypes(allTypeNames, reusableDeps);
+            foreach (var depName in reusableDeps)
             {
                 if (includedClasses.Contains(depName))
                     continue;
 
-                var depClass = allClasses.FirstOrDefault(c => c.Name == depName);
-                if (depClass == null)
+                if (!classesByName.TryGetValue(depName, out var depClass))
                     continue;
 
                 var depContent = FormatClassToString(depClass);
@@ -155,6 +132,9 @@ public static class PythonFormatter
         // Build type lookup
         var allClasses = index.GetAllClasses().ToList();
         var allTypeNames = allClasses.Select(c => c.Name).ToHashSet();
+        var classesByName = new Dictionary<string, ClassInfo>();
+        foreach (var c in allClasses)
+            classesByName.TryAdd(c.Name, c);
 
         // Get client dependencies first
         var clients = allClasses.Where(c => c.IsClientType).ToList();
@@ -175,6 +155,7 @@ public static class PythonFormatter
             .ToList();
 
         HashSet<string> includedClasses = [];
+        HashSet<string> reusableDeps = [];
         var currentLength = sb.Length;
 
         foreach (var module in index.Modules ?? [])
@@ -206,14 +187,13 @@ public static class PythonFormatter
 
                 // Include class + dependencies
                 List<ClassInfo> classesToAdd = [cls];
-                var deps = cls.GetReferencedTypes(allTypeNames);
-                foreach (var depName in deps)
+                cls.CollectReferencedTypes(allTypeNames, reusableDeps);
+                foreach (var depName in reusableDeps)
                 {
-                    if (!includedClasses.Contains(depName))
+                    if (!includedClasses.Contains(depName) &&
+                        classesByName.TryGetValue(depName, out var depClass))
                     {
-                        var depClass = allClasses.FirstOrDefault(c => c.Name == depName);
-                        if (depClass != null)
-                            classesToAdd.Add(depClass);
+                        classesToAdd.Add(depClass);
                     }
                 }
 

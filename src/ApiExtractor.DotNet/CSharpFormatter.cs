@@ -25,35 +25,9 @@ public static class CSharpFormatter
     {
         var sb = new StringBuilder();
 
-        // Section 1: Compact summary of what's already covered
-        var coveredByClient = coverage.CoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-
-        if (coveredByClient.Count > 0)
-        {
-            var totalCovered = coverage.CoveredOperations.Count;
-            sb.AppendLine($"// ALREADY COVERED ({totalCovered} calls across {coverage.FileCount} files) - DO NOT DUPLICATE:");
-            foreach (var (client, ops) in coveredByClient.OrderBy(kv => kv.Key))
-            {
-                sb.AppendLine($"//   {client}: {string.Join(", ", ops.Take(10))}{(ops.Count > 10 ? $" (+{ops.Count - 10} more)" : "")}");
-            }
-            sb.AppendLine();
-        }
-
-        // Section 2: Full signatures for types containing uncovered operations
-        var uncoveredByClient = coverage.UncoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-
-        if (uncoveredByClient.Count == 0)
-        {
-            sb.AppendLine("// All operations are covered in existing samples.");
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        if (uncoveredByClient is null)
             return sb.ToString();
-        }
-
-        sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
-        sb.AppendLine();
 
         // Format only types that have uncovered operations
         var allTypes = index.GetAllTypes().ToList();
@@ -66,10 +40,12 @@ public static class CSharpFormatter
             .ToList();
 
         HashSet<string> neededTypes = [];
+        HashSet<string> reusableDeps = [];
         foreach (var t in typesWithUncovered)
         {
             neededTypes.Add(t.Name);
-            foreach (var dep in t.GetReferencedTypes(allTypeNames))
+            t.CollectReferencedTypes(allTypeNames, reusableDeps);
+            foreach (var dep in reusableDeps)
                 neededTypes.Add(dep);
         }
 
@@ -154,6 +130,7 @@ public static class CSharpFormatter
 
         // Track what we've included
         HashSet<string> includedTypes = [];
+        HashSet<string> reusableDeps = [];
         var currentLength = sb.Length;
 
         // Include types by priority, pulling in dependencies
@@ -164,8 +141,8 @@ public static class CSharpFormatter
 
             // Calculate size of this type + its dependencies
             List<TypeInfo> typesToAdd = [type];
-            var deps = type.GetReferencedTypes(allTypeNames);
-            foreach (var depName in deps)
+            type.CollectReferencedTypes(allTypeNames, reusableDeps);
+            foreach (var depName in reusableDeps)
             {
                 if (!includedTypes.Contains(depName) && typesByName.TryGetValue(depName, out var depType))
                     typesToAdd.Add(depType);
@@ -223,9 +200,11 @@ public static class CSharpFormatter
         // Get clients and their dependencies first
         var clients = allTypes.Where(t => t.IsClientType).ToList();
         HashSet<string> clientDeps = [];
+        HashSet<string> reusableDeps = [];
         foreach (var client in clients)
         {
-            foreach (var dep in client.GetReferencedTypes(allTypeNames))
+            client.CollectReferencedTypes(allTypeNames, reusableDeps);
+            foreach (var dep in reusableDeps)
                 clientDeps.Add(dep);
         }
 

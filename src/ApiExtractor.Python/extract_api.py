@@ -1505,12 +1505,15 @@ if __name__ == "__main__":
         if len(sys.argv) < usage_idx + 3:
             print("Usage: --usage requires <api_json_path> <samples_path>", file=sys.stderr)
             sys.exit(1)
-        api_json_path = Path(sys.argv[usage_idx + 1])
+        api_json_path = sys.argv[usage_idx + 1]
         samples_path = Path(sys.argv[usage_idx + 2])
 
-        # Load API index
-        with open(api_json_path, 'r') as f:
-            api = json.load(f)
+        # Load API index (read from stdin when path is '-')
+        if api_json_path == '-':
+            api = json.load(sys.stdin)
+        else:
+            with open(api_json_path, 'r') as f:
+                api = json.load(f)
 
         # Analyze usage
         usage = analyze_usage(samples_path, api)

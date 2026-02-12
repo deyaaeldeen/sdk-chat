@@ -23,35 +23,9 @@ public static class JavaFormatter
     {
         var sb = new StringBuilder();
 
-        // Section 1: Compact summary of what's already covered
-        var coveredByClient = coverage.CoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-
-        if (coveredByClient.Count > 0)
-        {
-            var totalCovered = coverage.CoveredOperations.Count;
-            sb.AppendLine($"// ALREADY COVERED ({totalCovered} calls across {coverage.FileCount} files) - DO NOT DUPLICATE:");
-            foreach (var (client, ops) in coveredByClient.OrderBy(kv => kv.Key))
-            {
-                sb.AppendLine($"//   {client}: {string.Join(", ", ops.Take(10))}{(ops.Count > 10 ? $" (+{ops.Count - 10} more)" : "")}");
-            }
-            sb.AppendLine();
-        }
-
-        // Section 2: Full signatures for types containing uncovered operations
-        var uncoveredByClient = coverage.UncoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-
-        if (uncoveredByClient.Count == 0)
-        {
-            sb.AppendLine("// All operations are covered in existing samples.");
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        if (uncoveredByClient is null)
             return sb.ToString();
-        }
-
-        sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
-        sb.AppendLine();
 
         var allClasses = index.GetAllTypes().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
@@ -63,6 +37,7 @@ public static class JavaFormatter
             allClassesByName.TryAdd(c.Name.Split('<')[0], c);
 
         HashSet<string> includedClasses = [];
+        HashSet<string> reusableDeps = [];
 
         foreach (var cls in classesWithUncovered)
         {
@@ -93,8 +68,8 @@ public static class JavaFormatter
             includedClasses.Add(cls.Name);
 
             // Include supporting model/option types referenced by uncovered operations
-            var deps = filteredClass.GetReferencedTypes(allTypeNames);
-            foreach (var depName in deps)
+            filteredClass.CollectReferencedTypes(allTypeNames, reusableDeps);
+            foreach (var depName in reusableDeps)
             {
                 if (!includedClasses.Contains(depName) && allClassesByName.TryGetValue(depName, out var depClass))
                 {
@@ -149,9 +124,13 @@ public static class JavaFormatter
         // Get client dependencies first
         var clients = allClasses.Where(c => c.IsClientType).ToList();
         HashSet<string> clientDeps = [];
+        HashSet<string> reusableDeps2 = [];
         foreach (var client in clients)
-            foreach (var dep in client.GetReferencedTypes(allTypeNames))
+        {
+            client.CollectReferencedTypes(allTypeNames, reusableDeps2);
+            foreach (var dep in reusableDeps2)
                 clientDeps.Add(dep);
+        }
 
         // Prioritize classes
         var orderedClasses = allClasses
@@ -165,6 +144,7 @@ public static class JavaFormatter
             .ToList();
 
         HashSet<string> includedClasses2 = [];
+        HashSet<string> reusableDeps3 = [];
 
         foreach (var pkg in api.Packages)
         {
@@ -189,8 +169,8 @@ public static class JavaFormatter
 
                 // Include class + dependencies
                 List<ClassInfo> classesToAdd = [cls];
-                var deps = cls.GetReferencedTypes(allTypeNames);
-                foreach (var depName in deps)
+                cls.CollectReferencedTypes(allTypeNames, reusableDeps3);
+                foreach (var depName in reusableDeps3)
                 {
                     if (!includedClasses2.Contains(depName) && classesByName.TryGetValue(depName, out var depClass))
                     {

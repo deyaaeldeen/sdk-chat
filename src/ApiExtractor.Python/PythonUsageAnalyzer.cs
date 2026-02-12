@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Text.Json;
 using ApiExtractor.Contracts;
 
 namespace ApiExtractor.Python;
@@ -27,12 +26,17 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
+    public string? UnavailableReason => _availability.UnavailableReason;
+
+    /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {
         var normalizedPath = Path.GetFullPath(codePath);
 
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
+
+        using var activity = ExtractorTelemetry.StartUsageAnalysis(Language, normalizedPath);
 
         var clientClasses = GetClientAndSubclientClasses(apiIndex);
 
@@ -44,123 +48,26 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
-        // Write API index to temp file for the script
-        var tempApiFile = Path.GetTempFileName();
-        try
+        var analysisResult = await ScriptUsageAnalyzerHelper.AnalyzeAsync(new ScriptUsageAnalyzerHelper.ScriptInvocationConfig
         {
-            var apiJson = apiIndex.ToJson();
-            await File.WriteAllTextAsync(tempApiFile, apiJson, ct);
-
-            var output = await AnalyzeUsageAsync(availability, tempApiFile, normalizedPath, ct).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(output))
-                return new UsageIndex { FileCount = 0 };
-
-            // Parse the JSON output
-            var result = DeserializeResult(output);
-
-            if (result is null)
-                return new UsageIndex { FileCount = 0 };
-
-            return new UsageIndex
+            Language = Language,
+            Availability = availability,
+            ApiJson = apiIndex.ToJson(),
+            SamplesPath = normalizedPath,
+            BuildArgs = (avail, samplesPath) => avail.Mode switch
             {
-                FileCount = result.FileCount,
-                CoveredOperations = result.Covered?.Select(c => new OperationUsage
-                {
-                    ClientType = c.Client ?? "",
-                    Operation = c.Method ?? "",
-                    File = c.File ?? "",
-                    Line = c.Line
-                }).ToList() ?? [],
-                UncoveredOperations = result.Uncovered?.Select(u =>
-                {
-                    var sig = u.Sig;
-                    if (sig is null)
-                        sig = BuildSignatureLookup(apiIndex).GetValueOrDefault($"{u.Client}.{u.Method}") ?? $"{u.Method}(...)";
-                    return new UncoveredOperation
-                    {
-                        ClientType = u.Client ?? "",
-                        Operation = u.Method ?? "",
-                        Signature = sig
-                    };
-                }).ToList() ?? []
-            };
-        }
-        finally
-        {
-            // Best-effort cleanup: temp file deletion failure is non-critical
-            // (OS will clean up temp files, and we don't want to mask the real result)
-            try { File.Delete(tempApiFile); } catch { /* Intentionally ignored - temp file cleanup */ }
-        }
+                ExtractorMode.RuntimeInterpreter => new([GetScriptPath(), "--usage", "-", samplesPath]),
+                _ => new(["--usage", "-", samplesPath])
+            },
+            SignatureLookup = BuildSignatureLookup(apiIndex)
+        }, ct).ConfigureAwait(false);
+
+        ExtractorTelemetry.RecordResult(activity, true, analysisResult.Index?.CoveredOperations.Count ?? 0);
+        return analysisResult.Index ?? new UsageIndex { FileCount = 0 };
     }
 
     /// <inheritdoc />
     public string Format(UsageIndex index) => UsageFormatter.Format(index);
-
-    private static async Task<string?> AnalyzeUsageAsync(
-        ExtractorAvailabilityResult availability,
-        string apiJsonPath,
-        string samplesPath,
-        CancellationToken ct)
-    {
-        if (availability.Mode == ExtractorMode.NativeBinary)
-        {
-            var result = await ProcessSandbox.ExecuteAsync(
-                availability.ExecutablePath!,
-                ["--usage", apiJsonPath, samplesPath],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-
-            if (!result.Success)
-            {
-                Console.Error.WriteLine(result.TimedOut
-                    ? $"Python usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                    : $"Python usage analyzer: failed (exit {result.ExitCode}): {result.StandardError}");
-                return null;
-            }
-
-            return result.StandardOutput;
-        }
-
-        if (availability.Mode == ExtractorMode.Docker)
-        {
-            var dockerResult = await DockerSandbox.ExecuteAsync(
-                availability.DockerImageName!,
-                [apiJsonPath, samplesPath],
-                ["--usage", apiJsonPath, samplesPath],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-
-            if (!dockerResult.Success)
-            {
-                Console.Error.WriteLine(dockerResult.TimedOut
-                    ? $"Python usage analyzer: Docker timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                    : $"Python usage analyzer: Docker failed: {dockerResult.StandardError}");
-                return null;
-            }
-
-            return dockerResult.StandardOutput;
-        }
-
-        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
-            return null;
-
-        var scriptPath = GetScriptPath();
-        var runtimeResult = await ProcessSandbox.ExecuteAsync(
-            availability.ExecutablePath!,
-            [scriptPath, "--usage", apiJsonPath, samplesPath],
-            cancellationToken: ct
-        ).ConfigureAwait(false);
-
-        if (!runtimeResult.Success)
-        {
-            Console.Error.WriteLine(runtimeResult.TimedOut
-                ? $"Python usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Python usage analyzer: failed (exit {runtimeResult.ExitCode}): {runtimeResult.StandardError}");
-            return null;
-        }
-
-        return runtimeResult.StandardOutput;
-    }
 
     private static string GetScriptPath()
     {
@@ -171,10 +78,6 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             $"Corrupt installation: extract_api.py not found at {ScriptPath}. " +
             "Reinstall the application to resolve this issue.");
     }
-
-    // AOT-safe deserialization using source-generated context
-    private static UsageResult? DeserializeResult(string json) =>
-        JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.UsageResult);
 
     private static IReadOnlyList<ClassInfo> GetClientAndSubclientClasses(ApiIndex apiIndex)
     {

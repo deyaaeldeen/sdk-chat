@@ -1809,7 +1809,13 @@ Examples:
         const samplesPath = path.resolve(args[usageIdx + 2]);
 
         try {
-            const apiJson = fs.readFileSync(apiJsonPath, "utf-8");
+            // Read from stdin when path is '-'
+            let apiJson: string;
+            if (apiJsonPath === '-') {
+                apiJson = fs.readFileSync(0, 'utf-8');
+            } else {
+                apiJson = fs.readFileSync(apiJsonPath, 'utf-8');
+            }
             const api = JSON.parse(apiJson) as ApiIndex;
             const usage = analyzeUsage(samplesPath, api);
             console.log(JSON.stringify(usage, null, 2));

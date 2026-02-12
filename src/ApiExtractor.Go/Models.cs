@@ -151,31 +151,38 @@ public sealed record StructApi
     /// <summary>Gets type names referenced in method signatures, fields, and embeds.</summary>
     public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
     {
-        // Collect all identifier tokens from this type's signatures — O(total chars)
         HashSet<string> tokens = [];
+        CollectReferencedTypes(allTypeNames, tokens);
+        return tokens;
+    }
 
-        // Embedded types are direct composition dependencies
+    /// <summary>
+    /// Populates <paramref name="result"/> with referenced type names.
+    /// Clears the set first so callers can reuse it across iterations.
+    /// </summary>
+    public void CollectReferencedTypes(HashSet<string> allTypeNames, HashSet<string> result)
+    {
+        result.Clear();
+
         foreach (var embed in Embeds ?? [])
         {
             var embedName = embed.Split('<')[0].TrimStart('*');
             if (allTypeNames.Contains(embedName))
-                tokens.Add(embedName);
+                result.Add(embedName);
         }
 
         foreach (var method in Methods ?? [])
         {
-            SignatureTokenizer.TokenizeInto(method.Sig, tokens);
-            SignatureTokenizer.TokenizeInto(method.Ret, tokens);
+            SignatureTokenizer.TokenizeInto(method.Sig, result);
+            SignatureTokenizer.TokenizeInto(method.Ret, result);
         }
 
         foreach (var field in Fields ?? [])
         {
-            SignatureTokenizer.TokenizeInto(field.Type, tokens);
+            SignatureTokenizer.TokenizeInto(field.Type, result);
         }
 
-        // Intersect with known type names — O(min(|tokens|, |allTypeNames|))
-        tokens.IntersectWith(allTypeNames);
-        return tokens;
+        result.IntersectWith(allTypeNames);
     }
 }
 

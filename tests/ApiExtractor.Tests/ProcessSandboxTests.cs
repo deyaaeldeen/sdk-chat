@@ -97,5 +97,31 @@ public class ProcessSandboxTests
         Assert.True(result.OutputTruncated);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_StdinData_IsWrittenToProcess()
+    {
+        // Use 'cat' to echo stdin data back to stdout
+        var result = await ProcessSandbox.ExecuteAsync(
+            "cat", [],
+            workingDirectory: Path.GetTempPath(),
+            stdinData: "hello from stdin");
+
+        Assert.True(result.Success);
+        Assert.Equal("hello from stdin", result.StandardOutput);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NullStdinData_ClosesStdinImmediately()
+    {
+        // cat with no stdin should exit cleanly with empty output
+        var result = await ProcessSandbox.ExecuteAsync(
+            "cat", [],
+            workingDirectory: Path.GetTempPath(),
+            stdinData: null);
+
+        Assert.True(result.Success);
+        Assert.Equal("", result.StandardOutput);
+    }
+
     #endregion
 }

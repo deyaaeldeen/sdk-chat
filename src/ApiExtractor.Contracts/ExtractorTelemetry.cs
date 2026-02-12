@@ -37,6 +37,17 @@ public static class ExtractorTelemetry
     }
 
     /// <summary>
+    /// Starts an activity for usage analysis.
+    /// </summary>
+    public static Activity? StartUsageAnalysis(string language, string path)
+    {
+        var activity = Source.StartActivity("extractor.usage_analysis", ActivityKind.Internal);
+        activity?.SetTag("language", language);
+        activity?.SetTag("path", path);
+        return activity;
+    }
+
+    /// <summary>
     /// Starts an activity for external process execution.
     /// </summary>
     public static Activity? StartProcess(string executable, string language)

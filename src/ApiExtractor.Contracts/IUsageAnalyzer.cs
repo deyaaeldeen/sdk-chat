@@ -14,6 +14,16 @@ public interface IUsageAnalyzer
     string Language { get; }
 
     /// <summary>
+    /// Checks whether the analyzer's runtime dependencies are available.
+    /// </summary>
+    bool IsAvailable();
+
+    /// <summary>
+    /// Human-readable reason why the analyzer is unavailable, or null if available.
+    /// </summary>
+    string? UnavailableReason => IsAvailable() ? null : $"{Language} usage analyzer is not available";
+
+    /// <summary>
     /// Analyzes code files to extract API usage patterns (non-generic version).
     /// </summary>
     /// <param name="codePath">Path to directory containing code to analyze.</param>

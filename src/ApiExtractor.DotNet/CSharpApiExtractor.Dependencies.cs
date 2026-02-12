@@ -18,6 +18,20 @@ namespace ApiExtractor.DotNet;
 public partial class CSharpApiExtractor
 {
     /// <summary>
+    /// Cached metadata references from the last extraction, including NuGet package DLLs.
+    /// The usage analyzer can reuse these for richer type resolution in sample code.
+    /// Volatile for safe cross-thread visibility (extraction runs before usage analysis).
+    /// </summary>
+    private static volatile IReadOnlyList<MetadataReference>? s_cachedMetadataReferences;
+
+    /// <summary>
+    /// Returns the metadata references loaded during the last <see cref="ExtractAsync"/> call,
+    /// or <c>null</c> if extraction has not run yet. Includes runtime assemblies and NuGet
+    /// package DLLs, giving the usage analyzer full type resolution for SDK types.
+    /// </summary>
+    internal static IReadOnlyList<MetadataReference>? CachedMetadataReferences => s_cachedMetadataReferences;
+
+    /// <summary>
     /// .NET system assemblies that should be excluded from dependencies.
     /// These are part of the runtime/BCL and not external packages.
     /// Uses FrozenSet for zero-cost concurrent reads.
@@ -79,6 +93,9 @@ public partial class CSharpApiExtractor
 
         // Load metadata references from NuGet packages
         var references = LoadMetadataReferences(rootPath);
+
+        // Cache references for the usage analyzer to reuse
+        s_cachedMetadataReferences = references;
 
         // Create compilation with all syntax trees and references
         var compilation = CSharpCompilation.Create(

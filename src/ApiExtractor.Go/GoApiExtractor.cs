@@ -181,7 +181,7 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// so recompilation only occurs when the source changes.
     /// This is the fallback when pre-compiled binary is not available.
     /// </summary>
-    private static async Task<string> EnsureCompiledAsync(string goPath, CancellationToken ct)
+    internal static async Task<string> EnsureCompiledAsync(string goPath, CancellationToken ct)
     {
         var scriptPath = GetScriptPath();
         if (!File.Exists(scriptPath))

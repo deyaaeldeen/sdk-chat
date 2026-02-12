@@ -55,8 +55,13 @@ public class ExtractApi {
 
     // ===== Usage Analysis Mode =====
     static void analyzeUsage(Path apiJsonFile, Path samplesPath) throws Exception {
-        // Load API index
-        String apiJson = Files.readString(apiJsonFile);
+        // Load API index (read from stdin when path is "-")
+        String apiJson;
+        if (apiJsonFile.toString().equals("-")) {
+            apiJson = new String(System.in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } else {
+            apiJson = Files.readString(apiJsonFile);
+        }
         JsonObject apiIndex = gson.fromJson(apiJson, JsonObject.class);
 
         // Build map of client + subclient classes -> methods

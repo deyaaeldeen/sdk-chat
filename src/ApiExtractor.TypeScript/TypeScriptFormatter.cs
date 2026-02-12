@@ -34,35 +34,9 @@ public static class TypeScriptFormatter
     {
         var sb = new StringBuilder();
 
-        // Section 1: Compact summary of what's already covered
-        var coveredByClient = coverage.CoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
-
-        if (coveredByClient.Count > 0)
-        {
-            var totalCovered = coverage.CoveredOperations.Count;
-            sb.AppendLine($"// ALREADY COVERED ({totalCovered} calls across {coverage.FileCount} files) - DO NOT DUPLICATE:");
-            foreach (var (client, ops) in coveredByClient.OrderBy(kv => kv.Key))
-            {
-                sb.AppendLine($"//   {client}: {string.Join(", ", ops.Take(10))}{(ops.Count > 10 ? $" (+{ops.Count - 10} more)" : "")}");
-            }
-            sb.AppendLine();
-        }
-
-        // Section 2: Full signatures for types containing uncovered operations
-        var uncoveredByClient = coverage.UncoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
-
-        if (uncoveredByClient.Count == 0)
-        {
-            sb.AppendLine("// All operations are covered in existing samples.");
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        if (uncoveredByClient is null)
             return sb.ToString();
-        }
-
-        sb.AppendLine($"// UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
-        sb.AppendLine();
 
         var allClasses = index.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
@@ -76,6 +50,7 @@ public static class TypeScriptFormatter
         var allIfacesByName = SafeToDictionary(allInterfaces, i => i.Name);
 
         HashSet<string> includedClasses = [];
+        HashSet<string> reusableDeps = [];
 
         foreach (var cls in classesWithUncovered)
         {
@@ -106,8 +81,8 @@ public static class TypeScriptFormatter
             includedClasses.Add(cls.Name);
 
             // Include supporting model/option types referenced by uncovered operations
-            var deps = filteredClass.GetReferencedTypes(allTypeNames);
-            foreach (var depName in deps)
+            filteredClass.CollectReferencedTypes(allTypeNames, reusableDeps);
+            foreach (var depName in reusableDeps)
             {
                 if (includedClasses.Contains(depName))
                     continue;
@@ -172,9 +147,11 @@ public static class TypeScriptFormatter
 
         // Build dependency graph for classes
         var classDeps = new Dictionary<string, HashSet<string>>();
+        HashSet<string> reusableDeps2 = [];
         foreach (var cls in allClasses)
         {
-            classDeps[cls.Name] = cls.GetReferencedTypes(allTypeNames);
+            cls.CollectReferencedTypes(allTypeNames, reusableDeps2);
+            classDeps[cls.Name] = new HashSet<string>(reusableDeps2);
         }
 
         // Group entry points by export path

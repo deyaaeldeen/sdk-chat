@@ -10,6 +10,7 @@ import (
 	"go/doc"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -259,8 +260,14 @@ type UncoveredOp struct {
 
 // ===== Usage Analysis =====
 func analyzeUsage(apiJsonFile, samplesPath string) {
-	// Load API index
-	apiData, err := os.ReadFile(apiJsonFile)
+	// Load API index (read from stdin when path is "-")
+	var apiData []byte
+	var err error
+	if apiJsonFile == "-" {
+		apiData, err = io.ReadAll(os.Stdin)
+	} else {
+		apiData, err = os.ReadFile(apiJsonFile)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error reading API file:", err)
 		os.Exit(1)

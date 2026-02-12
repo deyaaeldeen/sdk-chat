@@ -8,7 +8,7 @@ namespace ApiExtractor.Go;
 
 /// <summary>
 /// Analyzes Go code to extract which API operations are being used.
-/// Uses go/ast (via go run) for accurate AST-based parsing.
+/// Uses go/ast (via compiled binary) for accurate AST-based parsing.
 /// </summary>
 public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 {
@@ -23,12 +23,17 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     public bool IsAvailable() => _availability.IsAvailable;
 
     /// <inheritdoc />
+    public string? UnavailableReason => _availability.UnavailableReason;
+
+    /// <inheritdoc />
     public async Task<UsageIndex> AnalyzeAsync(string codePath, ApiIndex apiIndex, CancellationToken ct = default)
     {
         var normalizedPath = Path.GetFullPath(codePath);
 
         if (!Directory.Exists(normalizedPath))
             return new UsageIndex { FileCount = 0 };
+
+        using var activity = ExtractorTelemetry.StartUsageAnalysis(Language, normalizedPath);
 
         if (!HasReachableOperations(apiIndex))
             return new UsageIndex { FileCount = 0 };
@@ -37,130 +42,34 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (!availability.IsAvailable)
             return new UsageIndex { FileCount = 0 };
 
-        var tempApiFile = Path.GetTempFileName();
-        try
+        var apiJson = JsonSerializer.Serialize(apiIndex, SourceGenerationContext.Default.ApiIndex);
+
+        // For RuntimeInterpreter mode, pre-compile the Go binary (Issue 3: avoid `go run` overhead).
+        // The compiled binary is cached by content hash, so this is fast on subsequent calls.
+        string? compiledBinaryPath = null;
+        if (availability.Mode == ExtractorMode.RuntimeInterpreter)
         {
-            var apiJson = JsonSerializer.Serialize(apiIndex, SourceGenerationContext.Default.ApiIndex);
-            await File.WriteAllTextAsync(tempApiFile, apiJson, ct);
-
-            var output = await AnalyzeUsageAsync(availability, tempApiFile, normalizedPath, ct).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(output))
-                return new UsageIndex { FileCount = 0 };
-
-            var result = DeserializeResult(output);
-
-            if (result is null)
-                return new UsageIndex { FileCount = 0 };
-
-            return new UsageIndex
-            {
-                FileCount = result.FileCount,
-                CoveredOperations = result.Covered?.Select(c => new OperationUsage
-                {
-                    ClientType = c.Client ?? "",
-                    Operation = c.Method ?? "",
-                    File = c.File ?? "",
-                    Line = c.Line
-                }).ToList() ?? [],
-                UncoveredOperations = result.Uncovered?.Select(u =>
-                {
-                    var sig = u.Sig;
-                    if (sig is null)
-                        sig = BuildSignatureLookup(apiIndex).GetValueOrDefault($"{u.Client}.{u.Method}") ?? $"{u.Method}(...)";
-                    return new UncoveredOperation
-                    {
-                        ClientType = u.Client ?? "",
-                        Operation = u.Method ?? "",
-                        Signature = sig
-                    };
-                }).ToList() ?? []
-            };
+            compiledBinaryPath = await GoApiExtractor.EnsureCompiledAsync(availability.ExecutablePath!, ct).ConfigureAwait(false);
         }
-        finally
+
+        var analysisResult = await ScriptUsageAnalyzerHelper.AnalyzeAsync(new ScriptUsageAnalyzerHelper.ScriptInvocationConfig
         {
-            // Best-effort cleanup: temp file deletion failure is non-critical
-            // (OS will clean up temp files, and we don't want to mask the real result)
-            try { File.Delete(tempApiFile); } catch { /* Intentionally ignored - temp file cleanup */ }
-        }
+            Language = Language,
+            Availability = availability.Mode == ExtractorMode.RuntimeInterpreter
+                ? availability with { Mode = ExtractorMode.NativeBinary, ExecutablePath = compiledBinaryPath }
+                : availability,
+            ApiJson = apiJson,
+            SamplesPath = normalizedPath,
+            BuildArgs = (avail, samplesPath) => new(["-usage", "-", samplesPath]),
+            SignatureLookup = BuildSignatureLookup(apiIndex)
+        }, ct).ConfigureAwait(false);
+
+        ExtractorTelemetry.RecordResult(activity, true, analysisResult.Index?.CoveredOperations.Count ?? 0);
+        return analysisResult.Index ?? new UsageIndex { FileCount = 0 };
     }
 
     /// <inheritdoc />
     public string Format(UsageIndex index) => UsageFormatter.Format(index);
-
-    private static string GetScriptDir() => AppContext.BaseDirectory;
-
-    private static async Task<string?> AnalyzeUsageAsync(
-        ExtractorAvailabilityResult availability,
-        string apiJsonPath,
-        string samplesPath,
-        CancellationToken ct)
-    {
-        if (availability.Mode == ExtractorMode.NativeBinary)
-        {
-            var result = await ProcessSandbox.ExecuteAsync(
-                availability.ExecutablePath!,
-                ["-usage", apiJsonPath, samplesPath],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-
-            if (!result.Success)
-            {
-                Console.Error.WriteLine(result.TimedOut
-                    ? $"Go usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                    : $"Go usage analyzer: failed (exit {result.ExitCode}): {result.StandardError}");
-                return null;
-            }
-
-            return result.StandardOutput;
-        }
-
-        if (availability.Mode == ExtractorMode.Docker)
-        {
-            var dockerResult = await DockerSandbox.ExecuteAsync(
-                availability.DockerImageName!,
-                [apiJsonPath, samplesPath],
-                ["-usage", apiJsonPath, samplesPath],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-
-            if (!dockerResult.Success)
-            {
-                Console.Error.WriteLine(dockerResult.TimedOut
-                    ? $"Go usage analyzer: Docker timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                    : $"Go usage analyzer: Docker failed: {dockerResult.StandardError}");
-                return null;
-            }
-
-            return dockerResult.StandardOutput;
-        }
-
-        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
-            return null;
-
-        var scriptDir = GetScriptDir();
-        var scriptPath = Path.Combine(scriptDir, "extract_api.go");
-
-        var runtimeResult = await ProcessSandbox.ExecuteAsync(
-            availability.ExecutablePath!,
-            ["run", scriptPath, "-usage", apiJsonPath, samplesPath],
-            workingDirectory: scriptDir,
-            cancellationToken: ct
-        ).ConfigureAwait(false);
-
-        if (!runtimeResult.Success)
-        {
-            Console.Error.WriteLine(runtimeResult.TimedOut
-                ? $"Go usage analyzer: timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Go usage analyzer: failed (exit {runtimeResult.ExitCode}): {runtimeResult.StandardError}");
-            return null;
-        }
-
-        return runtimeResult.StandardOutput;
-    }
-
-    // AOT-safe deserialization using source-generated context
-    private static UsageResult? DeserializeResult(string json) =>
-        JsonSerializer.Deserialize(json, ExtractorJsonContext.Default.UsageResult);
 
     private static bool HasReachableOperations(ApiIndex apiIndex)
     {

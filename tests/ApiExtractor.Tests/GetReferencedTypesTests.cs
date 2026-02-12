@@ -673,4 +673,126 @@ public class GetReferencedTypesTests
     }
 
     #endregion
+
+    #region CollectReferencedTypes (reusable HashSet overload)
+
+    [Fact]
+    public void DotNet_CollectReferencedTypes_MatchesGetReferencedTypes()
+    {
+        var type = new DotNetModels.TypeInfo
+        {
+            Name = "BlobClient",
+            Base = "ServiceClient",
+            Members =
+            [
+                new DotNetModels.MemberInfo { Name = "Download", Kind = "method", Signature = "Download(BlobOptions options)" }
+            ]
+        };
+        HashSet<string> allTypes = ["ServiceClient", "BlobOptions", "Irrelevant"];
+
+        var fromGet = type.GetReferencedTypes(allTypes);
+        var fromCollect = new HashSet<string>();
+        type.CollectReferencedTypes(allTypes, fromCollect);
+
+        Assert.Equal(fromGet.OrderBy(x => x), fromCollect.OrderBy(x => x));
+    }
+
+    [Fact]
+    public void DotNet_CollectReferencedTypes_ClearsSetOnReuse()
+    {
+        var type1 = new DotNetModels.TypeInfo
+        {
+            Name = "A",
+            Members = [new DotNetModels.MemberInfo { Name = "M", Kind = "method", Signature = "M(Foo x)" }]
+        };
+        var type2 = new DotNetModels.TypeInfo
+        {
+            Name = "B",
+            Members = [new DotNetModels.MemberInfo { Name = "M", Kind = "method", Signature = "M(Bar x)" }]
+        };
+        HashSet<string> allTypes = ["Foo", "Bar"];
+        var reusable = new HashSet<string>();
+
+        type1.CollectReferencedTypes(allTypes, reusable);
+        Assert.Contains("Foo", reusable);
+        Assert.DoesNotContain("Bar", reusable);
+
+        type2.CollectReferencedTypes(allTypes, reusable);
+        Assert.Contains("Bar", reusable);
+        Assert.DoesNotContain("Foo", reusable); // Cleared before second use
+    }
+
+    [Fact]
+    public void Python_CollectReferencedTypes_MatchesGetReferencedTypes()
+    {
+        var cls = new PyModels.ClassInfo
+        {
+            Name = "Client",
+            Base = "BaseClient",
+            Methods = [new PyModels.MethodInfo("do_work", "self, opts: WorkOptions", null, false, null, null, "Result")]
+        };
+        HashSet<string> allTypes = ["BaseClient", "WorkOptions", "Result"];
+
+        var fromGet = cls.GetReferencedTypes(allTypes);
+        var fromCollect = new HashSet<string>();
+        cls.CollectReferencedTypes(allTypes, fromCollect);
+
+        Assert.Equal(fromGet.OrderBy(x => x), fromCollect.OrderBy(x => x));
+    }
+
+    [Fact]
+    public void Go_CollectReferencedTypes_MatchesGetReferencedTypes()
+    {
+        var s = new GoModels.StructApi
+        {
+            Name = "Client",
+            Embeds = ["*BaseClient"],
+            Methods = [new GoModels.FuncApi { Name = "Do", Sig = "opts Options", Ret = "Result" }]
+        };
+        HashSet<string> allTypes = ["BaseClient", "Options", "Result"];
+
+        var fromGet = s.GetReferencedTypes(allTypes);
+        var fromCollect = new HashSet<string>();
+        s.CollectReferencedTypes(allTypes, fromCollect);
+
+        Assert.Equal(fromGet.OrderBy(x => x), fromCollect.OrderBy(x => x));
+    }
+
+    [Fact]
+    public void Java_CollectReferencedTypes_MatchesGetReferencedTypes()
+    {
+        var cls = new JavaModels.ClassInfo
+        {
+            Name = "Client",
+            Extends = "BaseClient",
+            Methods = [new JavaModels.MethodInfo { Name = "do", Sig = "Options opts", Ret = "Result" }]
+        };
+        HashSet<string> allTypes = ["BaseClient", "Options", "Result"];
+
+        var fromGet = cls.GetReferencedTypes(allTypes);
+        var fromCollect = new HashSet<string>();
+        cls.CollectReferencedTypes(allTypes, fromCollect);
+
+        Assert.Equal(fromGet.OrderBy(x => x), fromCollect.OrderBy(x => x));
+    }
+
+    [Fact]
+    public void TypeScript_CollectReferencedTypes_MatchesGetReferencedTypes()
+    {
+        var cls = new TsModels.ClassInfo
+        {
+            Name = "Client",
+            Extends = "BaseClient",
+            Methods = [new TsModels.MethodInfo { Name = "do", Sig = "opts: Options", Ret = "Promise<Result>" }]
+        };
+        HashSet<string> allTypes = ["BaseClient", "Options", "Result"];
+
+        var fromGet = cls.GetReferencedTypes(allTypes);
+        var fromCollect = new HashSet<string>();
+        cls.CollectReferencedTypes(allTypes, fromCollect);
+
+        Assert.Equal(fromGet.OrderBy(x => x), fromCollect.OrderBy(x => x));
+    }
+
+    #endregion
 }

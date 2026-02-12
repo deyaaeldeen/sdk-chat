@@ -1,12 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Text;
 using ApiExtractor.Contracts;
 using ApiExtractor.Python;
 using Xunit;
-using Go = ApiExtractor.Go;
-using Java = ApiExtractor.Java;
-using TypeScript = ApiExtractor.TypeScript;
 
 namespace ApiExtractor.Tests;
 
@@ -921,4 +919,124 @@ public class FormatterTests
     }
 
     #endregion
+}
+
+/// <summary>
+/// Tests for <see cref="CoverageFormatter"/> shared scaffolding.
+/// </summary>
+public class CoverageFormatterTests
+{
+    [Fact]
+    public void AppendCoverageSummary_WithCoveredOps_RendersSummarySection()
+    {
+        var coverage = new UsageIndex
+        {
+            FileCount = 3,
+            CoveredOperations =
+            [
+                new OperationUsage { ClientType = "BlobClient", Operation = "Download", File = "a.cs", Line = 1 },
+                new OperationUsage { ClientType = "BlobClient", Operation = "Upload", File = "b.cs", Line = 5 },
+            ],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "BlobClient", Operation = "Delete", Signature = "Delete(string name)" },
+            ]
+        };
+
+        var sb = new StringBuilder();
+        var result = CoverageFormatter.AppendCoverageSummary(sb, coverage, "//");
+
+        Assert.NotNull(result);
+        var text = sb.ToString();
+        Assert.Contains("ALREADY COVERED (2 calls across 3 files)", text);
+        Assert.Contains("BlobClient: Download, Upload", text);
+        Assert.Contains("UNCOVERED API (1 operations)", text);
+    }
+
+    [Fact]
+    public void AppendCoverageSummary_AllCovered_ReturnsNull()
+    {
+        var coverage = new UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations =
+            [
+                new OperationUsage { ClientType = "Client", Operation = "Do", File = "a.cs", Line = 1 },
+            ],
+            UncoveredOperations = []
+        };
+
+        var sb = new StringBuilder();
+        var result = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+
+        Assert.Null(result);
+        Assert.Contains("All operations are covered", sb.ToString());
+    }
+
+    [Fact]
+    public void AppendCoverageSummary_NoCoveredOps_SkipsCoveredSection()
+    {
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "Client", Operation = "Do", Signature = "Do()" },
+            ]
+        };
+
+        var sb = new StringBuilder();
+        var result = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain("ALREADY COVERED", sb.ToString());
+        Assert.Contains("UNCOVERED API", sb.ToString());
+    }
+
+    [Fact]
+    public void AppendCoverageSummary_PythonCommentPrefix_UsesHash()
+    {
+        var coverage = new UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations =
+            [
+                new OperationUsage { ClientType = "Client", Operation = "Do", File = "a.py", Line = 1 },
+            ],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "Client", Operation = "Do2", Signature = "Do2()" },
+            ]
+        };
+
+        var sb = new StringBuilder();
+        CoverageFormatter.AppendCoverageSummary(sb, coverage, "#");
+        var text = sb.ToString();
+
+        Assert.Contains("# ALREADY COVERED", text);
+        Assert.Contains("# UNCOVERED API", text);
+        Assert.DoesNotContain("//", text);
+    }
+
+    [Fact]
+    public void AppendCoverageSummary_ManyOps_TruncatesAfterTen()
+    {
+        var ops = Enumerable.Range(1, 15)
+            .Select(i => new OperationUsage { ClientType = "Client", Operation = $"Op{i}", File = "a.cs", Line = i })
+            .ToList();
+        var coverage = new UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations = ops,
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "Client", Operation = "X", Signature = "X()" }
+            ]
+        };
+
+        var sb = new StringBuilder();
+        CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        Assert.Contains("(+5 more)", sb.ToString());
+    }
 }
