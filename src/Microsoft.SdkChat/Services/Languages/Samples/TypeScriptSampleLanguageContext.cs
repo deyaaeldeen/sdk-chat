@@ -13,7 +13,7 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
 {
     private readonly TypeScriptUsageAnalyzer _usageAnalyzer = new();
     private readonly ExtractionCache<ApiIndex> _cache = new(
-        (path, ct) => new TypeScriptApiExtractor().ExtractAsync(path, ct), [".ts"]);
+        async (path, ct) => (ApiIndex?)await new TypeScriptApiExtractor().ExtractAsync(path, ct), [".ts"]);
 
     public TypeScriptSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 

@@ -13,7 +13,7 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
 {
     private readonly JavaUsageAnalyzer _usageAnalyzer = new();
     private readonly ExtractionCache<ApiIndex> _cache = new(
-        (path, ct) => new JavaApiExtractor().ExtractAsync(path, ct), [".java"]);
+        async (path, ct) => (ApiIndex?)await new JavaApiExtractor().ExtractAsync(path, ct), [".java"]);
 
     public JavaSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 

@@ -85,10 +85,10 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
     /// Extract API from a Go module directory.
     /// Prefers pre-compiled binary from build, falls back to runtime compilation.
     /// </summary>
-    public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
+    public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
         var (index, _) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
-        return index;
+        return index ?? throw new InvalidOperationException("Go extraction returned no API surface.");
     }
 
     /// <summary>

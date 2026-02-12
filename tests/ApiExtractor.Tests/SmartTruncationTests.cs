@@ -1398,4 +1398,743 @@ public class SmartTruncationTests
     }
 
     #endregion
+
+    #region Issue 3e: Version Field Consistency Tests
+
+    [Fact]
+    public void AllLanguages_ApiIndex_HasVersionProperty()
+    {
+        // All ApiIndex types should support a Version property
+        var dotnet = new DotNet.ApiIndex { Package = "Test", Version = "1.0.0" };
+        var python = new Python.ApiIndex("test-pkg", [], Version: "2.0.0");
+        var ts = new TypeScript.ApiIndex { Package = "@test/pkg", Version = "3.0.0" };
+        var go = new Go.ApiIndex { Package = "testpkg", Version = "4.0.0" };
+        var java = new Java.ApiIndex { Package = "com.test", Version = "5.0.0" };
+
+        Assert.Equal("1.0.0", dotnet.Version);
+        Assert.Equal("2.0.0", python.Version);
+        Assert.Equal("3.0.0", ts.Version);
+        Assert.Equal("4.0.0", go.Version);
+        Assert.Equal("5.0.0", java.Version);
+    }
+
+    [Fact]
+    public void AllLanguages_ApiIndex_VersionDefaultsToNull()
+    {
+        var dotnet = new DotNet.ApiIndex { Package = "Test" };
+        var python = new Python.ApiIndex("test-pkg", []);
+        var ts = new TypeScript.ApiIndex { Package = "@test/pkg" };
+        var go = new Go.ApiIndex { Package = "testpkg" };
+        var java = new Java.ApiIndex { Package = "com.test" };
+
+        Assert.Null(dotnet.Version);
+        Assert.Null(python.Version);
+        Assert.Null(ts.Version);
+        Assert.Null(go.Version);
+        Assert.Null(java.Version);
+    }
+
+    [Fact]
+    public void AllLanguages_ApiIndex_VersionSerializesToJson()
+    {
+        var dotnet = new DotNet.ApiIndex { Package = "Test", Version = "1.0.0" };
+        var python = new Python.ApiIndex("test-pkg", [], Version: "2.0.0");
+        var ts = new TypeScript.ApiIndex { Package = "@test/pkg", Version = "3.0.0" };
+        var go = new Go.ApiIndex { Package = "testpkg", Version = "4.0.0" };
+        var java = new Java.ApiIndex { Package = "com.test", Version = "5.0.0" };
+
+        Assert.Contains("\"version\"", dotnet.ToJson());
+        Assert.Contains("\"1.0.0\"", dotnet.ToJson());
+        Assert.Contains("\"version\"", python.ToJson());
+        Assert.Contains("\"version\"", ts.ToJson());
+        Assert.Contains("\"version\"", go.ToJson());
+        Assert.Contains("\"version\"", java.ToJson());
+    }
+
+    [Fact]
+    public void AllLanguages_ApiIndex_NullVersionOmittedFromJson()
+    {
+        var dotnet = new DotNet.ApiIndex { Package = "Test" };
+        var python = new Python.ApiIndex("test-pkg", []);
+        var ts = new TypeScript.ApiIndex { Package = "@test/pkg" };
+        var go = new Go.ApiIndex { Package = "testpkg" };
+        var java = new Java.ApiIndex { Package = "com.test" };
+
+        Assert.DoesNotContain("\"version\"", dotnet.ToJson());
+        Assert.DoesNotContain("\"version\"", python.ToJson());
+        Assert.DoesNotContain("\"version\"", ts.ToJson());
+        Assert.DoesNotContain("\"version\"", go.ToJson());
+        Assert.DoesNotContain("\"version\"", java.ToJson());
+    }
+
+    #endregion
+
+    #region Issue 3c: IsClientType Allows Struct/Record Tests
+
+    [Fact]
+    public void DotNet_IsClientType_AcceptsStructEntryPoint()
+    {
+        var structClient = new DotNet.TypeInfo
+        {
+            Name = "StructClient",
+            Kind = "struct",
+            EntryPoint = true,
+            Members = [new MemberInfo { Name = "Execute", Kind = "method", Signature = "() -> void" }]
+        };
+
+        Assert.True(structClient.IsClientType);
+    }
+
+    [Fact]
+    public void DotNet_IsClientType_AcceptsRecordEntryPoint()
+    {
+        var recordClient = new DotNet.TypeInfo
+        {
+            Name = "RecordClient",
+            Kind = "record",
+            EntryPoint = true,
+            Members = [new MemberInfo { Name = "Process", Kind = "method", Signature = "() -> Task" }]
+        };
+
+        Assert.True(recordClient.IsClientType);
+    }
+
+    [Fact]
+    public void DotNet_IsClientType_StillWorksForClass()
+    {
+        var classClient = new DotNet.TypeInfo
+        {
+            Name = "ClassClient",
+            Kind = "class",
+            EntryPoint = true,
+            Members = [new MemberInfo { Name = "Run", Kind = "method", Signature = "() -> void" }]
+        };
+
+        Assert.True(classClient.IsClientType);
+    }
+
+    [Fact]
+    public void DotNet_IsClientType_RejectsNonEntryPoint()
+    {
+        var nonEntry = new DotNet.TypeInfo
+        {
+            Name = "Helper",
+            Kind = "struct",
+            EntryPoint = false,
+            Members = [new MemberInfo { Name = "Help", Kind = "method", Signature = "() -> void" }]
+        };
+
+        Assert.False(nonEntry.IsClientType);
+    }
+
+    [Fact]
+    public void DotNet_IsClientType_RejectsEntryPointWithoutMethods()
+    {
+        var noMethods = new DotNet.TypeInfo
+        {
+            Name = "Config",
+            Kind = "struct",
+            EntryPoint = true,
+            Members = [new MemberInfo { Name = "Value", Kind = "property", Signature = "string" }]
+        };
+
+        Assert.False(noMethods.IsClientType);
+    }
+
+    #endregion
+
+    #region Issue 3d: TruncationPriority Error/Exception Consistency Tests
+
+    [Fact]
+    public void DotNet_TruncationPriority_RecognizesBothExceptionAndError()
+    {
+        var exception = new DotNet.TypeInfo { Name = "SomeException", Kind = "class" };
+        var error = new DotNet.TypeInfo { Name = "SomeError", Kind = "class" };
+
+        Assert.Equal(2, exception.TruncationPriority);
+        Assert.Equal(2, error.TruncationPriority);
+    }
+
+    [Fact]
+    public void Python_TruncationPriority_RecognizesBothExceptionAndError()
+    {
+        var exception = new Python.ClassInfo { Name = "SomeException" };
+        var error = new Python.ClassInfo { Name = "SomeError" };
+
+        Assert.Equal(2, exception.TruncationPriority);
+        Assert.Equal(2, error.TruncationPriority);
+    }
+
+    [Fact]
+    public void TypeScript_TruncationPriority_RecognizesBothExceptionAndError()
+    {
+        var error = new TypeScript.ClassInfo { Name = "SomeError" };
+        var exception = new TypeScript.ClassInfo { Name = "SomeException" };
+
+        Assert.Equal(2, error.TruncationPriority);
+        Assert.Equal(2, exception.TruncationPriority);
+    }
+
+    [Fact]
+    public void Go_TruncationPriority_RecognizesBothExceptionAndError()
+    {
+        var error = new Go.StructApi { Name = "SomeError" };
+        var exception = new Go.StructApi { Name = "SomeException" };
+
+        Assert.Equal(2, error.TruncationPriority);
+        Assert.Equal(2, exception.TruncationPriority);
+    }
+
+    [Fact]
+    public void Java_TruncationPriority_RecognizesBothExceptionAndError()
+    {
+        var exception = new Java.ClassInfo { Name = "SomeException" };
+        var error = new Java.ClassInfo { Name = "SomeError" };
+
+        Assert.Equal(2, exception.TruncationPriority);
+        Assert.Equal(2, error.TruncationPriority);
+    }
+
+    [Fact]
+    public void AllLanguages_TruncationPriority_ErrorAndExceptionSamePriority()
+    {
+        // Verify all 5 languages treat Exception and Error types with equal priority
+        var dotnetEx = new DotNet.TypeInfo { Name = "FooException", Kind = "class" };
+        var dotnetErr = new DotNet.TypeInfo { Name = "FooError", Kind = "class" };
+        var pyEx = new Python.ClassInfo { Name = "FooException" };
+        var pyErr = new Python.ClassInfo { Name = "FooError" };
+        var tsEx = new TypeScript.ClassInfo { Name = "FooException" };
+        var tsErr = new TypeScript.ClassInfo { Name = "FooError" };
+        var goEx = new Go.StructApi { Name = "FooException" };
+        var goErr = new Go.StructApi { Name = "FooError" };
+        var javaEx = new Java.ClassInfo { Name = "FooException" };
+        var javaErr = new Java.ClassInfo { Name = "FooError" };
+
+        Assert.Equal(dotnetEx.TruncationPriority, dotnetErr.TruncationPriority);
+        Assert.Equal(pyEx.TruncationPriority, pyErr.TruncationPriority);
+        Assert.Equal(tsEx.TruncationPriority, tsErr.TruncationPriority);
+        Assert.Equal(goEx.TruncationPriority, goErr.TruncationPriority);
+        Assert.Equal(javaEx.TruncationPriority, javaErr.TruncationPriority);
+    }
+
+    #endregion
+
+    #region Issue 3b: Case Sensitivity Tests
+
+    [Fact]
+    public void TypeScript_BuildSignatureLookup_IsCaseSensitive()
+    {
+        var apiIndex = new TypeScript.ApiIndex
+        {
+            Package = "@test/pkg",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "MyClient",
+                            Methods =
+                            [
+                                new TypeScript.MethodInfo { Name = "send", Sig = "(msg: string)", Ret = "void" },
+                                new TypeScript.MethodInfo { Name = "Send", Sig = "(msg: string)", Ret = "void" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var lookup = TypeScriptUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        // Both "send" and "Send" should be separate entries (case-sensitive)
+        Assert.True(lookup.ContainsKey("MyClient.send"));
+        Assert.True(lookup.ContainsKey("MyClient.Send"));
+        Assert.NotEqual(lookup["MyClient.send"], lookup["MyClient.Send"]);
+    }
+
+    [Fact]
+    public void TypeScript_BuildSignatureLookup_DoesNotMatchWrongCase()
+    {
+        var apiIndex = new TypeScript.ApiIndex
+        {
+            Package = "@test/pkg",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "MyClient",
+                            Methods =
+                            [
+                                new TypeScript.MethodInfo { Name = "send", Sig = "(msg: string)", Ret = "void" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var lookup = TypeScriptUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        Assert.True(lookup.ContainsKey("MyClient.send"));
+        Assert.False(lookup.ContainsKey("MyClient.SEND"));
+        Assert.False(lookup.ContainsKey("myclient.send"));
+    }
+
+    [Fact]
+    public void Java_BuildSignatureLookup_IsCaseSensitive()
+    {
+        var apiIndex = new Java.ApiIndex
+        {
+            Package = "com.test",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.test",
+                    Classes =
+                    [
+                        new Java.ClassInfo
+                        {
+                            Name = "MyClient",
+                            Methods =
+                            [
+                                new Java.MethodInfo { Name = "send", Sig = "(String msg)", Ret = "void" },
+                                new Java.MethodInfo { Name = "Send", Sig = "(String msg)", Ret = "Response" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var lookup = JavaUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        Assert.True(lookup.ContainsKey("MyClient.send"));
+        Assert.True(lookup.ContainsKey("MyClient.Send"));
+    }
+
+    [Fact]
+    public void Java_BuildSignatureLookup_DoesNotMatchWrongCase()
+    {
+        var apiIndex = new Java.ApiIndex
+        {
+            Package = "com.test",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.test",
+                    Classes =
+                    [
+                        new Java.ClassInfo
+                        {
+                            Name = "MyClient",
+                            Methods =
+                            [
+                                new Java.MethodInfo { Name = "send", Sig = "(String msg)", Ret = "void" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var lookup = JavaUsageAnalyzer.BuildSignatureLookup(apiIndex);
+
+        Assert.True(lookup.ContainsKey("MyClient.send"));
+        Assert.False(lookup.ContainsKey("MyClient.SEND"));
+        Assert.False(lookup.ContainsKey("myclient.send"));
+    }
+
+    #endregion
+
+    #region Issue 3a: BuildDependencyGraph All Languages Tests
+
+    [Fact]
+    public void Python_BuildDependencyGraph_TracksReferences()
+    {
+        var api = new Python.ApiIndex("test-pkg", [
+            new Python.ModuleInfo("mod", [
+                new Python.ClassInfo
+                {
+                    Name = "Client",
+                    EntryPoint = true,
+                    Methods = [new Python.MethodInfo("send", "(msg: Message)", null, null, null, null, Ret: "Response")]
+                },
+                new Python.ClassInfo { Name = "Message", Properties = [new Python.PropertyInfo("text", "str", null)] },
+                new Python.ClassInfo { Name = "Response", Properties = [new Python.PropertyInfo("status", "int", null)] },
+                new Python.ClassInfo { Name = "Unrelated", Properties = [new Python.PropertyInfo("value", "int", null)] }
+            ], null)
+        ]);
+
+        var graph = api.BuildDependencyGraph();
+
+        Assert.True(graph.ContainsKey("Client"));
+        Assert.Contains("Message", graph["Client"]);
+        Assert.Contains("Response", graph["Client"]);
+        Assert.DoesNotContain("Unrelated", graph["Client"]);
+    }
+
+    [Fact]
+    public void TypeScript_BuildDependencyGraph_TracksReferences()
+    {
+        var api = new TypeScript.ApiIndex
+        {
+            Package = "@test/pkg",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "Client",
+                            EntryPoint = true,
+                            Methods = [new TypeScript.MethodInfo { Name = "send", Sig = "(msg: Message)", Ret = "Response" }]
+                        },
+                        new TypeScript.ClassInfo { Name = "Message", Properties = [new TypeScript.PropertyInfo { Name = "text", Type = "string" }] },
+                        new TypeScript.ClassInfo { Name = "Response", Properties = [new TypeScript.PropertyInfo { Name = "status", Type = "number" }] },
+                        new TypeScript.ClassInfo { Name = "Unrelated", Properties = [new TypeScript.PropertyInfo { Name = "value", Type = "number" }] }
+                    ]
+                }
+            ]
+        };
+
+        var graph = api.BuildDependencyGraph();
+
+        Assert.True(graph.ContainsKey("Client"));
+        Assert.Contains("Message", graph["Client"]);
+        Assert.Contains("Response", graph["Client"]);
+        Assert.DoesNotContain("Unrelated", graph["Client"]);
+    }
+
+    [Fact]
+    public void Go_BuildDependencyGraph_TracksReferences()
+    {
+        var api = new Go.ApiIndex
+        {
+            Package = "testpkg",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "testpkg",
+                    Structs =
+                    [
+                        new Go.StructApi
+                        {
+                            Name = "Client",
+                            EntryPoint = true,
+                            Methods = [new Go.FuncApi { Name = "Send", Sig = "(msg Message)", Ret = "Response" }]
+                        },
+                        new Go.StructApi { Name = "Message", Fields = [new Go.FieldApi { Name = "Text", Type = "string" }] },
+                        new Go.StructApi { Name = "Response", Fields = [new Go.FieldApi { Name = "Status", Type = "int" }] },
+                        new Go.StructApi { Name = "Unrelated", Fields = [new Go.FieldApi { Name = "Value", Type = "int" }] }
+                    ]
+                }
+            ]
+        };
+
+        var graph = api.BuildDependencyGraph();
+
+        Assert.True(graph.ContainsKey("Client"));
+        Assert.Contains("Message", graph["Client"]);
+        Assert.Contains("Response", graph["Client"]);
+        Assert.DoesNotContain("Unrelated", graph["Client"]);
+    }
+
+    [Fact]
+    public void Java_BuildDependencyGraph_TracksReferences()
+    {
+        var api = new Java.ApiIndex
+        {
+            Package = "com.test",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.test",
+                    Classes =
+                    [
+                        new Java.ClassInfo
+                        {
+                            Name = "Client",
+                            EntryPoint = true,
+                            Methods = [new Java.MethodInfo { Name = "send", Sig = "(Message msg)", Ret = "Response" }]
+                        },
+                        new Java.ClassInfo { Name = "Message", Fields = [new Java.FieldInfo { Name = "text", Type = "String" }] },
+                        new Java.ClassInfo { Name = "Response", Fields = [new Java.FieldInfo { Name = "status", Type = "int" }] },
+                        new Java.ClassInfo { Name = "Unrelated", Fields = [new Java.FieldInfo { Name = "value", Type = "int" }] }
+                    ]
+                }
+            ]
+        };
+
+        var graph = api.BuildDependencyGraph();
+
+        Assert.True(graph.ContainsKey("Client"));
+        Assert.Contains("Message", graph["Client"]);
+        Assert.Contains("Response", graph["Client"]);
+        Assert.DoesNotContain("Unrelated", graph["Client"]);
+    }
+
+    [Fact]
+    public void AllLanguages_BuildDependencyGraph_EmptyApiReturnsEmptyGraph()
+    {
+        var dotnet = new DotNet.ApiIndex { Package = "Test" };
+        var python = new Python.ApiIndex("test-pkg", []);
+        var ts = new TypeScript.ApiIndex { Package = "@test/pkg" };
+        var go = new Go.ApiIndex { Package = "testpkg" };
+        var java = new Java.ApiIndex { Package = "com.test" };
+
+        Assert.Empty(dotnet.BuildDependencyGraph());
+        Assert.Empty(python.BuildDependencyGraph());
+        Assert.Empty(ts.BuildDependencyGraph());
+        Assert.Empty(go.BuildDependencyGraph());
+        Assert.Empty(java.BuildDependencyGraph());
+    }
+
+    #endregion
+
+    #region Issue 2e: FormatWithCoverage Dependency Inclusion Tests
+
+    [Fact]
+    public void TypeScript_FormatWithCoverage_IncludesExternalDependencyTypes()
+    {
+        var api = new TypeScript.ApiIndex
+        {
+            Package = "@test/storage",
+            Modules =
+            [
+                new TypeScript.ModuleInfo
+                {
+                    Name = "index",
+                    Classes =
+                    [
+                        new TypeScript.ClassInfo
+                        {
+                            Name = "BlobClient",
+                            EntryPoint = true,
+                            Methods = [new TypeScript.MethodInfo { Name = "upload", Sig = "(data: Uint8Array)", Ret = "Promise<void>" }]
+                        }
+                    ]
+                }
+            ],
+            Dependencies =
+            [
+                new TypeScript.DependencyInfo
+                {
+                    Package = "@azure/core-client",
+                    Classes = [new TypeScript.ClassInfo { Name = "ServiceClient", Properties = [new TypeScript.PropertyInfo { Name = "endpoint", Type = "string" }] }],
+                    Interfaces = [new TypeScript.InterfaceInfo { Name = "OperationOptions", Properties = [new TypeScript.PropertyInfo { Name = "abortSignal", Type = "AbortSignal" }] }]
+                }
+            ]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations = [new UncoveredOperation { ClientType = "BlobClient", Operation = "upload", Signature = "upload(...)" }]
+        };
+
+        var result = TypeScriptFormatter.FormatWithCoverage(api, coverage, 10000);
+
+        Assert.Contains("BlobClient", result);
+        Assert.Contains("ServiceClient", result);
+        Assert.Contains("OperationOptions", result);
+    }
+
+    [Fact]
+    public void Go_FormatWithCoverage_IncludesExternalDependencyTypes()
+    {
+        var api = new Go.ApiIndex
+        {
+            Package = "testpkg",
+            Packages =
+            [
+                new Go.PackageApi
+                {
+                    Name = "testpkg",
+                    Structs =
+                    [
+                        new Go.StructApi
+                        {
+                            Name = "BlobClient",
+                            EntryPoint = true,
+                            Methods = [new Go.FuncApi { Name = "Upload", Sig = "(data []byte)", Ret = "error" }]
+                        }
+                    ]
+                }
+            ],
+            Dependencies =
+            [
+                new Go.DependencyInfo
+                {
+                    Package = "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+                    Structs = [new Go.StructApi { Name = "ClientOptions", Fields = [new Go.FieldApi { Name = "Retry", Type = "RetryOptions" }] }]
+                }
+            ]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations = [new UncoveredOperation { ClientType = "BlobClient", Operation = "Upload", Signature = "Upload(...)" }]
+        };
+
+        var result = GoFormatter.FormatWithCoverage(api, coverage, 10000);
+
+        Assert.Contains("BlobClient", result);
+        Assert.Contains("ClientOptions", result);
+    }
+
+    [Fact]
+    public void Java_FormatWithCoverage_IncludesExternalDependencyTypes()
+    {
+        var api = new Java.ApiIndex
+        {
+            Package = "com.test",
+            Packages =
+            [
+                new Java.PackageInfo
+                {
+                    Name = "com.test",
+                    Classes =
+                    [
+                        new Java.ClassInfo
+                        {
+                            Name = "BlobClient",
+                            EntryPoint = true,
+                            Methods = [new Java.MethodInfo { Name = "upload", Sig = "(byte[] data)", Ret = "void" }]
+                        }
+                    ]
+                }
+            ],
+            Dependencies =
+            [
+                new Java.DependencyInfo
+                {
+                    Package = "com.azure:azure-core",
+                    Classes = [new Java.ClassInfo { Name = "HttpClient", Fields = [new Java.FieldInfo { Name = "baseUrl", Type = "String" }] }],
+                    Interfaces = [new Java.ClassInfo { Name = "TokenCredential", Methods = [new Java.MethodInfo { Name = "getToken", Sig = "()", Ret = "AccessToken" }] }]
+                }
+            ]
+        };
+
+        var coverage = new UsageIndex
+        {
+            FileCount = 0,
+            CoveredOperations = [],
+            UncoveredOperations = [new UncoveredOperation { ClientType = "BlobClient", Operation = "upload", Signature = "upload(...)" }]
+        };
+
+        var result = JavaFormatter.FormatWithCoverage(api, coverage, 10000);
+
+        Assert.Contains("BlobClient", result);
+        Assert.Contains("HttpClient", result);
+        Assert.Contains("TokenCredential", result);
+    }
+
+    #endregion
+
+    #region Issue 2d: Consistent ExtractAsync Return Type Tests
+
+    [Fact]
+    public void AllLanguages_PublicExtractAsync_ReturnsNonNullableSignature()
+    {
+        // Verify all 5 extractors' public ExtractAsync return Task<ApiIndex> (non-nullable)
+        // by checking the method info via reflection
+        var tsMethod = typeof(TypeScriptApiExtractor).GetMethod("ExtractAsync", [typeof(string), typeof(CancellationToken)]);
+        var goMethod = typeof(GoApiExtractor).GetMethod("ExtractAsync", [typeof(string), typeof(CancellationToken)]);
+        var javaMethod = typeof(JavaApiExtractor).GetMethod("ExtractAsync", [typeof(string), typeof(CancellationToken)]);
+        var csMethod = typeof(CSharpApiExtractor).GetMethod("ExtractAsync", [typeof(string), typeof(CancellationToken)]);
+        var pyMethod = typeof(PythonApiExtractor).GetMethod("ExtractAsync", [typeof(string), typeof(CancellationToken)]);
+
+        Assert.NotNull(tsMethod);
+        Assert.NotNull(goMethod);
+        Assert.NotNull(javaMethod);
+        Assert.NotNull(csMethod);
+        Assert.NotNull(pyMethod);
+
+        // All should return Task<ApiIndex> (not Task<ApiIndex?>)
+        // The generic argument of the Task should be a non-nullable reference type
+        static void AssertNonNullableReturn(System.Reflection.MethodInfo method, string lang)
+        {
+            var returnType = method.ReturnType;
+            Assert.True(returnType.IsGenericType, $"{lang} ExtractAsync should return generic Task<T>");
+            var typeArg = returnType.GetGenericArguments()[0];
+            // If the return type were nullable, the NullabilityInfoContext would show it
+            var nullCtx = new System.Reflection.NullabilityInfoContext();
+            var nullInfo = nullCtx.Create(method.ReturnParameter);
+            // For Task<T>, check the generic type argument nullability
+            Assert.NotEmpty(nullInfo.GenericTypeArguments);
+            Assert.Equal(System.Reflection.NullabilityState.NotNull, nullInfo.GenericTypeArguments[0].ReadState);
+        }
+
+        AssertNonNullableReturn(tsMethod, "TypeScript");
+        AssertNonNullableReturn(goMethod, "Go");
+        AssertNonNullableReturn(javaMethod, "Java");
+        AssertNonNullableReturn(csMethod, "C#");
+        AssertNonNullableReturn(pyMethod, "Python");
+    }
+
+    #endregion
+
+    #region Issue 2a: CSharpFormatter Property Ordering Tests
+
+    [Fact]
+    public void DotNet_CSharpFormatter_StaticPropsBeforeInstanceProps()
+    {
+        var api = new DotNet.ApiIndex
+        {
+            Package = "TestPkg",
+            Namespaces =
+            [
+                new NamespaceInfo
+                {
+                    Name = "TestNs",
+                    Types =
+                    [
+                        new DotNet.TypeInfo
+                        {
+                            Name = "MyClient",
+                            Kind = "class",
+                            EntryPoint = true,
+                            Members =
+                            [
+                                new MemberInfo { Name = "InstanceProp", Kind = "property", Signature = "string InstanceProp { get; set; }", IsStatic = false },
+                                new MemberInfo { Name = "StaticProp", Kind = "property", Signature = "int StaticProp { get; }", IsStatic = true },
+                                new MemberInfo { Name = "DoWork", Kind = "method", Signature = "() -> void" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var result = CSharpFormatter.Format(api);
+
+        // Static property should appear before instance property
+        var staticIdx = result.IndexOf("StaticProp", StringComparison.Ordinal);
+        var instanceIdx = result.IndexOf("InstanceProp", StringComparison.Ordinal);
+        Assert.True(staticIdx >= 0, "StaticProp not found");
+        Assert.True(instanceIdx >= 0, "InstanceProp not found");
+        Assert.True(staticIdx < instanceIdx,
+            $"StaticProp (pos {staticIdx}) should appear before InstanceProp (pos {instanceIdx})");
+    }
+
+    #endregion
 }

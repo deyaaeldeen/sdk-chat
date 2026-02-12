@@ -135,7 +135,7 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// </summary>
     internal static Dictionary<string, string> BuildSignatureLookup(ApiIndex apiIndex)
     {
-        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var lookup = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var pkg in apiIndex.Packages)
         {
             foreach (var cls in pkg.Classes ?? [])

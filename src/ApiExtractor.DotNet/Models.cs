@@ -140,13 +140,13 @@ public record TypeInfo
     public IReadOnlyList<string>? Values { get; init; } // For enums
 
     /// <summary>
-    /// Returns true if this is a client class (entry point for SDK operations).
+    /// Returns true if this is a client type (entry point for SDK operations).
     /// A client type must be an entry point AND have methods (operations).
+    /// Allows class, struct, and record kinds — not just class.
     /// </summary>
     [JsonIgnore]
     public bool IsClientType =>
         EntryPoint == true &&
-        Kind == "class" &&
         (Members?.Any(m => m.Kind == "method") ?? false);
 
     /// <summary>
@@ -176,7 +176,7 @@ public record TypeInfo
         {
             if (IsClientType) return 0;        // Clients are most important
             if (IsOptionsType) return 1;       // Options next (configure clients)
-            if (Name.Contains("Exception", StringComparison.Ordinal)) return 2; // Exceptions for error handling
+            if (Name.Contains("Exception", StringComparison.Ordinal) || Name.Contains("Error", StringComparison.Ordinal)) return 2; // Exceptions/errors for error handling
             if (Kind == "enum") return 3;      // Enums usually small, include them
             if (IsModelType) return 4;         // Models are common but secondary
             return 5;                          // Everything else

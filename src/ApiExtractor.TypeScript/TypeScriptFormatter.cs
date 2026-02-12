@@ -106,6 +106,37 @@ public static class TypeScriptFormatter
             }
         }
 
+        // Include dependency types from external packages if space permits
+        if (index.Dependencies?.Count > 0)
+        {
+            foreach (var dep in index.Dependencies)
+            {
+                foreach (var cls in dep.Classes ?? [])
+                {
+                    if (includedClasses.Contains(cls.Name))
+                        continue;
+
+                    var depContent = FormatClassToString(cls);
+                    if (sb.Length + depContent.Length > maxLength - 100)
+                        break;
+                    sb.Append(depContent);
+                    includedClasses.Add(cls.Name);
+                }
+
+                foreach (var iface in dep.Interfaces ?? [])
+                {
+                    if (includedClasses.Contains(iface.Name))
+                        continue;
+
+                    var depContent = FormatInterface(iface);
+                    if (sb.Length + depContent.Length > maxLength - 100)
+                        break;
+                    sb.Append(depContent);
+                    includedClasses.Add(iface.Name);
+                }
+            }
+        }
+
         return sb.ToString();
     }
 

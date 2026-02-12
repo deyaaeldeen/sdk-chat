@@ -13,6 +13,9 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
+    [JsonPropertyName("version")]
+    public string? Version { get; init; }
+
     [JsonPropertyName("modules")]
     public IReadOnlyList<ModuleInfo> Modules { get; init; } = [];
 
@@ -34,6 +37,26 @@ public sealed record ApiIndex : IApiIndex
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => TypeScriptFormatter.Format(this);
+
+    /// <summary>
+    /// Builds a dependency graph: for each class, which other classes it references.
+    /// Used for smart truncation to avoid orphan types.
+    /// </summary>
+    public Dictionary<string, HashSet<string>> BuildDependencyGraph()
+    {
+        var graph = new Dictionary<string, HashSet<string>>();
+        var allClasses = GetAllClasses().ToList();
+        var allTypeNames = allClasses.Select(c => c.Name).ToHashSet();
+        HashSet<string> reusable = [];
+
+        foreach (var cls in allClasses)
+        {
+            cls.CollectReferencedTypes(allTypeNames, reusable);
+            graph[cls.Name] = new HashSet<string>(reusable);
+        }
+
+        return graph;
+    }
 }
 
 /// <summary>Information about types from a dependency package.</summary>
@@ -144,7 +167,7 @@ public sealed record ClassInfo
         {
             if (IsClientType) return 0;
             if (Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal)) return 1;
-            if (Name.Contains("Error", StringComparison.Ordinal)) return 2;
+            if (Name.Contains("Error", StringComparison.Ordinal) || Name.Contains("Exception", StringComparison.Ordinal)) return 2;
             if (IsModelType) return 3;
             return 4;
         }

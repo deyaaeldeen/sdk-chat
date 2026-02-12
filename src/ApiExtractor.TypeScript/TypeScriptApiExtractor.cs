@@ -81,10 +81,10 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// Extract API from a TypeScript package directory.
     /// Prefers pre-compiled binary from build, falls back to Node.js runtime.
     /// </summary>
-    public async Task<ApiIndex?> ExtractAsync(string rootPath, CancellationToken ct = default)
+    public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
     {
         var (index, _) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
-        return index;
+        return index ?? throw new InvalidOperationException("TypeScript extraction returned no API surface.");
     }
 
     /// <summary>

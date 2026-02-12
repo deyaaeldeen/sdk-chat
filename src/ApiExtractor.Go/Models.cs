@@ -13,6 +13,9 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
+    [JsonPropertyName("version")]
+    public string? Version { get; init; }
+
     [JsonPropertyName("packages")]
     public IReadOnlyList<PackageApi> Packages { get; init; } = [];
 
@@ -34,6 +37,26 @@ public sealed record ApiIndex : IApiIndex
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => GoFormatter.Format(this);
+
+    /// <summary>
+    /// Builds a dependency graph: for each struct, which other structs it references.
+    /// Used for smart truncation to avoid orphan types.
+    /// </summary>
+    public Dictionary<string, HashSet<string>> BuildDependencyGraph()
+    {
+        var graph = new Dictionary<string, HashSet<string>>();
+        var allStructs = GetAllStructs().ToList();
+        var allTypeNames = allStructs.Select(s => s.Name).ToHashSet();
+        HashSet<string> reusable = [];
+
+        foreach (var st in allStructs)
+        {
+            st.CollectReferencedTypes(allTypeNames, reusable);
+            graph[st.Name] = [.. reusable];
+        }
+
+        return graph;
+    }
 }
 
 /// <summary>Information about types from a dependency module.</summary>
@@ -142,7 +165,7 @@ public sealed record StructApi
         {
             if (IsClientType) return 0;
             if (IsOptionsType) return 1;
-            if (Name.Contains("Error", StringComparison.Ordinal)) return 2;
+            if (Name.Contains("Error", StringComparison.Ordinal) || Name.Contains("Exception", StringComparison.Ordinal)) return 2;
             if (IsModelType) return 3;
             return 4;
         }

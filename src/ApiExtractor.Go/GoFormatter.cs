@@ -80,6 +80,25 @@ public static class GoFormatter
             }
         }
 
+        // Include dependency types from external packages if space permits
+        if (index.Dependencies?.Count > 0)
+        {
+            foreach (var dep in index.Dependencies)
+            {
+                foreach (var st in dep.Structs ?? [])
+                {
+                    if (includedStructs.Contains(st.Name))
+                        continue;
+
+                    var depContent = FormatStructToString(st);
+                    if (sb.Length + depContent.Length > maxLength - 100)
+                        break;
+                    sb.Append(depContent);
+                    includedStructs.Add(st.Name);
+                }
+            }
+        }
+
         return sb.ToString();
     }
 

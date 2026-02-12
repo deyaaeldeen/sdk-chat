@@ -11,7 +11,8 @@ namespace ApiExtractor.Python;
 public sealed record ApiIndex(
     string Package,
     IReadOnlyList<ModuleInfo> Modules,
-    IReadOnlyList<DependencyInfo>? Dependencies = null) : IApiIndex
+    IReadOnlyList<DependencyInfo>? Dependencies = null,
+    string? Version = null) : IApiIndex
 {
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
@@ -26,6 +27,25 @@ public sealed record ApiIndex(
         : JsonSerializer.Serialize(this, ApiIndexContext.Default.ApiIndex);
 
     public string ToStubs() => PythonFormatter.Format(this);
+
+    /// <summary>
+    /// Builds a dependency graph: for each class, which other classes it references.
+    /// Used for smart truncation to avoid orphan types.
+    /// </summary>
+    public Dictionary<string, HashSet<string>> BuildDependencyGraph()
+    {
+        var graph = new Dictionary<string, HashSet<string>>();
+        var allTypeNames = GetAllClasses().Select(c => c.Name).ToHashSet();
+        HashSet<string> reusable = [];
+
+        foreach (var cls in GetAllClasses())
+        {
+            cls.CollectReferencedTypes(allTypeNames, reusable);
+            graph[cls.Name] = [.. reusable];
+        }
+
+        return graph;
+    }
 }
 
 /// <summary>Information about types from a dependency package.</summary>
@@ -122,6 +142,7 @@ public sealed record ClassInfo
         foreach (var method in Methods ?? [])
         {
             SignatureTokenizer.TokenizeInto(method.Signature, result);
+            SignatureTokenizer.TokenizeInto(method.Ret, result);
         }
 
         foreach (var prop in Properties ?? [])

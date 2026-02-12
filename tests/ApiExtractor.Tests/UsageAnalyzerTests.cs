@@ -750,7 +750,7 @@ public class UsageAnalyzerTests
     }
 
     [Fact]
-    public void TypeScript_BuildSignatureLookup_CaseInsensitive()
+    public void TypeScript_BuildSignatureLookup_CaseSensitive()
     {
         var apiIndex = new TsModels.ApiIndex
         {
@@ -767,9 +767,10 @@ public class UsageAnalyzerTests
 
         var lookup = TsModels.TypeScriptUsageAnalyzer.BuildSignatureLookup(apiIndex);
 
-        // OrdinalIgnoreCase comparer
-        Assert.True(lookup.ContainsKey("client.get"));
-        Assert.True(lookup.ContainsKey("CLIENT.GET"));
+        // TypeScript is case-sensitive: exact case required
+        Assert.True(lookup.ContainsKey("Client.Get"));
+        Assert.False(lookup.ContainsKey("client.get"));
+        Assert.False(lookup.ContainsKey("CLIENT.GET"));
     }
 
     [Fact]
@@ -927,7 +928,7 @@ public class UsageAnalyzerTests
     }
 
     [Fact]
-    public void Java_BuildSignatureLookup_CaseInsensitive()
+    public void Java_BuildSignatureLookup_CaseSensitive()
     {
         var apiIndex = new JavaModels.ApiIndex
         {
@@ -941,9 +942,9 @@ public class UsageAnalyzerTests
 
         var lookup = JavaModels.JavaUsageAnalyzer.BuildSignatureLookup(apiIndex);
 
-        // OrdinalIgnoreCase
+        // Java is case-sensitive: exact case required
         Assert.True(lookup.ContainsKey("Client.get"));
-        Assert.True(lookup.ContainsKey("CLIENT.GET"));
+        Assert.False(lookup.ContainsKey("CLIENT.GET"));
     }
 
     [Fact]

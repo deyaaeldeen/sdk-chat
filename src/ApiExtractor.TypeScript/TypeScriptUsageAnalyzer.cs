@@ -195,7 +195,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     /// </summary>
     internal static Dictionary<string, string> BuildSignatureLookup(ApiIndex apiIndex)
     {
-        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var lookup = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var module in apiIndex.Modules)
         {
             foreach (var cls in module.Classes ?? [])

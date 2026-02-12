@@ -316,9 +316,9 @@ public static class CSharpFormatter
         }
 
         // Instance properties
-        if (membersByKind.TryGetValue("property", out var props))
+        if (properties != null)
         {
-            foreach (var m in props.Where(m => m.IsStatic != true))
+            foreach (var m in properties.Where(m => m.IsStatic != true))
                 FormatMember(sb, m, indent + "    ");
         }
 
