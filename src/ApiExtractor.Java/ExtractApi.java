@@ -1143,6 +1143,7 @@ public class ExtractApi {
         }
 
         getDocString(cid).ifPresent(doc -> info.put("doc", doc));
+        addDeprecationInfo(info, cid);
 
         // Constructors (not applicable for interfaces)
         if (!isInterface) {
@@ -1185,6 +1186,7 @@ public class ExtractApi {
         typeCollector.addDefinedType(enumName);
 
         getDocString(ed).ifPresent(doc -> info.put("doc", doc));
+        addDeprecationInfo(info, ed);
 
         List<String> values = ed.getEntries().stream()
             .map(e -> e.getNameAsString())
@@ -1234,6 +1236,7 @@ public class ExtractApi {
         }
 
         getDocString(rd).ifPresent(doc -> info.put("doc", doc));
+        addDeprecationInfo(info, rd);
 
         // Record components (parameters)
         List<Map<String, Object>> components = new ArrayList<>();
@@ -1275,6 +1278,7 @@ public class ExtractApi {
         typeCollector.addDefinedType(typeName);
 
         getDocString(ad).ifPresent(doc -> info.put("doc", doc));
+        addDeprecationInfo(info, ad);
 
         // Annotation members (elements)
         List<Map<String, Object>> members = new ArrayList<>();
@@ -1341,6 +1345,7 @@ public class ExtractApi {
         }
 
         getDocString(cd).ifPresent(doc -> info.put("doc", doc));
+        addDeprecationInfo(info, cd);
 
         return info;
     }
@@ -1362,8 +1367,24 @@ public class ExtractApi {
         }
 
         getDocString(fd).ifPresent(doc -> info.put("doc", doc));
+        addDeprecationInfo(info, fd);
 
         return info;
+    }
+
+    static void addDeprecationInfo(Map<String, Object> info, NodeWithAnnotations<?> node) {
+        node.getAnnotationByName("Deprecated").ifPresent(ann -> {
+            info.put("deprecated", true);
+            if (ann instanceof NormalAnnotationExpr normal) {
+                for (var pair : normal.getPairs()) {
+                    if (pair.getNameAsString().equals("since")) {
+                        info.put("deprecatedMsg", "Since " + pair.getValue().toString().replace("\"", ""));
+                    }
+                }
+            } else if (ann instanceof SingleMemberAnnotationExpr single) {
+                info.put("deprecatedMsg", single.getMemberValue().toString().replace("\"", ""));
+            }
+        });
     }
 
     static List<String> getModifiers(NodeWithModifiers<?> node) {
