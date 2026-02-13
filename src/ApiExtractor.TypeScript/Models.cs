@@ -188,7 +188,7 @@ public sealed record ClassInfo
         get
         {
             if (string.IsNullOrEmpty(Extends)) return false;
-            var baseName = Extends.Split('<')[0];
+            var baseName = IApiIndex.NormalizeTypeName(Extends);
             return baseName.EndsWith("Error", StringComparison.Ordinal)
                 || baseName.EndsWith("Exception", StringComparison.Ordinal);
         }
@@ -225,14 +225,14 @@ public sealed record ClassInfo
 
         if (!string.IsNullOrEmpty(Extends))
         {
-            var baseName = Extends.Split('<')[0];
+            var baseName = IApiIndex.NormalizeTypeName(Extends);
             if (allTypeNames.Contains(baseName))
                 result.Add(baseName);
         }
 
         foreach (var iface in Implements ?? [])
         {
-            var ifaceName = iface.Split('<')[0];
+            var ifaceName = IApiIndex.NormalizeTypeName(iface);
             if (allTypeNames.Contains(ifaceName))
                 result.Add(ifaceName);
         }
@@ -270,7 +270,7 @@ public sealed record InterfaceInfo
     public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("extends")]
-    public string? Extends { get; init; }
+    public IReadOnlyList<string>? Extends { get; init; }
 
     [JsonPropertyName("typeParams")]
     public string? TypeParams { get; init; }

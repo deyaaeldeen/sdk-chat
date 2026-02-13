@@ -23,6 +23,13 @@ public interface IApiIndex
 
     /// <summary>Gets the names of client/entry-point types that have operations.</summary>
     IEnumerable<string> GetClientTypeNames() => [];
+
+    /// <summary>
+    /// Strips language-specific generic/type-parameter suffixes from a type name to produce
+    /// a canonical form suitable for cross-extractor comparison.
+    /// C# uses <![CDATA[<T>]]>, Python uses [T], Java/Go/TypeScript have no suffix in names.
+    /// </summary>
+    static string NormalizeTypeName(string name) => name.Split('<', '[')[0];
 }
 
 /// <summary>

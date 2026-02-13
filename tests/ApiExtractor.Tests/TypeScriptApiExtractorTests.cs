@@ -78,6 +78,8 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         return _fixture.Api!;
     }
 
+    #region Basic Extraction Tests
+
     [Fact]
     public void Extract_ReturnsApiIndex_WithPackageName()
     {
@@ -162,6 +164,10 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.Contains(functions, f => f.Name == "createDefaultClient" || f.Name == "batchGetResources");
     }
 
+    #endregion
+
+    #region Method Attribute Tests
+
     [Fact]
     public void Extract_FindsAsyncMethods()
     {
@@ -206,6 +212,344 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.DoesNotContain(allMethods, m => m.Name.StartsWith('#'));
     }
 
+    #endregion
+
+    #region Entry Point and Client Detection Tests
+
+    [Fact]
+    public void Extract_SampleClient_IsMarkedAsEntryPoint()
+    {
+        var api = GetApi();
+        var sampleClient = api.GetAllClasses().FirstOrDefault(c => c.Name == "SampleClient");
+        Assert.NotNull(sampleClient);
+        Assert.True(sampleClient.EntryPoint, "SampleClient should be marked as entryPoint");
+    }
+
+    [Fact]
+    public void Extract_SampleClient_IsClientType()
+    {
+        var api = GetApi();
+        var sampleClient = api.GetAllClasses().FirstOrDefault(c => c.Name == "SampleClient");
+        Assert.NotNull(sampleClient);
+        Assert.True(sampleClient.IsClientType, "SampleClient (entryPoint + methods) should be IsClientType");
+    }
+
+    [Fact]
+    public void Extract_WidgetClient_IsAlsoEntryPoint_BecauseExportedFromMainFile()
+    {
+        var api = GetApi();
+        var widgetClient = api.GetAllClasses().FirstOrDefault(c => c.Name == "WidgetClient");
+        Assert.NotNull(widgetClient);
+        // WidgetClient is exported from the same main entry file, so the extractor
+        // marks it as entryPoint=true. Subclient status is a higher-level inference.
+        Assert.True(widgetClient.EntryPoint == true);
+    }
+
+    [Fact]
+    public void Extract_GetClientClasses_ReturnsOnlyEntryPoints()
+    {
+        var api = GetApi();
+        var clients = api.GetClientClasses().ToList();
+        Assert.NotEmpty(clients);
+        Assert.All(clients, c => Assert.True(c.EntryPoint == true && (c.Methods?.Any() ?? false)));
+    }
+
+    [Fact]
+    public void Extract_GetClientTypeNames_IncludesSampleClient()
+    {
+        var api = GetApi();
+        var clientNames = api.GetClientTypeNames().ToList();
+        Assert.Contains("SampleClient", clientNames);
+    }
+
+    #endregion
+
+    #region Model and Error Type Detection Tests
+
+    [Fact]
+    public void ClassInfo_IsModelType_TrueForPropertyOnlyClasses()
+    {
+        var modelClass = new ClassInfo
+        {
+            Name = "TestModel",
+            Properties = [new PropertyInfo { Name = "id", Type = "string" }]
+        };
+        Assert.True(modelClass.IsModelType);
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_FalseForClassesWithMethods()
+    {
+        var clientClass = new ClassInfo
+        {
+            Name = "TestClient",
+            Properties = [new PropertyInfo { Name = "endpoint", Type = "string" }],
+            Methods = [new MethodInfo { Name = "doWork", Sig = "()", Ret = "void" }]
+        };
+        Assert.False(clientClass.IsModelType);
+    }
+
+    [Fact]
+    public void ClassInfo_IsErrorType_DetectsErrorBaseClass()
+    {
+        var errorClass = new ClassInfo { Name = "ServiceError", Extends = "Error" };
+        Assert.True(errorClass.IsErrorType);
+    }
+
+    [Fact]
+    public void ClassInfo_IsErrorType_DetectsExceptionBaseClass()
+    {
+        var exceptionClass = new ClassInfo { Name = "HttpException", Extends = "RestException" };
+        Assert.True(exceptionClass.IsErrorType);
+    }
+
+    [Fact]
+    public void ClassInfo_IsErrorType_FalseForRegularBaseClass()
+    {
+        var normalClass = new ClassInfo { Name = "Widget", Extends = "BaseModel" };
+        Assert.False(normalClass.IsErrorType);
+    }
+
+    [Fact]
+    public void ClassInfo_IsErrorType_FalseWhenNoBase()
+    {
+        var rootClass = new ClassInfo { Name = "SomeClass" };
+        Assert.False(rootClass.IsErrorType);
+    }
+
+    #endregion
+
+    #region TruncationPriority Tests
+
+    [Fact]
+    public void ClassInfo_TruncationPriority_ClientsAreHighest()
+    {
+        var client = new ClassInfo
+        {
+            Name = "TestClient",
+            EntryPoint = true,
+            Methods = [new MethodInfo { Name = "op", Sig = "()", Ret = "void" }]
+        };
+        Assert.Equal(0, client.TruncationPriority);
+    }
+
+    [Fact]
+    public void ClassInfo_TruncationPriority_ErrorsBeforeModels()
+    {
+        var error = new ClassInfo { Name = "SvcError", Extends = "Error" };
+        var model = new ClassInfo
+        {
+            Name = "Dto",
+            Properties = [new PropertyInfo { Name = "x", Type = "string" }]
+        };
+        Assert.True(error.TruncationPriority < model.TruncationPriority);
+    }
+
+    [Fact]
+    public void ClassInfo_TruncationPriority_ModelsBeforeOther()
+    {
+        var model = new ClassInfo
+        {
+            Name = "Dto",
+            Properties = [new PropertyInfo { Name = "x", Type = "string" }]
+        };
+        var other = new ClassInfo { Name = "Helper" };
+        Assert.True(model.TruncationPriority < other.TruncationPriority);
+    }
+
+    [Fact]
+    public void ClassInfo_TruncationPriority_FourLevels_ConsistentWithOtherExtractors()
+    {
+        var client = new ClassInfo
+        {
+            Name = "C",
+            EntryPoint = true,
+            Methods = [new MethodInfo { Name = "op", Sig = "()", Ret = "void" }]
+        };
+        var error = new ClassInfo { Name = "E", Extends = "Error" };
+        var model = new ClassInfo
+        {
+            Name = "M",
+            Properties = [new PropertyInfo { Name = "p", Type = "string" }]
+        };
+        var other = new ClassInfo { Name = "X" };
+
+        Assert.Equal(0, client.TruncationPriority);
+        Assert.Equal(1, error.TruncationPriority);
+        Assert.Equal(2, model.TruncationPriority);
+        Assert.Equal(3, other.TruncationPriority);
+    }
+
+    #endregion
+
+    #region Dependency Graph Tests
+
+    [Fact]
+    public void Extract_BuildDependencyGraph_ReturnsNonEmptyGraph()
+    {
+        var api = GetApi();
+        var graph = api.BuildDependencyGraph();
+        Assert.NotEmpty(graph);
+    }
+
+    [Fact]
+    public void Extract_BuildDependencyGraph_SampleClientReferencesWidgetClient()
+    {
+        var api = GetApi();
+        var graph = api.BuildDependencyGraph();
+
+        // SampleClient has a WidgetClient property, so it should reference WidgetClient
+        Assert.True(graph.ContainsKey("SampleClient"));
+        var deps = graph["SampleClient"];
+        Assert.Contains("WidgetClient", deps);
+    }
+
+    [Fact]
+    public void ClassInfo_CollectReferencedTypes_FindsExtends()
+    {
+        var allTypes = new HashSet<string> { "BaseClient", "ChildClient", "Unrelated" };
+        var cls = new ClassInfo
+        {
+            Name = "ChildClient",
+            Extends = "BaseClient",
+            Methods = [new MethodInfo { Name = "op", Sig = "()", Ret = "void" }]
+        };
+
+        var refs = cls.GetReferencedTypes(allTypes);
+        Assert.Contains("BaseClient", refs);
+        Assert.DoesNotContain("Unrelated", refs);
+    }
+
+    [Fact]
+    public void ClassInfo_CollectReferencedTypes_FindsImplements()
+    {
+        var allTypes = new HashSet<string> { "Disposable", "Serializable", "TestClass" };
+        var cls = new ClassInfo
+        {
+            Name = "TestClass",
+            Implements = ["Disposable", "Serializable"]
+        };
+
+        var refs = cls.GetReferencedTypes(allTypes);
+        Assert.Contains("Disposable", refs);
+        Assert.Contains("Serializable", refs);
+    }
+
+    [Fact]
+    public void ClassInfo_CollectReferencedTypes_FindsMethodSignatureTypes()
+    {
+        var allTypes = new HashSet<string> { "Request", "Response", "TestClient" };
+        var cls = new ClassInfo
+        {
+            Name = "TestClient",
+            Methods = [new MethodInfo { Name = "call", Sig = "(req: Request)", Ret = "Response" }]
+        };
+
+        var refs = cls.GetReferencedTypes(allTypes);
+        Assert.Contains("Request", refs);
+        Assert.Contains("Response", refs);
+    }
+
+    [Fact]
+    public void ClassInfo_CollectReferencedTypes_FindsPropertyTypes()
+    {
+        var allTypes = new HashSet<string> { "Options", "TestClass" };
+        var cls = new ClassInfo
+        {
+            Name = "TestClass",
+            Properties = [new PropertyInfo { Name = "opts", Type = "Options" }]
+        };
+
+        var refs = cls.GetReferencedTypes(allTypes);
+        Assert.Contains("Options", refs);
+    }
+
+    #endregion
+
+    #region GetAllTypeNames Tests
+
+    [Fact]
+    public void Extract_GetAllTypeNames_IncludesClasses()
+    {
+        var api = GetApi();
+        var names = api.GetAllTypeNames().ToList();
+        Assert.Contains("SampleClient", names);
+    }
+
+    [Fact]
+    public void Extract_GetAllTypeNames_IncludesInterfaces()
+    {
+        var api = GetApi();
+        var names = api.GetAllTypeNames().ToList();
+        Assert.Contains("Resource", names);
+    }
+
+    [Fact]
+    public void Extract_GetAllTypeNames_IncludesEnums()
+    {
+        var api = GetApi();
+        var names = api.GetAllTypeNames().ToList();
+        Assert.Contains("ResultStatus", names);
+    }
+
+    #endregion
+
+    #region Formatter Tests
+
+    [Fact]
+    public void Extract_ToStubs_ProducesNonEmptyOutput()
+    {
+        var api = GetApi();
+        var stubs = api.ToStubs();
+        Assert.False(string.IsNullOrWhiteSpace(stubs));
+    }
+
+    [Fact]
+    public void Extract_ToStubs_ContainsClassDeclarations()
+    {
+        var api = GetApi();
+        var stubs = api.ToStubs();
+        Assert.Contains("class SampleClient", stubs);
+    }
+
+    [Fact]
+    public void Extract_ToStubs_ContainsInterfaceDeclarations()
+    {
+        var api = GetApi();
+        var stubs = api.ToStubs();
+        Assert.Contains("interface Resource", stubs);
+    }
+
+    [Fact]
+    public void Extract_ToStubs_ContainsEnumDeclarations()
+    {
+        var api = GetApi();
+        var stubs = api.ToStubs();
+        Assert.Contains("ResultStatus", stubs);
+    }
+
+    #endregion
+
+    #region Serialization Tests
+
+    [Fact]
+    public void Extract_ToJson_ProducesValidJson()
+    {
+        var api = GetApi();
+        var json = api.ToJson();
+        Assert.NotNull(json);
+        var parsed = JsonSerializer.Deserialize<JsonElement>(json);
+        Assert.Equal(JsonValueKind.Object, parsed.ValueKind);
+    }
+
+    [Fact]
+    public void Extract_ToJson_Pretty_ProducesIndentedOutput()
+    {
+        var api = GetApi();
+        var json = api.ToJson(pretty: true);
+        Assert.Contains("\n", json);
+    }
+
     [Fact]
     public void Extract_ProducesSmallerOutputThanSource()
     {
@@ -220,4 +564,6 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.True(json.Length <= maxAllowedSize,
             $"JSON ({json.Length}) should be <= 120% of source ({sourceSize})");
     }
+
+    #endregion
 }

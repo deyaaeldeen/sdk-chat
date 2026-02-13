@@ -63,7 +63,7 @@ public sealed record ApiIndex : IApiIndex
     {
         var graph = new Dictionary<string, HashSet<string>>();
         var allTypes = GetAllTypes().ToList();
-        var allTypeNames = allTypes.Select(c => c.Name.Split('<')[0]).ToHashSet();
+        var allTypeNames = allTypes.Select(c => IApiIndex.NormalizeTypeName(c.Name)).ToHashSet();
         HashSet<string> reusable = [];
 
         foreach (var cls in allTypes)
@@ -196,7 +196,7 @@ public sealed record ClassInfo
         get
         {
             if (string.IsNullOrEmpty(Extends)) return false;
-            var baseName = Extends.Split('<')[0];
+            var baseName = IApiIndex.NormalizeTypeName(Extends);
             // Strip package prefix if present (e.g. "java.lang.Exception" → "Exception")
             var lastDot = baseName.LastIndexOf('.');
             if (lastDot >= 0) baseName = baseName[(lastDot + 1)..];
@@ -237,14 +237,14 @@ public sealed record ClassInfo
 
         if (!string.IsNullOrEmpty(Extends))
         {
-            var baseName = Extends.Split('<')[0];
+            var baseName = IApiIndex.NormalizeTypeName(Extends);
             if (allTypeNames.Contains(baseName))
                 result.Add(baseName);
         }
 
         foreach (var iface in Implements ?? [])
         {
-            var ifaceName = iface.Split('<')[0];
+            var ifaceName = IApiIndex.NormalizeTypeName(iface);
             if (allTypeNames.Contains(ifaceName))
                 result.Add(ifaceName);
         }

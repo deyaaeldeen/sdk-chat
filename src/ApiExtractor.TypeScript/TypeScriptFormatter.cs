@@ -533,7 +533,7 @@ public static class TypeScriptFormatter
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(iface.Doc))
             sb.AppendLine($"/** {iface.Doc} */");
-        var ext = !string.IsNullOrEmpty(iface.Extends) ? $" extends {iface.Extends}" : "";
+        var ext = iface.Extends?.Count > 0 ? $" extends {string.Join(", ", iface.Extends)}" : "";
         var typeParams = !string.IsNullOrEmpty(iface.TypeParams) ? $"<{iface.TypeParams}>" : "";
         var export = exportKeyword ? "export " : "";
         sb.AppendLine($"{export}interface {iface.Name}{typeParams}{ext} {{");

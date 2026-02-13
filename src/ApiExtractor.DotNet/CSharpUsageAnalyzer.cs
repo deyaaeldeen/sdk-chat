@@ -187,7 +187,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     {
         var allTypes = apiIndex.GetAllTypes().ToList();
         var allTypeNames = allTypes
-            .Select(t => t.Name.Split('<')[0])
+            .Select(t => IApiIndex.NormalizeTypeName(t.Name))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Build interface→implementer edges for BFS
@@ -196,20 +196,20 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         {
             foreach (var iface in type.Interfaces ?? [])
             {
-                var ifaceName = iface.Split('<')[0];
+                var ifaceName = IApiIndex.NormalizeTypeName(iface);
                 if (!additionalEdges.TryGetValue(ifaceName, out var list))
                 {
                     list = [];
                     additionalEdges[ifaceName] = list;
                 }
-                list.Add(type.Name.Split('<')[0]);
+                list.Add(IApiIndex.NormalizeTypeName(type.Name));
             }
         }
 
         // Build type nodes for reachability analysis
         var typeNodes = allTypes.Select(t => new ReachabilityAnalyzer.TypeNode
         {
-            Name = t.Name.Split('<')[0],
+            Name = IApiIndex.NormalizeTypeName(t.Name),
             HasOperations = t.Members?.Any(m => m.Kind == "method") ?? false,
             IsExplicitEntryPoint = t.EntryPoint == true,
             IsRootCandidate = t.Kind.Equals("class", StringComparison.OrdinalIgnoreCase)
@@ -221,8 +221,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         var reachable = ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.OrdinalIgnoreCase);
 
         return allTypes
-            .Where(t => reachable.Contains(t.Name.Split('<')[0]) && (t.Members?.Any(m => m.Kind == "method") ?? false))
-            .GroupBy(t => t.Name.Split('<')[0], StringComparer.OrdinalIgnoreCase)
+            .Where(t => reachable.Contains(IApiIndex.NormalizeTypeName(t.Name)) && (t.Members?.Any(m => m.Kind == "method") ?? false))
+            .GroupBy(t => IApiIndex.NormalizeTypeName(t.Name), StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First());
     }
 
@@ -311,7 +311,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             {
                 foreach (var iface in type.Interfaces ?? [])
                 {
-                    var ifaceName = iface.Split('<')[0];
+                    var ifaceName = IApiIndex.NormalizeTypeName(iface);
 
                     if (!interfaceToImpls.TryGetValue(ifaceName, out var impls))
                     {

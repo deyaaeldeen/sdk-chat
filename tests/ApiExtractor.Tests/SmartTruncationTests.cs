@@ -1840,9 +1840,9 @@ public class SmartTruncationTests
             Members = [new MemberInfo { Name = "MaxTokens", Kind = "property", Signature = "int" }]
         };
 
-        // Should be a model type (properties only), priority 3 — not special priority 1
+        // Should be a model type (properties only), priority 2 — not special priority 1
         Assert.True(options.IsModelType);
-        Assert.Equal(3, options.TruncationPriority);
+        Assert.Equal(2, options.TruncationPriority);
     }
 
     [Fact]
@@ -1856,7 +1856,7 @@ public class SmartTruncationTests
         };
 
         Assert.True(settings.IsModelType);
-        Assert.Equal(3, settings.TruncationPriority);
+        Assert.Equal(2, settings.TruncationPriority);
     }
 
     [Fact]

@@ -60,35 +60,13 @@ public sealed record ApiIndex : IApiIndex
     public Dictionary<string, HashSet<string>> BuildDependencyGraph()
     {
         var graph = new Dictionary<string, HashSet<string>>();
-        var allTypeNames = GetAllTypes().Select(t => t.Name.Split('<')[0]).ToHashSet();
+        var allTypeNames = GetAllTypes().Select(t => IApiIndex.NormalizeTypeName(t.Name)).ToHashSet();
+        HashSet<string> reusable = [];
 
         foreach (var type in GetAllTypes())
         {
-            HashSet<string> deps = [];
-
-            // Check base type
-            if (!string.IsNullOrEmpty(type.Base) && allTypeNames.Contains(type.Base.Split('<')[0]))
-                deps.Add(type.Base.Split('<')[0]);
-
-            // Check interfaces
-            foreach (var iface in type.Interfaces ?? [])
-            {
-                var ifaceName = iface.Split('<')[0];
-                if (allTypeNames.Contains(ifaceName))
-                    deps.Add(ifaceName);
-            }
-
-            // Check member signatures for type references using token-boundary matching
-            // (avoids substring false positives like "Policy" matching inside "PolicyList")
-            foreach (var member in type.Members ?? [])
-            {
-                SignatureTokenizer.TokenizeInto(member.Signature, deps);
-            }
-
-            // Keep only references to known types
-            deps.IntersectWith(allTypeNames);
-
-            graph[type.Name] = deps;
+            type.CollectReferencedTypes(allTypeNames, reusable);
+            graph[type.Name] = [.. reusable];
         }
 
         return graph;
@@ -180,6 +158,7 @@ public record TypeInfo
     /// <summary>
     /// Gets the priority for smart truncation.
     /// Lower = more important, include first.
+    /// Aligned across all language extractors: client=0, error=1, model=2, other=3.
     /// </summary>
     [JsonIgnore]
     public int TruncationPriority
@@ -188,9 +167,8 @@ public record TypeInfo
         {
             if (IsClientType) return 0;        // Clients are most important
             if (IsErrorType) return 1;         // Error types for error handling
-            if (Kind == "enum") return 2;      // Enums usually small, include them
-            if (IsModelType) return 3;         // Models are common but secondary
-            return 4;                          // Everything else
+            if (IsModelType) return 2;         // Models are common but secondary
+            return 3;                          // Everything else (enums, delegates, etc.)
         }
     }
 
@@ -214,14 +192,14 @@ public record TypeInfo
 
         if (!string.IsNullOrEmpty(Base))
         {
-            var baseName = Base.Split('<')[0];
+            var baseName = IApiIndex.NormalizeTypeName(Base);
             if (allTypeNames.Contains(baseName))
                 result.Add(baseName);
         }
 
         foreach (var iface in Interfaces ?? [])
         {
-            var ifaceName = iface.Split('<')[0];
+            var ifaceName = IApiIndex.NormalizeTypeName(iface);
             if (allTypeNames.Contains(ifaceName))
                 result.Add(ifaceName);
         }

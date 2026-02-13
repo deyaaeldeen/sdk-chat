@@ -69,7 +69,7 @@ export interface InterfaceInfo {
     entryPoint?: boolean;
     exportPath?: string;  // The subpath to import from (e.g., "." or "./client")
     reExportedFrom?: string;  // External package this is re-exported from
-    extends?: string;
+    extends?: string[];
     typeParams?: string;
     doc?: string;
     methods?: MethodInfo[];
@@ -708,7 +708,7 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
 
     // Extends
     const ext = iface.getExtends().map((e) => e.getText());
-    if (ext.length) result.extends = ext.join(", ");
+    if (ext.length) result.extends = ext;
 
     // Type parameters
     const typeParams = iface.getTypeParameters().map((t) => t.getText());
@@ -1492,7 +1492,7 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
             if (!resolved) continue;
 
             const type = resolved.type;
-            if ("constructors" in type || "methods" in type && "properties" in type && !("extends" in type && typeof (type as InterfaceInfo).extends === "string")) {
+            if ("constructors" in type || "methods" in type && "properties" in type && !("extends" in type && Array.isArray((type as InterfaceInfo).extends))) {
                 // Distinguish class from interface by presence of constructors
                 if ("constructors" in type) {
                     classes.push(type as ClassInfo);
@@ -1563,7 +1563,7 @@ export function formatStubs(api: ApiIndex): string {
         // Interfaces
         for (const iface of module.interfaces || []) {
             if (iface.doc) lines.push(`/** ${iface.doc} */`);
-            const ext = iface.extends ? ` extends ${iface.extends}` : "";
+            const ext = iface.extends?.length ? ` extends ${iface.extends.join(", ")}` : "";
             const typeParams = iface.typeParams ? `<${iface.typeParams}>` : "";
             lines.push(`export interface ${iface.name}${typeParams}${ext} {`);
 
@@ -1632,7 +1632,7 @@ export function formatStubs(api: ApiIndex): string {
             // Interfaces
             for (const iface of dep.interfaces || []) {
                 if (iface.doc) lines.push(`/** ${iface.doc} */`);
-                const ext = iface.extends ? ` extends ${iface.extends}` : "";
+                const ext = iface.extends?.length ? ` extends ${iface.extends.join(", ")}` : "";
                 const typeParams = iface.typeParams ? `<${iface.typeParams}>` : "";
                 lines.push(`interface ${iface.name}${typeParams}${ext} {`);
 
@@ -2489,8 +2489,7 @@ function getReferencedTypesForInterface(iface: InterfaceInfo, allTypeNames: Set<
     const refs = new Set<string>();
 
     if (iface.extends) {
-        const bases = iface.extends.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-        for (const entry of bases) {
+        for (const entry of iface.extends) {
             const baseName = entry.split("<")[0];
             if (allTypeNames.has(baseName)) {
                 refs.add(baseName);

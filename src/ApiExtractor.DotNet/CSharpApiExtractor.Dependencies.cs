@@ -5,6 +5,7 @@ using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Xml;
 using System.Xml.Linq;
+using ApiExtractor.Contracts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -83,11 +84,11 @@ public partial class CSharpApiExtractor
         foreach (var ns in namespaces)
             foreach (var type in ns.Types)
             {
-                definedTypes.Add(type.Name.Split('<')[0]);
+                definedTypes.Add(IApiIndex.NormalizeTypeName(type.Name));
                 // Also add fully qualified name
                 if (!string.IsNullOrEmpty(ns.Name))
                 {
-                    definedTypes.Add($"{ns.Name}.{type.Name.Split('<')[0]}");
+                    definedTypes.Add($"{ns.Name}.{IApiIndex.NormalizeTypeName(type.Name)}");
                 }
             }
 
@@ -277,7 +278,7 @@ public partial class CSharpApiExtractor
 
         // Get the type name
         var typeName = typeSymbol.Name;
-        var fullName = typeSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat).Split('<')[0];
+        var fullName = IApiIndex.NormalizeTypeName(typeSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
 
         // Skip if it's a locally defined type
         if (definedTypes.Contains(typeName) || definedTypes.Contains(fullName)) return;

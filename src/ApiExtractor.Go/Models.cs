@@ -208,7 +208,7 @@ public sealed record StructApi
 
         foreach (var embed in Embeds ?? [])
         {
-            var embedName = embed.Split('<')[0].TrimStart('*');
+            var embedName = IApiIndex.NormalizeTypeName(embed).TrimStart('*');
             if (allTypeNames.Contains(embedName))
                 result.Add(embedName);
         }

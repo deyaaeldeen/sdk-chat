@@ -31,10 +31,10 @@ public static class JavaFormatter
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
 
         // Build set of all type names for dependency tracking
-        var allTypeNames = allClasses.Select(c => c.Name.Split('<')[0]).ToHashSet();
+        var allTypeNames = allClasses.Select(c => IApiIndex.NormalizeTypeName(c.Name)).ToHashSet();
         var allClassesByName = new Dictionary<string, ClassInfo>();
         foreach (var c in allClasses)
-            allClassesByName.TryAdd(c.Name.Split('<')[0], c);
+            allClassesByName.TryAdd(IApiIndex.NormalizeTypeName(c.Name), c);
 
         HashSet<string> includedClasses = [];
         HashSet<string> reusableDeps = [];
@@ -145,12 +145,12 @@ public static class JavaFormatter
 
         // Build type lookup
         var allClasses = api.GetAllTypes().ToList();
-        var allTypeNames = allClasses.Select(c => c.Name.Split('<')[0]).ToHashSet();
+        var allTypeNames = allClasses.Select(c => IApiIndex.NormalizeTypeName(c.Name)).ToHashSet();
 
         // Pre-build dictionary for O(1) lookups — first-wins for duplicate names
         var classesByName = new Dictionary<string, ClassInfo>();
         foreach (var c in allClasses)
-            classesByName.TryAdd(c.Name.Split('<')[0], c);
+            classesByName.TryAdd(IApiIndex.NormalizeTypeName(c.Name), c);
 
         // Get client dependencies first
         var clients = allClasses.Where(c => c.IsClientType).ToList();

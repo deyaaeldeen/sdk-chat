@@ -32,7 +32,7 @@ public static class CSharpFormatter
 
         // Format only types that have uncovered operations
         var allTypes = index.GetAllTypes().ToList();
-        var allTypeNames = allTypes.Select(t => t.Name.Split('<')[0]).ToHashSet();
+        var allTypeNames = allTypes.Select(t => IApiIndex.NormalizeTypeName(t.Name)).ToHashSet();
         var nsMap = BuildNamespaceMap(index);
 
         // Find types with uncovered operations and their dependencies
@@ -113,7 +113,7 @@ public static class CSharpFormatter
 
         // Build type lookup and dependency graph
         var allTypes = index.GetAllTypes().ToList();
-        var allTypeNames = allTypes.Select(t => t.Name.Split('<')[0]).ToHashSet();
+        var allTypeNames = allTypes.Select(t => IApiIndex.NormalizeTypeName(t.Name)).ToHashSet();
 
         // Handle potential duplicate type names (same name in different namespaces)
         var typesByName = new Dictionary<string, TypeInfo>();

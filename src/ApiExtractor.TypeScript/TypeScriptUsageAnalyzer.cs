@@ -89,12 +89,12 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             out var classesByName,
             out var interfacesByName);
 
-        if (classesByName.Values.Any(c => reachable.Contains(c.Name.Split('<')[0]) && (c.Methods?.Any() ?? false)))
+        if (classesByName.Values.Any(c => reachable.Contains(IApiIndex.NormalizeTypeName(c.Name)) && (c.Methods?.Any() ?? false)))
         {
             return true;
         }
 
-        return interfacesByName.Values.Any(i => reachable.Contains(i.Name.Split('<')[0]) && (i.Methods?.Any() ?? false));
+        return interfacesByName.Values.Any(i => reachable.Contains(IApiIndex.NormalizeTypeName(i.Name)) && (i.Methods?.Any() ?? false));
     }
 
     private static HashSet<string> GetReachableTypeNames(
@@ -105,37 +105,37 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         var allClasses = apiIndex.GetAllClasses().ToList();
         var allInterfaces = apiIndex.Modules.SelectMany(m => m.Interfaces ?? []).ToList();
 
-        classesByName = new Dictionary<string, ClassInfo>(StringComparer.OrdinalIgnoreCase);
+        classesByName = new Dictionary<string, ClassInfo>(StringComparer.Ordinal);
         foreach (var cls in allClasses)
         {
-            var name = cls.Name.Split('<')[0];
+            var name = IApiIndex.NormalizeTypeName(cls.Name);
             classesByName.TryAdd(name, cls);
         }
 
-        interfacesByName = new Dictionary<string, InterfaceInfo>(StringComparer.OrdinalIgnoreCase);
+        interfacesByName = new Dictionary<string, InterfaceInfo>(StringComparer.Ordinal);
         foreach (var iface in allInterfaces)
         {
-            var name = iface.Name.Split('<')[0];
+            var name = IApiIndex.NormalizeTypeName(iface.Name);
             interfacesByName.TryAdd(name, iface);
         }
 
         var allTypeNames = classesByName.Keys
             .Concat(interfacesByName.Keys)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(StringComparer.Ordinal);
 
         // Build interface→implementer edges for BFS
-        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var cls in allClasses)
         {
             foreach (var iface in cls.Implements ?? [])
             {
-                var ifaceName = iface.Split('<')[0];
+                var ifaceName = IApiIndex.NormalizeTypeName(iface);
                 if (!additionalEdges.TryGetValue(ifaceName, out var list))
                 {
                     list = [];
                     additionalEdges[ifaceName] = list;
                 }
-                list.Add(cls.Name.Split('<')[0]);
+                list.Add(IApiIndex.NormalizeTypeName(cls.Name));
             }
         }
 
@@ -144,7 +144,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
         foreach (var cls in allClasses)
         {
-            var name = cls.Name.Split('<')[0];
+            var name = IApiIndex.NormalizeTypeName(cls.Name);
             typeNodes.Add(new ReachabilityAnalyzer.TypeNode
             {
                 Name = name,
@@ -157,7 +157,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
         foreach (var iface in allInterfaces)
         {
-            var name = iface.Name.Split('<')[0];
+            var name = IApiIndex.NormalizeTypeName(iface.Name);
             typeNodes.Add(new ReachabilityAnalyzer.TypeNode
             {
                 Name = name,
@@ -168,23 +168,19 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             });
         }
 
-        return ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.OrdinalIgnoreCase);
+        return ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.Ordinal);
     }
 
     private static HashSet<string> GetReferencedTypes(InterfaceInfo iface, HashSet<string> allTypeNames)
     {
         HashSet<string> tokens = [];
 
-        if (!string.IsNullOrEmpty(iface.Extends))
+        foreach (var baseEntry in iface.Extends ?? [])
         {
-            var bases = iface.Extends.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var baseEntry in bases)
+            var baseName = IApiIndex.NormalizeTypeName(baseEntry);
+            if (allTypeNames.Contains(baseName))
             {
-                var baseName = baseEntry.Trim().Split('<')[0];
-                if (allTypeNames.Contains(baseName))
-                {
-                    tokens.Add(baseName);
-                }
+                tokens.Add(baseName);
             }
         }
 

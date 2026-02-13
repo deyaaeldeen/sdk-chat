@@ -122,7 +122,7 @@ public sealed record ClassInfo
         get
         {
             if (string.IsNullOrEmpty(Base)) return false;
-            var baseName = Base.Split('[')[0];
+            var baseName = IApiIndex.NormalizeTypeName(Base);
             // Strip module prefix if present (e.g. "builtins.Exception" → "Exception")
             if (baseName.Contains('.'))
                 baseName = baseName[(baseName.LastIndexOf('.') + 1)..];
@@ -164,7 +164,7 @@ public sealed record ClassInfo
 
         if (!string.IsNullOrEmpty(Base))
         {
-            var baseName = Base.Split('[')[0];
+            var baseName = IApiIndex.NormalizeTypeName(Base);
             if (allTypeNames.Contains(baseName))
                 result.Add(baseName);
         }

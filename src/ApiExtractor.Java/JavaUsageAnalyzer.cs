@@ -93,45 +93,45 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             .ToList();
 
         var allTypeNames = allClasses
-            .Select(c => c.Name.Split('<')[0])
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(c => IApiIndex.NormalizeTypeName(c.Name))
+            .ToHashSet(StringComparer.Ordinal);
 
         var interfaceNames = apiIndex.Packages
             .SelectMany(p => p.Interfaces ?? [])
-            .Select(i => i.Name.Split('<')[0])
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(i => IApiIndex.NormalizeTypeName(i.Name))
+            .ToHashSet(StringComparer.Ordinal);
 
         // Build interface→implementer edges for BFS
-        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var additionalEdges = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var cls in allClasses)
         {
             foreach (var iface in cls.Implements ?? [])
             {
-                var ifaceName = iface.Split('<')[0];
+                var ifaceName = IApiIndex.NormalizeTypeName(iface);
                 if (!additionalEdges.TryGetValue(ifaceName, out var list))
                 {
                     list = [];
                     additionalEdges[ifaceName] = list;
                 }
-                list.Add(cls.Name.Split('<')[0]);
+                list.Add(IApiIndex.NormalizeTypeName(cls.Name));
             }
         }
 
         // Build type nodes for reachability analysis
         var typeNodes = allClasses.Select(c => new ReachabilityAnalyzer.TypeNode
         {
-            Name = c.Name.Split('<')[0],
+            Name = IApiIndex.NormalizeTypeName(c.Name),
             HasOperations = c.Methods?.Any() ?? false,
             IsExplicitEntryPoint = c.EntryPoint == true,
-            IsRootCandidate = !interfaceNames.Contains(c.Name.Split('<')[0]),
+            IsRootCandidate = !interfaceNames.Contains(IApiIndex.NormalizeTypeName(c.Name)),
             ReferencedTypes = c.GetReferencedTypes(allTypeNames)
         }).ToList();
 
-        var reachable = ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.OrdinalIgnoreCase);
+        var reachable = ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.Ordinal);
 
         return allClasses
-            .Where(c => reachable.Contains(c.Name.Split('<')[0]) && (c.Methods?.Any() ?? false))
-            .GroupBy(c => c.Name.Split('<')[0], StringComparer.OrdinalIgnoreCase)
+            .Where(c => reachable.Contains(IApiIndex.NormalizeTypeName(c.Name)) && (c.Methods?.Any() ?? false))
+            .GroupBy(c => IApiIndex.NormalizeTypeName(c.Name), StringComparer.Ordinal)
             .Select(g => g.First())
             .ToList();
     }

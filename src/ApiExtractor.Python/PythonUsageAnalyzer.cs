@@ -90,7 +90,7 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
     {
         var allClasses = apiIndex.GetAllClasses().ToList();
         var allTypeNames = allClasses
-            .Select(c => c.Name.Split('[')[0])
+            .Select(c => IApiIndex.NormalizeTypeName(c.Name))
             .ToHashSet(StringComparer.Ordinal);
 
         // Build base→derived edges for BFS (Python uses inheritance, not interfaces)
@@ -100,29 +100,32 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             if (string.IsNullOrWhiteSpace(cls.Base))
                 continue;
 
-            var baseName = cls.Base.Split('[')[0];
+            var baseName = IApiIndex.NormalizeTypeName(cls.Base);
             if (!additionalEdges.TryGetValue(baseName, out var list))
             {
                 list = [];
                 additionalEdges[baseName] = list;
             }
-            list.Add(cls.Name.Split('[')[0]);
+            list.Add(IApiIndex.NormalizeTypeName(cls.Name));
         }
 
         // Build type nodes for reachability analysis
+        // Abstract base classes (ABC/ABCMeta) and Protocols are not root candidates,
+        // mirroring how interfaces are excluded in Java/TypeScript/Go.
         var typeNodes = allClasses.Select(c => new ReachabilityAnalyzer.TypeNode
         {
-            Name = c.Name.Split('[')[0],
+            Name = IApiIndex.NormalizeTypeName(c.Name),
             HasOperations = c.Methods?.Any() ?? false,
             IsExplicitEntryPoint = c.EntryPoint == true,
+            IsRootCandidate = !IsAbstractOrProtocolType(c),
             ReferencedTypes = c.GetReferencedTypes(allTypeNames)
         }).ToList();
 
         var reachable = ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.Ordinal);
 
         return allClasses
-            .Where(c => reachable.Contains(c.Name.Split('[')[0]) && (c.Methods?.Any() ?? false))
-            .GroupBy(c => c.Name.Split('[')[0], StringComparer.Ordinal)
+            .Where(c => reachable.Contains(IApiIndex.NormalizeTypeName(c.Name)) && (c.Methods?.Any() ?? false))
+            .GroupBy(c => IApiIndex.NormalizeTypeName(c.Name), StringComparer.Ordinal)
             .Select(g => g.First())
             .ToList();
     }
@@ -138,5 +141,23 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             foreach (var method in cls.Methods ?? [])
                 lookup.TryAdd($"{cls.Name}.{method.Name}", $"{method.Name}({method.Signature})");
         return lookup;
+    }
+
+    /// <summary>
+    /// Detects abstract base classes and protocol types that should not be root candidates
+    /// in reachability analysis. Mirrors how Java/TypeScript/Go exclude interfaces.
+    /// </summary>
+    private static bool IsAbstractOrProtocolType(ClassInfo cls)
+    {
+        if (string.IsNullOrEmpty(cls.Base))
+            return false;
+
+        var baseName = IApiIndex.NormalizeTypeName(cls.Base);
+
+        // Strip module prefix (e.g. "abc.ABC" → "ABC", "typing.Protocol" → "Protocol")
+        if (baseName.Contains('.'))
+            baseName = baseName[(baseName.LastIndexOf('.') + 1)..];
+
+        return baseName is "ABC" or "ABCMeta" or "Protocol";
     }
 }
