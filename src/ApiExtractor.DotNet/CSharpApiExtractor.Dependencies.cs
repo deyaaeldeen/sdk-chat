@@ -68,14 +68,14 @@ public partial class CSharpApiExtractor
 
     /// <summary>
     /// Resolves transitive dependencies using Roslyn semantic analysis.
-    /// Creates a compilation with NuGet package references to properly resolve external types.
+    /// Uses a pre-created compilation with NuGet package references.
     /// </summary>
     private static IReadOnlyList<DependencyInfo>? ResolveTransitiveDependencies(
-        string rootPath,
-        IReadOnlyList<SyntaxTree> syntaxTrees,
+        CSharpCompilation compilation,
         IReadOnlyList<NamespaceInfo> namespaces,
         CancellationToken ct)
     {
+        var syntaxTrees = compilation.SyntaxTrees.ToList();
         if (syntaxTrees.Count == 0) return null;
 
         // Collect all defined type names (to exclude from dependencies)
@@ -90,20 +90,6 @@ public partial class CSharpApiExtractor
                     definedTypes.Add($"{ns.Name}.{type.Name.Split('<')[0]}");
                 }
             }
-
-        // Load metadata references from NuGet packages
-        var references = LoadMetadataReferences(rootPath);
-
-        // Cache references for the usage analyzer to reuse
-        s_cachedMetadataReferences = references;
-
-        // Create compilation with all syntax trees and references
-        var compilation = CSharpCompilation.Create(
-            "ApiExtraction",
-            syntaxTrees,
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
-                .WithNullableContextOptions(NullableContextOptions.Enable));
 
         // Collect external type symbols from all public API surfaces
         var externalTypes = new Dictionary<string, (ITypeSymbol Symbol, string AssemblyName)>(StringComparer.Ordinal);

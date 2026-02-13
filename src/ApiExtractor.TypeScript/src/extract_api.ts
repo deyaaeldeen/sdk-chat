@@ -146,71 +146,6 @@ const BUILTIN_PATH_PATTERNS = [
 ];
 
 /**
- * Well-known builtin type names that are part of TypeScript/JavaScript/DOM.
- * This is a fallback when type resolution isn't possible.
- * Generated from TypeScript lib files - covers ES5 through ESNext and DOM.
- */
-const WELL_KNOWN_BUILTINS = new Set([
-    // ES fundamentals
-    "Array", "ArrayBuffer", "ArrayBufferConstructor", "ArrayBufferLike", "ArrayBufferTypes",
-    "ArrayConstructor", "ArrayLike", "AsyncGenerator", "AsyncGeneratorFunction", "AsyncGeneratorFunctionConstructor",
-    "AsyncIterable", "AsyncIterableIterator", "AsyncIterator", "Atomics",
-    "BigInt", "BigInt64Array", "BigInt64ArrayConstructor", "BigIntConstructor", "BigIntToLocaleStringOptions",
-    "BigUint64Array", "BigUint64ArrayConstructor", "Boolean", "BooleanConstructor",
-    "CallableFunction", "ConcatArray", "Console", "DataView", "DataViewConstructor", "Date", "DateConstructor",
-    "Error", "ErrorConstructor", "EvalError", "EvalErrorConstructor",
-    "Float32Array", "Float32ArrayConstructor", "Float64Array", "Float64ArrayConstructor",
-    "Function", "FunctionConstructor", "Generator", "GeneratorFunction", "GeneratorFunctionConstructor",
-    "IArguments", "ImportMeta", "Int8Array", "Int8ArrayConstructor", "Int16Array", "Int16ArrayConstructor",
-    "Int32Array", "Int32ArrayConstructor", "Intl", "IterableIterator", "Iterator", "IteratorResult", "IteratorYieldResult", "IteratorReturnResult",
-    "JSON", "Map", "MapConstructor", "Math", "MethodDecorator",
-    "NewableFunction", "Number", "NumberConstructor", "Object", "ObjectConstructor",
-    "Parameters", "ConstructorParameters", "ReturnType", "InstanceType", "OmitThisParameter", "ThisParameterType", "ThisType",
-    "Partial", "Required", "Readonly", "Pick", "Omit", "Record", "Exclude", "Extract", "NonNullable", "Awaited",
-    "Uppercase", "Lowercase", "Capitalize", "Uncapitalize", "NoInfer",
-    "Promise", "PromiseConstructor", "PromiseLike", "PromiseFulfilledResult", "PromiseRejectedResult", "PromiseSettledResult",
-    "PropertyDecorator", "PropertyDescriptor", "PropertyDescriptorMap", "PropertyKey",
-    "ProxyHandler", "Proxy", "ProxyConstructor",
-    "RangeError", "RangeErrorConstructor", "ReferenceError", "ReferenceErrorConstructor",
-    "Reflect", "RegExp", "RegExpConstructor", "RegExpMatchArray", "RegExpExecArray",
-    "Set", "SetConstructor", "SharedArrayBuffer", "SharedArrayBufferConstructor",
-    "String", "StringConstructor", "Symbol", "SymbolConstructor",
-    "SyntaxError", "SyntaxErrorConstructor", "TemplateStringsArray",
-    "TypedPropertyDescriptor", "TypeError", "TypeErrorConstructor",
-    "Uint8Array", "Uint8ArrayConstructor", "Uint8ClampedArray", "Uint8ClampedArrayConstructor",
-    "Uint16Array", "Uint16ArrayConstructor", "Uint32Array", "Uint32ArrayConstructor",
-    "URIError", "URIErrorConstructor", "WeakMap", "WeakMapConstructor", "WeakSet", "WeakSetConstructor", "WeakRef", "WeakRefConstructor",
-    "FinalizationRegistry", "FinalizationRegistryConstructor",
-    // DOM types (commonly used)
-    "Blob", "BlobPropertyBag", "File", "FileList", "FileReader", "FileReaderSync",
-    "FormData", "FormDataEntryValue", "Headers", "HeadersInit",
-    "Request", "RequestInit", "RequestInfo", "Response", "ResponseInit", "ResponseType",
-    "URL", "URLSearchParams", "URLSearchParamsInit",
-    "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamBYOBReader",
-    "WritableStream", "WritableStreamDefaultWriter", "TransformStream",
-    "AbortController", "AbortSignal",
-    "EventTarget", "Event", "CustomEvent", "CustomEventInit", "EventInit", "EventListener", "EventListenerOrEventListenerObject",
-    "MessageEvent", "MessageEventInit", "MessagePort", "MessageChannel",
-    "Worker", "WorkerGlobalScope", "DedicatedWorkerGlobalScope", "SharedWorker", "SharedWorkerGlobalScope",
-    "Crypto", "SubtleCrypto", "CryptoKey", "CryptoKeyPair",
-    "TextDecoder", "TextEncoder", "TextDecoderStream", "TextEncoderStream",
-    "WebSocket", "CloseEvent", "WebSocketEventMap",
-    "Storage", "StorageEvent", "IDBDatabase", "IDBTransaction", "IDBObjectStore", "IDBRequest",
-    "Document", "Element", "HTMLElement", "Node", "NodeList", "HTMLCollection",
-    "Window", "WindowOrWorkerGlobalScope", "Navigator", "Location", "History",
-    "Performance", "PerformanceEntry", "PerformanceMark", "PerformanceMeasure",
-    "Console", "Timer", "Timeout", "Interval",
-    // Node.js built-ins (from @types/node)
-    "Buffer", "BufferEncoding", "NodeJS", "EventEmitter",
-    "Stream", "Readable", "Writable", "Duplex", "Transform", "PassThrough",
-    "ChildProcess", "Cluster", "Worker",
-    "IncomingMessage", "ServerResponse", "ClientRequest", "Agent",
-    "Socket", "Server", "TLSSocket",
-    "Stats", "Dirent", "ReadStream", "WriteStream",
-    "Process", "Global",
-]);
-
-/**
  * Primitive type names that are always builtins (not resolvable to declarations).
  */
 const PRIMITIVE_TYPES = new Set([
@@ -219,9 +154,13 @@ const PRIMITIVE_TYPES = new Set([
 ]);
 
 /**
- * Cache for builtin type checks to avoid repeated resolution.
+ * Builtin type names discovered dynamically from the TypeScript project's
+ * lib files (lib.es*.d.ts, lib.dom.d.ts) and @types/node declarations.
+ * Populated at extraction time by scanning source files that match
+ * BUILTIN_PATH_PATTERNS, ensuring the set stays current with the
+ * TypeScript and @types/node versions installed in the target project.
  */
-const builtinTypeCache = new Map<string, boolean>();
+let discoveredBuiltins = new Set<string>();
 
 /**
  * Project instance for type resolution (set during extraction).
@@ -229,82 +168,75 @@ const builtinTypeCache = new Map<string, boolean>();
 let typeResolutionProject: Project | null = null;
 
 /**
- * Sets the project to use for type resolution.
+ * Sets the project to use for type resolution and discovers all builtin
+ * type names from TypeScript lib files and @types/node declarations.
+ *
+ * Scans source files matching BUILTIN_PATH_PATTERNS and collects all
+ * interface, class, type alias, and enum names. This replaces the previous
+ * static WELL_KNOWN_BUILTINS set with version-aware runtime discovery,
+ * similar to how the Java extractor uses ModuleLayer.boot() and the
+ * Python extractor uses sys.stdlib_module_names.
  */
 function setTypeResolutionProject(project: Project): void {
     typeResolutionProject = project;
-    builtinTypeCache.clear();
+    discoveredBuiltins = discoverBuiltinTypes(project);
 }
 
 /**
- * Checks if a type name is a builtin using TypeScript's type resolution.
+ * Scans all source files from TypeScript lib and @types/node to collect
+ * every declared interface, class, type alias, enum, and variable name.
+ */
+function discoverBuiltinTypes(project: Project): Set<string> {
+    const builtins = new Set<string>();
+
+    const builtinFiles = project.getSourceFiles()
+        .filter(sf => BUILTIN_PATH_PATTERNS.some(p => sf.getFilePath().includes(p)));
+
+    for (const sourceFile of builtinFiles) {
+        try {
+            for (const iface of sourceFile.getInterfaces()) {
+                builtins.add(iface.getName());
+            }
+            for (const cls of sourceFile.getClasses()) {
+                const name = cls.getName();
+                if (name) builtins.add(name);
+            }
+            for (const alias of sourceFile.getTypeAliases()) {
+                builtins.add(alias.getName());
+            }
+            for (const enumDecl of sourceFile.getEnums()) {
+                builtins.add(enumDecl.getName());
+            }
+            // Also collect variable declarations (e.g., "declare var console: Console")
+            // which define global objects like JSON, Math, Reflect, Atomics, Intl
+            for (const varStmt of sourceFile.getVariableStatements()) {
+                for (const decl of varStmt.getDeclarations()) {
+                    builtins.add(decl.getName());
+                }
+            }
+        } catch {
+            // Skip files that fail to parse (non-fatal)
+        }
+    }
+
+    return builtins;
+}
+
+/**
+ * Checks if a type name is a builtin using dynamically discovered type names.
  * Builtins are types defined in TypeScript's lib files or @types/node.
  */
 function isBuiltinType(typeName: string): boolean {
     // Strip generic parameters
     const baseName = typeName.split("<")[0].trim();
 
-    // Check primitives first (not resolvable)
+    // Check primitives first (not resolvable to declarations)
     if (PRIMITIVE_TYPES.has(baseName)) {
         return true;
     }
 
-    // Check well-known builtins (fast path)
-    if (WELL_KNOWN_BUILTINS.has(baseName)) {
-        return true;
-    }
-
-    // Check cache
-    if (builtinTypeCache.has(baseName)) {
-        return builtinTypeCache.get(baseName)!;
-    }
-
-    // If no project available, assume not builtin (let it be resolved)
-    if (!typeResolutionProject) {
-        builtinTypeCache.set(baseName, false);
-        return false;
-    }
-
-    // Try to resolve the type using the project's type checker
-    // Uses getSourceFile() lookups instead of iterating all source files
-    try {
-        // Use the language service to find the symbol declaration
-        const checker = typeResolutionProject.getTypeChecker();
-        // Search through source files that match builtin path patterns first
-        const builtinFiles = typeResolutionProject.getSourceFiles()
-            .filter(sf => BUILTIN_PATH_PATTERNS.some(p => sf.getFilePath().includes(p)));
-
-        for (const sourceFile of builtinFiles) {
-            const found = sourceFile.getInterface(baseName)
-                ?? sourceFile.getClass(baseName)
-                ?? sourceFile.getTypeAlias(baseName)
-                ?? sourceFile.getEnum(baseName);
-            if (found) {
-                builtinTypeCache.set(baseName, true);
-                return true;
-            }
-        }
-
-        // Check non-builtin files to confirm it's NOT a builtin
-        const nonBuiltinFiles = typeResolutionProject.getSourceFiles()
-            .filter(sf => !BUILTIN_PATH_PATTERNS.some(p => sf.getFilePath().includes(p)));
-
-        for (const sourceFile of nonBuiltinFiles) {
-            const found = sourceFile.getInterface(baseName)
-                ?? sourceFile.getClass(baseName)
-                ?? sourceFile.getTypeAlias(baseName)
-                ?? sourceFile.getEnum(baseName);
-            if (found) {
-                builtinTypeCache.set(baseName, false);
-                return false;
-            }
-        }
-    } catch {
-        // If resolution fails, assume not builtin
-    }
-
-    builtinTypeCache.set(baseName, false);
-    return false;
+    // Check against dynamically discovered builtins from lib files / @types/node
+    return discoveredBuiltins.has(baseName);
 }
 
 // ============================================================================
@@ -1211,7 +1143,7 @@ export function extractPackage(rootPath: string): ApiIndex {
         },
     });
 
-    // Set project for type resolution (used by isBuiltinType and type collector)
+    // Set project for type resolution and discover builtin types from lib files
     setTypeResolutionProject(project);
     typeCollector.setProject(project);
     typeCollector.clear();

@@ -885,10 +885,12 @@ public class GetReferencedTypesIntegrationTests : IDisposable
         };
 
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "sample.cs"), """
+            using TestSdk;
+            using System.IO;
             var client = new StorageClient();
             client.GetInfo();
             var blob = client.Blobs;
-            blob.Upload();
+            blob.Upload(null);
             // Download not called
             """);
 

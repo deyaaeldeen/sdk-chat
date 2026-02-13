@@ -38,10 +38,8 @@ def _build_builtins_set() -> frozenset[str]:
     (e.g. ExceptionGroup in 3.11, TaskGroup in 3.11, etc.)
     without manual maintenance.
 
-    Supplements with a small static set for names exported from
-    stdlib modules whose public names aren't discoverable via
-    simple dir()/`__all__` introspection (e.g. collections.abc,
-    contextlib decorators, functools helpers).
+    Dynamically imports all stdlib modules and collects their
+    exported names, so no static supplement is needed.
     """
     names: set[str] = set()
 
@@ -69,47 +67,37 @@ def _build_builtins_set() -> frozenset[str]:
     import abc
     names.update(["ABC", "ABCMeta", "abstractmethod"])
 
-    # 5. Static supplement for stdlib names that are used as type annotations
-    #    but aren't discoverable from the modules above.  These are stable
-    #    across Python versions and rarely change.
-    _STDLIB_ANNOTATION_NAMES = {
-        # contextlib
-        "contextmanager", "asynccontextmanager", "closing", "suppress",
-        "redirect_stdout", "redirect_stderr", "ExitStack", "AsyncExitStack",
-        "nullcontext", "aclosing",
-        # functools
-        "partial", "partialmethod", "reduce", "wraps", "update_wrapper",
-        "total_ordering", "cmp_to_key", "lru_cache", "cached_property",
-        "singledispatch",
-        # io
-        "IOBase", "RawIOBase", "BufferedIOBase", "TextIOBase",
-        "FileIO", "BytesIO", "StringIO", "BufferedReader", "BufferedWriter",
-        "BufferedRandom", "BufferedRWPair", "TextIOWrapper",
-        # pathlib
-        "Path", "PurePath", "PurePosixPath", "PureWindowsPath",
-        "PosixPath", "WindowsPath",
-        # datetime
-        "date", "time", "datetime", "timedelta", "timezone", "tzinfo",
-        # uuid
-        "UUID",
-        # decimal / fractions
-        "Decimal", "Fraction",
-        # enum
-        "Enum", "IntEnum", "Flag", "IntFlag", "auto", "unique", "StrEnum",
-        # dataclasses
-        "dataclass", "field",
-        # json
-        "JSONEncoder", "JSONDecoder", "JSONDecodeError",
-        # logging
-        "Logger", "Handler", "Formatter", "Filter", "LogRecord",
-        # concurrent.futures
-        "Future", "Executor", "ThreadPoolExecutor", "ProcessPoolExecutor",
-        # asyncio
-        "Task", "Event", "Lock", "Semaphore", "BoundedSemaphore",
-        "Condition", "Queue", "LifoQueue", "PriorityQueue",
-        "StreamReader", "StreamWriter",
-    }
-    names.update(_STDLIB_ANNOTATION_NAMES)
+    # 5. Dynamic introspection of all stdlib modules.
+    #    Imports each module in sys.stdlib_module_names and collects
+    #    exported names (from __all__ or public uppercase names).
+    #    Skips modules that are known to have side effects on import.
+    #    Redirects stdout to suppress any output from noisy modules.
+    import sys
+    import io
+    _SKIP_MODULES = frozenset({
+        "antigravity", "turtle", "turtledemo", "tkinter", "idlelib",
+        "test", "ensurepip", "venv", "_thread", "readline", "this",
+    })
+    for mod_name in sys.stdlib_module_names:
+        if mod_name.startswith("_") or mod_name in _SKIP_MODULES:
+            continue
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            mod = __import__(mod_name, fromlist=["__name__"])
+            exported = getattr(mod, "__all__", None)
+            if exported is not None:
+                names.update(exported)
+            else:
+                names.update(
+                    name for name in dir(mod)
+                    if not name.startswith("_")
+                )
+        except Exception:
+            # Module may not be importable (platform-specific, etc.)
+            pass
+        finally:
+            sys.stdout = old_stdout
 
     return frozenset(names)
 

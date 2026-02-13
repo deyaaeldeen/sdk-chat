@@ -204,8 +204,10 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
     }
 
     [Fact]
-    public void ClassInfo_IsModelType_ClassWithOnlyGettersSetters_IsModel()
+    public void ClassInfo_IsModelType_ClassWithOnlyGettersSetters_IsNotModel()
     {
+        // Classes with public methods (even getters/setters) are not models.
+        // Model detection is purely structural: no public methods + has fields.
         var classInfo = new ClassInfo
         {
             Name = "UserProfile",
@@ -217,7 +219,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
             }
         };
 
-        Assert.True(classInfo.IsModelType, "Class with only getters/setters/is should be a model");
+        Assert.False(classInfo.IsModelType, "Class with public methods should not be a model, even if they are getters/setters");
     }
 
     [Fact]
@@ -320,6 +322,84 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
 
         Assert.True(classInfo.IsModelType,
             "Class with private methods and fields should be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithGettersAndFields_IsNotModel()
+    {
+        // Even with fields present, having public methods makes it not a model
+        var classInfo = new ClassInfo
+        {
+            Name = "ConfigBean",
+            Methods = new List<MethodInfo>
+            {
+                new() { Name = "getHost", Modifiers = ["public"] },
+                new() { Name = "setHost", Modifiers = ["public"] }
+            },
+            Fields = new List<FieldInfo>
+            {
+                new() { Name = "host", Type = "String" }
+            }
+        };
+
+        Assert.False(classInfo.IsModelType,
+            "Class with public methods (even getters) and fields should not be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithOnlyPublicFields_NoMethods_IsModel()
+    {
+        // Class with explicit empty methods list and fields — model (no public methods)
+        var classInfo = new ClassInfo
+        {
+            Name = "Point",
+            Methods = new List<MethodInfo>(),
+            Fields = new List<FieldInfo>
+            {
+                new() { Name = "x", Type = "int" },
+                new() { Name = "y", Type = "int" }
+            }
+        };
+
+        Assert.True(classInfo.IsModelType,
+            "Class with empty methods list and fields should be a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsErrorType_ExtendsException_Detected()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "ServiceException",
+            Extends = "RuntimeException",
+            Methods = new List<MethodInfo>
+            {
+                new() { Name = "getErrorCode", Modifiers = ["public"] }
+            }
+        };
+
+        Assert.True(classInfo.IsErrorType);
+        Assert.Equal(1, classInfo.TruncationPriority);
+    }
+
+    [Fact]
+    public void ClassInfo_IsErrorType_ExtendsThrowable_Detected()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "CriticalFailure",
+            Extends = "Throwable"
+        };
+
+        Assert.True(classInfo.IsErrorType);
+    }
+
+    [Fact]
+    public void ClassInfo_IsErrorType_NamedExceptionNoExtends_NotDetected()
+    {
+        // Named "FooException" but no Extends → not an error type
+        var classInfo = new ClassInfo { Name = "FooException" };
+        Assert.False(classInfo.IsErrorType);
     }
 
     #endregion

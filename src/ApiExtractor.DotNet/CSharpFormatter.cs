@@ -3,6 +3,7 @@
 
 using System.Text;
 using ApiExtractor.Contracts;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace ApiExtractor.DotNet;
 
@@ -427,5 +428,80 @@ public static class CSharpFormatter
         }
 
         return sb.ToString();
+    }
+
+    // =========================================================================
+    // Compilation Stubs — lightweight type declarations for Roslyn semantic analysis
+    // =========================================================================
+
+    /// <summary>
+    /// Builds a <see cref="Microsoft.CodeAnalysis.SyntaxTree"/> containing stub type declarations
+    /// derived from an <see cref="ApiIndex"/>. The stubs use the real method signatures from the
+    /// API index so Roslyn can fully resolve call sites in sample code. Properties preserve
+    /// return types for subclient resolution (<c>client.Widgets</c> → <c>WidgetClient</c>).
+    /// </summary>
+    public static Microsoft.CodeAnalysis.SyntaxTree BuildCompilationStubs(ApiIndex apiIndex)
+    {
+        var sb = new StringBuilder();
+
+        foreach (var ns in apiIndex.Namespaces ?? [])
+        {
+            if (!string.IsNullOrEmpty(ns.Name))
+            {
+                sb.AppendLine($"namespace {ns.Name}");
+                sb.AppendLine("{");
+            }
+
+            foreach (var type in ns.Types ?? [])
+            {
+                var keyword = type.Kind switch
+                {
+                    "interface" => "interface",
+                    "struct" => "struct",
+                    "record" => "record",
+                    _ => "class"
+                };
+
+                var baseClause = type.Interfaces is { Count: > 0 }
+                    ? $" : {string.Join(", ", type.Interfaces)}"
+                    : "";
+
+                sb.AppendLine($"public {keyword} {type.Name}{baseClause}");
+                sb.AppendLine("{");
+
+                foreach (var member in type.Members ?? [])
+                {
+                    var isInterface = type.Kind == "interface";
+                    var accessModifier = isInterface ? "" : "public ";
+
+                    if (member.Kind == "method")
+                    {
+                        var sig = member.Signature ?? $"void {member.Name}()";
+                        var staticMod = member.IsStatic == true ? "static " : "";
+                        if (isInterface)
+                            sb.AppendLine($"    {sig};");
+                        else if (sig.StartsWith("void ", StringComparison.Ordinal))
+                            sb.AppendLine($"    {accessModifier}{staticMod}{sig} {{ }}");
+                        else
+                            sb.AppendLine($"    {accessModifier}{staticMod}{sig} => default!;");
+                    }
+                    else if (member.Kind == "property")
+                    {
+                        var sig = member.Signature ?? $"object {member.Name} {{ get; }}";
+                        sb.AppendLine($"    {accessModifier}{sig}");
+                    }
+                }
+
+                sb.AppendLine("}");
+                sb.AppendLine();
+            }
+
+            if (!string.IsNullOrEmpty(ns.Name))
+            {
+                sb.AppendLine("}");
+            }
+        }
+
+        return CSharpSyntaxTree.ParseText(sb.ToString(), path: "__api_stubs__.cs");
     }
 }

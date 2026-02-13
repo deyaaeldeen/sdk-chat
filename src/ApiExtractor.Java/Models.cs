@@ -160,8 +160,8 @@ public sealed record ClassInfo
         (Methods?.Any() ?? false);
 
     /// <summary>Returns true if this is a model/DTO class.
-    /// A model type has no public methods (and has fields or no methods at all),
-    /// or all its public methods are getters/setters/is-checks.</summary>
+    /// A model type has no public methods and has fields, or Methods wasn't extracted (null).
+    /// An empty class (empty Methods list + no fields) is a marker type, not a model.</summary>
     [JsonIgnore]
     public bool IsModelType
     {
@@ -171,16 +171,28 @@ public sealed record ClassInfo
 
             if (!hasPublicMethods)
             {
-                // No public methods: model if it has fields, or if Methods wasn't extracted (null).
-                // An empty class (empty Methods list + no fields) is a marker type, not a model.
                 return (Fields?.Count > 0) || Methods is null;
             }
 
-            // All public methods are getters/setters/is-checks
-            return Methods!.Where(m => m.Modifiers?.Contains("public") == true)
-                .All(m => m.Name.StartsWith("get", StringComparison.Ordinal)
-                    || m.Name.StartsWith("set", StringComparison.Ordinal)
-                    || m.Name.StartsWith("is", StringComparison.Ordinal));
+            return false;
+        }
+    }
+
+    /// <summary>Returns true if this type extends an exception/error base type.
+    /// Checks the Extends field structurally rather than the type's own name.</summary>
+    [JsonIgnore]
+    public bool IsErrorType
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(Extends)) return false;
+            var baseName = Extends.Split('<')[0];
+            // Strip package prefix if present (e.g. "java.lang.Exception" → "Exception")
+            var lastDot = baseName.LastIndexOf('.');
+            if (lastDot >= 0) baseName = baseName[(lastDot + 1)..];
+            return baseName.EndsWith("Exception", StringComparison.Ordinal)
+                || baseName.EndsWith("Error", StringComparison.Ordinal)
+                || baseName == "Throwable";
         }
     }
 
@@ -191,10 +203,9 @@ public sealed record ClassInfo
         get
         {
             if (IsClientType) return 0;
-            if (Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal) || Name.EndsWith("Builder", StringComparison.Ordinal)) return 1;
-            if (Name.Contains("Exception", StringComparison.Ordinal) || Name.Contains("Error", StringComparison.Ordinal)) return 2;
-            if (IsModelType) return 3;
-            return 4;
+            if (IsErrorType) return 1;
+            if (IsModelType) return 2;
+            return 3;
         }
     }
 

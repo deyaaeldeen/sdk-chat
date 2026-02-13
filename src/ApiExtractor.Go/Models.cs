@@ -152,10 +152,10 @@ public sealed record StructApi
     public bool IsModelType =>
         !(Methods?.Any() ?? false) && (Fields?.Any() ?? false);
 
-    /// <summary>Returns true if this is an Options struct.</summary>
+    /// <summary>Returns true if this struct implements the error interface (has Error() string method).</summary>
     [JsonIgnore]
-    public bool IsOptionsType =>
-        Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal) || Name.EndsWith("Params", StringComparison.Ordinal);
+    public bool IsErrorType =>
+        Methods?.Any(m => m.Name == "Error" && m.Ret == "string" && (m.Sig is null or "" or "()")) ?? false;
 
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
@@ -164,10 +164,9 @@ public sealed record StructApi
         get
         {
             if (IsClientType) return 0;
-            if (IsOptionsType) return 1;
-            if (Name.Contains("Error", StringComparison.Ordinal) || Name.Contains("Exception", StringComparison.Ordinal)) return 2;
-            if (IsModelType) return 3;
-            return 4;
+            if (IsErrorType) return 1;
+            if (IsModelType) return 2;
+            return 3;
         }
     }
 

@@ -113,6 +113,13 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
         var packageName = DetectPackageName(rootPath);
 
+        // Create compilation for semantic analysis (shared between error detection and dependency resolution)
+        var treeList = syntaxTrees.ToList();
+        var compilation = CreateCompilation(rootPath, treeList);
+
+        // Mark error types structurally using Roslyn inheritance chain analysis
+        MarkErrorTypes(typeMap, treeList, compilation);
+
         var namespaces = typeMap.Values
             .GroupBy(t => t.Namespace)
             .OrderBy(g => g.Key)
@@ -123,10 +130,8 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             })
             .ToList();
 
-        // Resolve transitive dependencies using semantic analysis
-        // Snapshot ConcurrentBag to List once; ResolveTransitiveDependencies uses it directly
-        var treeList = syntaxTrees.ToList();
-        var dependencies = ResolveTransitiveDependencies(rootPath, treeList, namespaces, ct);
+        // Resolve transitive dependencies using the same compilation
+        var dependencies = ResolveTransitiveDependencies(compilation, namespaces, ct);
 
         return new ApiIndex { Package = packageName, Namespaces = namespaces, Dependencies = dependencies };
     }
@@ -151,6 +156,7 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         public ConcurrentDictionary<string, MemberInfo> Members { get; } = new(); // Key = signature for dedup
         private volatile List<string>? _values;
         public volatile bool IsEntryPoint;
+        public volatile bool IsError;
         public ConcurrentBag<string> RawBaseTypes { get; } = [];
 
         public void AddInterface(string iface) => Interfaces.TryAdd(iface, 0);
@@ -200,7 +206,8 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Doc = Doc,
             Members = !Members.IsEmpty ? Members.Values.ToList() : null,
             Values = _values,
-            EntryPoint = IsEntryPoint ? true : null
+            EntryPoint = IsEntryPoint ? true : null,
+            IsError = IsError ? true : null
         };
     }
 
@@ -389,6 +396,69 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
                         mt.AddInterface(rawBase);
                     else
                         mt.SetBaseIfNull(rawBase);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Creates a Roslyn compilation with NuGet package references for semantic analysis.
+    /// The compilation is shared between error type detection and dependency resolution.
+    /// </summary>
+    private static CSharpCompilation CreateCompilation(string rootPath, IReadOnlyList<SyntaxTree> syntaxTrees)
+    {
+        var references = LoadMetadataReferences(rootPath);
+        s_cachedMetadataReferences = references;
+
+        return CSharpCompilation.Create(
+            "ApiExtraction",
+            syntaxTrees,
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                .WithNullableContextOptions(NullableContextOptions.Enable));
+    }
+
+    /// <summary>
+    /// Marks error types structurally by walking each type's inheritance chain
+    /// using Roslyn's semantic model and checking for System.Exception.
+    /// </summary>
+    private static void MarkErrorTypes(
+        ConcurrentDictionary<string, MergedType> typeMap,
+        IReadOnlyList<SyntaxTree> syntaxTrees,
+        CSharpCompilation compilation)
+    {
+        var exceptionType = compilation.GetTypeByMetadataName("System.Exception");
+        if (exceptionType is null) return;
+
+        foreach (var tree in syntaxTrees)
+        {
+            var semanticModel = compilation.GetSemanticModel(tree);
+            var root = tree.GetRoot();
+
+            foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+            {
+                var symbol = semanticModel.GetDeclaredSymbol(typeDecl);
+                if (symbol is null) continue;
+
+                // Walk the inheritance chain to check for System.Exception
+                var baseType = symbol.BaseType;
+                while (baseType is not null)
+                {
+                    if (SymbolEqualityComparer.Default.Equals(baseType, exceptionType))
+                    {
+                        // Map back to typeMap using the symbol's namespace and declared name
+                        var name = GetTypeName(typeDecl);
+                        var ns = symbol.ContainingNamespace is { IsGlobalNamespace: false } cns
+                            ? cns.ToDisplayString()
+                            : "";
+                        var key = $"{ns}.{name}";
+                        if (typeMap.TryGetValue(key, out var mt))
+                        {
+                            mt.IsError = true;
+                        }
+                        break;
+                    }
+                    baseType = baseType.BaseType;
                 }
             }
         }

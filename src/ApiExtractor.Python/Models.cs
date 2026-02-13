@@ -102,6 +102,25 @@ public sealed record ClassInfo
     public bool IsModelType =>
         !(Methods?.Any() ?? false) && (Properties?.Any() ?? false);
 
+    /// <summary>Returns true if this class inherits from an exception base type.
+    /// Checks the Base field structurally rather than the type's own name.</summary>
+    [JsonIgnore]
+    public bool IsErrorType
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(Base)) return false;
+            var baseName = Base.Split('[')[0];
+            // Strip module prefix if present (e.g. "builtins.Exception" → "Exception")
+            if (baseName.Contains('.'))
+                baseName = baseName[(baseName.LastIndexOf('.') + 1)..];
+            return baseName.EndsWith("Exception", StringComparison.Ordinal)
+                || baseName.EndsWith("Error", StringComparison.Ordinal)
+                || baseName == "BaseException"
+                || baseName == "Warning";
+        }
+    }
+
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
     public int TruncationPriority
@@ -109,10 +128,9 @@ public sealed record ClassInfo
         get
         {
             if (IsClientType) return 0;
-            if (Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal)) return 1;
-            if (Name.Contains("Exception", StringComparison.Ordinal) || Name.Contains("Error", StringComparison.Ordinal)) return 2;
-            if (IsModelType) return 3;
-            return 4;
+            if (IsErrorType) return 1;
+            if (IsModelType) return 2;
+            return 3;
         }
     }
 

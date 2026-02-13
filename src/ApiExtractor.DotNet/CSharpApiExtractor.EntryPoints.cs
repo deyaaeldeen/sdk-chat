@@ -18,7 +18,7 @@ public partial class CSharpApiExtractor
     /// Entry points in .NET are determined by:
     /// 1. RootNamespace from .csproj
     /// 2. PackageId from .csproj
-    /// 3. Inferred from project directory name
+    /// 3. AssemblyName from .csproj
     /// Returns a FrozenSet for guaranteed thread-safe concurrent reads.
     /// </summary>
     private static FrozenSet<string> ResolveEntryPointNamespaces(string rootPath)
@@ -49,22 +49,6 @@ public partial class CSharpApiExtractor
             catch (Exception ex) when (ex is XmlException or IOException)
             {
                 Trace.TraceWarning("Failed to parse csproj '{0}': {1}", csproj, ex.Message);
-            }
-
-            // Fallback to project file name
-            var projectName = Path.GetFileNameWithoutExtension(csproj);
-            if (!string.IsNullOrEmpty(projectName))
-            {
-                entryPoints.Add(projectName);
-            }
-        }
-        else
-        {
-            // No csproj, use directory name as namespace hint
-            var dirName = Path.GetFileName(rootPath);
-            if (!string.IsNullOrEmpty(dirName))
-            {
-                entryPoints.Add(dirName);
             }
         }
 
@@ -100,17 +84,13 @@ public partial class CSharpApiExtractor
             }
 
             // Namespace is a direct child of entry point (e.g., "MyPkg.Models" when entry is "MyPkg")
-            // But exclude implementation/internal namespaces
             if (ns.StartsWith(entryNs + ".", StringComparison.OrdinalIgnoreCase))
             {
-                var suffix = ns[(entryNs.Length + 1)..].ToLowerInvariant();
-                if (!suffix.Contains(".internal", StringComparison.Ordinal) && !suffix.Contains(".implementation", StringComparison.Ordinal))
-                {
-                    // Direct children of entry namespace are entry points
-                    // But deeper nested ones are typically supporting types
-                    var depth = suffix.Count(c => c == '.');
-                    return depth == 0;
-                }
+                var suffix = ns[(entryNs.Length + 1)..];
+                // Direct children of entry namespace are entry points
+                // But deeper nested ones are typically supporting types
+                var depth = suffix.Count(c => c == '.');
+                return depth == 0;
             }
         }
 

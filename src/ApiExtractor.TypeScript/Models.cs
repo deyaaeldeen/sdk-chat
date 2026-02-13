@@ -159,6 +159,20 @@ public sealed record ClassInfo
     public bool IsModelType =>
         !(Methods?.Any() ?? false) && (Properties?.Any() ?? false);
 
+    /// <summary>Returns true if this class extends an error base type.
+    /// Checks the Extends field structurally rather than the type's own name.</summary>
+    [JsonIgnore]
+    public bool IsErrorType
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(Extends)) return false;
+            var baseName = Extends.Split('<')[0];
+            return baseName.EndsWith("Error", StringComparison.Ordinal)
+                || baseName.EndsWith("Exception", StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>Gets the priority for smart truncation. Lower = more important.</summary>
     [JsonIgnore]
     public int TruncationPriority
@@ -166,10 +180,9 @@ public sealed record ClassInfo
         get
         {
             if (IsClientType) return 0;
-            if (Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal)) return 1;
-            if (Name.Contains("Error", StringComparison.Ordinal) || Name.Contains("Exception", StringComparison.Ordinal)) return 2;
-            if (IsModelType) return 3;
-            return 4;
+            if (IsErrorType) return 1;
+            if (IsModelType) return 2;
+            return 3;
         }
     }
 

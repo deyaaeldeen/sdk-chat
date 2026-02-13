@@ -51,6 +51,7 @@ public class AllUsageAnalyzersTests : IDisposable
             ("DataClient", ["GetData", "GetDataAsync", "ProcessData"]));
 
         await WriteFileAsync("sample.cs", """
+            using TestSdk;
             var client = new DataClient();
             client.GetData();
             await client.GetDataAsync();
@@ -78,6 +79,7 @@ public class AllUsageAnalyzersTests : IDisposable
             ("ContainerClient", ["Create", "List"], []));
 
         await WriteFileAsync("sample.cs", """
+            using TestSdk;
             var storage = new StorageClient();
             storage.GetBlob();
 
@@ -114,6 +116,7 @@ public class AllUsageAnalyzersTests : IDisposable
             ("ChatClient", ["Send", "Receive"]));
 
         await WriteFileAsync("sample.cs", """
+            using TestSdk;
             // These should NOT match - receivers are not SDK client types
             var x = new object();
             x.Send();  // Send is in API but x is not ChatClient
@@ -138,10 +141,34 @@ public class AllUsageAnalyzersTests : IDisposable
         // C# doesn't have top-level functions in the same way as Python/Go
         // Static methods on classes are tracked as class methods
         // Use class-level analyzer
-        var apiIndex = CreateCSharpApiIndex(
-            ("Helpers", ["CreateClient", "ParseResponse"]));
+        var apiIndex = new DotNet.ApiIndex
+        {
+            Package = "TestSdk",
+            Namespaces =
+            [
+                new DotNet.NamespaceInfo
+                {
+                    Name = "TestSdk",
+                    Types =
+                    [
+                        new DotNet.TypeInfo
+                        {
+                            Name = "Helpers",
+                            Kind = "class",
+                            EntryPoint = true,
+                            Members =
+                            [
+                                new DotNet.MemberInfo { Name = "CreateClient", Kind = "method", Signature = "void CreateClient()", IsStatic = true },
+                                new DotNet.MemberInfo { Name = "ParseResponse", Kind = "method", Signature = "void ParseResponse()", IsStatic = true }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
 
         await WriteFileAsync("sample.cs", """
+            using TestSdk;
             Helpers.CreateClient();
             // ParseResponse not called
             """);
@@ -202,6 +229,7 @@ public class AllUsageAnalyzersTests : IDisposable
             ("WidgetClient", ["ListWidgets", "GetWidget"], []));
 
         await WriteFileAsync("sample.cs", """
+            using TestSdk;
             var client = new ContainerClient();
             var widgets = client.Widgets;
             widgets.ListWidgets();
@@ -228,6 +256,7 @@ public class AllUsageAnalyzersTests : IDisposable
             ("ServiceClientImpl", "class", ["Process", "Validate"], [], ["IServiceClient"]));
 
         await WriteFileAsync("sample.cs", """
+            using TestSdk;
             var client = new MainClient();
             var svc = client.Service;
             svc.Process();
@@ -249,6 +278,7 @@ public class AllUsageAnalyzersTests : IDisposable
             ("WidgetClient", ["ListWidgets", "GetWidget"], []));
 
         await WriteFileAsync("sample.cs", """
+            using TestSdk;
             var client = new MainClient();
             client.Widgets.ListWidgets();
             // GetWidget not called via chain
@@ -292,6 +322,7 @@ public class AllUsageAnalyzersTests : IDisposable
         };
 
         await WriteFileAsync("sample.cs", """
+            using TestSdk;
             var client = new FluentClient();
             client.Send();
             """);

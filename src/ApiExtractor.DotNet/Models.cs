@@ -120,6 +120,10 @@ public record TypeInfo
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
 
+    [JsonPropertyName("isError")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsError { get; init; }
+
     /// <summary>External package/assembly this type is re-exported from.</summary>
     [JsonPropertyName("reExportedFrom")]
     public string? ReExportedFrom { get; init; }
@@ -159,11 +163,11 @@ public record TypeInfo
         (Members?.Any(m => m.Kind == "property") ?? false);
 
     /// <summary>
-    /// Returns true if this is an Options type for configuration.
+    /// Returns true if this type inherits from System.Exception.
+    /// Set structurally by the Roslyn-based extractor via inheritance chain analysis.
     /// </summary>
     [JsonIgnore]
-    public bool IsOptionsType =>
-        Name.EndsWith("Options", StringComparison.Ordinal) || Name.EndsWith("Settings", StringComparison.Ordinal) || Name.EndsWith("Config", StringComparison.Ordinal);
+    public bool IsErrorType => IsError == true;
 
     /// <summary>
     /// Gets the priority for smart truncation.
@@ -175,11 +179,10 @@ public record TypeInfo
         get
         {
             if (IsClientType) return 0;        // Clients are most important
-            if (IsOptionsType) return 1;       // Options next (configure clients)
-            if (Name.Contains("Exception", StringComparison.Ordinal) || Name.Contains("Error", StringComparison.Ordinal)) return 2; // Exceptions/errors for error handling
-            if (Kind == "enum") return 3;      // Enums usually small, include them
-            if (IsModelType) return 4;         // Models are common but secondary
-            return 5;                          // Everything else
+            if (IsErrorType) return 1;         // Error types for error handling
+            if (Kind == "enum") return 2;      // Enums usually small, include them
+            if (IsModelType) return 3;         // Models are common but secondary
+            return 4;                          // Everything else
         }
     }
 

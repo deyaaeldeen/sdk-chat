@@ -81,6 +81,7 @@ public class UsageAnalyzerTests
         // Arrange
         var (tempDir, _) = await SetupTestFilesAsync(
             ("sample.cs", """
+                using TestSdk;
                 var chatClient = new ChatClient();
                 var completion = await chatClient.GetCompletionAsync("Hi");
                 var stream = chatClient.GetStreamingCompletionAsync("Hi");
@@ -120,6 +121,7 @@ public class UsageAnalyzerTests
         // Arrange
         var (tempDir, _) = await SetupTestFilesAsync(
             ("sample.cs", """
+                using TestSdk;
                 var client = new ChatClient();
                 await client.GetCompletionAsync("test");
                 """));
@@ -151,6 +153,7 @@ public class UsageAnalyzerTests
         // Arrange
         var (tempDir, _) = await SetupTestFilesAsync(
             ("sample.cs", """
+                using TestSdk;
                 var client = new EmptyClient();
                 await client.Widgets.ListWidgetsAsync();
                 """));
@@ -178,10 +181,12 @@ public class UsageAnalyzerTests
         // Arrange - same method called multiple times
         var (tempDir, _) = await SetupTestFilesAsync(
             ("sample1.cs", """
+                using TestSdk;
                 var client = new ChatClient();
                 await client.GetCompletionAsync("test1");
                 """),
             ("sample2.cs", """
+                using TestSdk;
                 var client = new ChatClient();
                 await client.GetCompletionAsync("test2");
                 await client.GetCompletionAsync("test3");
@@ -443,6 +448,7 @@ public class UsageAnalyzerTests
         // This tests that stylistic casing differences in code don't affect detection
         var (tempDir, _) = await SetupTestFilesAsync(
             ("sample.cs", """
+                using TestSdk;
                 var chatClient = new ChatClient();
                 chatClient.GetCompletionAsync("hello");
                 """));
@@ -554,6 +560,7 @@ public class UsageAnalyzerTests
     {
         var (tempDir, _) = await SetupTestFilesAsync(
             ("sample.cs", """
+                using Test;
                 using System;
                 var Client = new ChatClient();
                 Client.GetCompletionAsync("test");
@@ -608,6 +615,7 @@ public class UsageAnalyzerTests
         try
         {
             await File.WriteAllTextAsync(Path.Combine(tempDir, "sample.cs"), """
+                using Test;
                 ChatClient? client = new ChatClient();
                 client.GetCompletionAsync("test");
                 """);

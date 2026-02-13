@@ -37,11 +37,6 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         if (clientMethods.Count == 0)
             return new UsageIndex { FileCount = 0 };
 
-        // Pre-build canonical name lookup for O(1) case-insensitive → stored-key resolution
-        var canonicalClientNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var key in clientMethods.Keys)
-            canonicalClientNames[key] = key;
-
         var files = Directory.EnumerateFiles(normalizedPath, "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("\\obj\\", StringComparison.Ordinal)
                      && !f.Contains("/bin/", StringComparison.Ordinal) && !f.Contains("\\bin\\", StringComparison.Ordinal)
@@ -63,28 +58,18 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         }
 
         // Create compilation for semantic analysis.
-        // Prefer cached references from the API extractor (includes NuGet package DLLs
-        // for richer type resolution of SDK types in sample code).
-        // Falls back to basic runtime references if extraction hasn't run.
+        // Include stub type declarations from the ApiIndex so Roslyn can resolve
+        // SDK types that sample code references but does not define.
+        var stubTree = CSharpFormatter.BuildCompilationStubs(apiIndex);
+        var allTrees = syntaxTrees.Append(stubTree).ToList();
+
         var references = CSharpApiExtractor.CachedMetadataReferences ?? GetBasicMetadataReferences();
         var compilation = CSharpCompilation.Create(
             "UsageAnalysis",
-            syntaxTrees,
+            allTrees,
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
                 .WithNullableContextOptions(NullableContextOptions.Enable));
-
-        // Build property type map from API index for subclient resolution
-        var propertyTypeMap = BuildPropertyTypeMap(apiIndex, clientMethods, canonicalClientNames);
-
-        // Build method return type map from API index for precise factory/getter resolution
-        var methodReturnTypeMap = BuildMethodReturnTypeMap(apiIndex, clientMethods, canonicalClientNames);
-
-        // Collect all type names from API for variable tracking (including types without methods)
-        var allTypeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var ns in apiIndex.Namespaces ?? [])
-            foreach (var type in ns.Types ?? [])
-                allTypeNames.TryAdd(type.Name, type.Name);
 
         List<OperationUsage> coveredOperations = [];
         HashSet<string> seenOperations = []; // Dedupe: "ClientType.Method"
@@ -97,23 +82,12 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             var relativePath = filePathMap[tree];
             var semanticModel = compilation.GetSemanticModel(tree);
 
-            // Build variable → client type map for syntactic resolution
-            var varTypes = BuildVarTypeMap(root, clientMethods, propertyTypeMap, methodReturnTypeMap, allTypeNames);
-
             // Use Roslyn to find all method invocations
             var invocations = root.DescendantNodes().OfType<InvocationExpressionSyntax>();
 
             foreach (var invocation in invocations)
             {
                 var (clientType, methodName) = ExtractMethodCallWithSemantics(invocation, clientMethods, semanticModel);
-
-                // Fall back to syntactic resolution when Roslyn can't resolve types
-                // (e.g., missing assembly references in sample code)
-                if (clientType is null)
-                {
-                    (clientType, methodName) = ExtractMethodCallSyntactic(
-                        invocation, clientMethods, varTypes, propertyTypeMap, methodReturnTypeMap, canonicalClientNames);
-                }
 
                 if (clientType is not null && methodName is not null)
                 {
@@ -263,51 +237,42 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
 
         var methodName = memberAccess.Name.Identifier.Text;
 
-        // First, try semantic resolution for accurate type matching
-        try
+        var symbolInfo = semanticModel.GetSymbolInfo(memberAccess);
+        if (symbolInfo.Symbol is IMethodSymbol methodSymbol)
         {
-            var symbolInfo = semanticModel.GetSymbolInfo(memberAccess);
-            if (symbolInfo.Symbol is IMethodSymbol methodSymbol)
+            var containingType = methodSymbol.ContainingType;
+            if (containingType is not null)
             {
-                var containingType = methodSymbol.ContainingType;
-                if (containingType is not null)
+                var typeName = containingType.Name;
+
+                // Check if this type is in our client methods map
+                if (clientMethods.TryGetValue(typeName, out var methods) && methods.Contains(methodName))
                 {
-                    var typeName = containingType.Name;
+                    return (typeName, methodName);
+                }
 
-                    // Check if this type is in our client methods map
-                    if (clientMethods.TryGetValue(typeName, out var methods) && methods.Contains(methodName))
+                // Also check interfaces that the type implements
+                foreach (var iface in containingType.AllInterfaces)
+                {
+                    var ifaceName = iface.Name;
+                    if (clientMethods.TryGetValue(ifaceName, out var ifaceMethods) && ifaceMethods.Contains(methodName))
                     {
-                        return (typeName, methodName);
-                    }
-
-                    // Also check interfaces that the type implements
-                    foreach (var iface in containingType.AllInterfaces)
-                    {
-                        var ifaceName = iface.Name;
-                        if (clientMethods.TryGetValue(ifaceName, out var ifaceMethods) && ifaceMethods.Contains(methodName))
-                        {
-                            return (ifaceName, methodName);
-                        }
-                    }
-
-                    // Check base types
-                    var baseType = containingType.BaseType;
-                    while (baseType is not null)
-                    {
-                        var baseName = baseType.Name;
-                        if (clientMethods.TryGetValue(baseName, out var baseMethods) && baseMethods.Contains(methodName))
-                        {
-                            return (baseName, methodName);
-                        }
-                        baseType = baseType.BaseType;
+                        return (ifaceName, methodName);
                     }
                 }
+
+                // Check base types
+                var baseType = containingType.BaseType;
+                while (baseType is not null)
+                {
+                    var baseName = baseType.Name;
+                    if (clientMethods.TryGetValue(baseName, out var baseMethods) && baseMethods.Contains(methodName))
+                    {
+                        return (baseName, methodName);
+                    }
+                    baseType = baseType.BaseType;
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            // Semantic resolution failed (missing references) - fall back to heuristic
-            Trace.TraceWarning("Semantic resolution failed for invocation: {0}", ex.Message);
         }
 
         return (null, null);
@@ -402,341 +367,5 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         }
 
         return uncovered;
-    }
-
-    /// <summary>
-    /// Extracts client type and method name using syntactic local type inference.
-    /// Used as a fallback when Roslyn semantic model cannot resolve types
-    /// (e.g., sample code without assembly references).
-    /// </summary>
-    private static (string? ClientType, string? MethodName) ExtractMethodCallSyntactic(
-        InvocationExpressionSyntax invocation,
-        Dictionary<string, HashSet<string>> clientMethods,
-        Dictionary<string, string> varTypes,
-        Dictionary<string, string> propertyTypeMap,
-        Dictionary<string, string> methodReturnTypeMap,
-        Dictionary<string, string> canonicalClientNames)
-    {
-        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
-            return (null, null);
-
-        var methodName = memberAccess.Name.Identifier.Text;
-        var receiver = memberAccess.Expression;
-
-        // Pattern 1: variable.Method() — e.g., client.GetData()
-        if (receiver is IdentifierNameSyntax id)
-        {
-            var varName = id.Identifier.Text;
-
-            // Check variable type map
-            if (varTypes.TryGetValue(varName, out var varType) &&
-                clientMethods.TryGetValue(varType, out var methods) &&
-                methods.Contains(methodName))
-            {
-                return (varType, methodName);
-            }
-
-            // Check static call: TypeName.Method() — e.g., Helpers.CreateClient()
-            if (clientMethods.TryGetValue(varName, out var staticMethods) &&
-                staticMethods.Contains(methodName))
-            {
-                return (GetCanonicalClientName(varName, canonicalClientNames), methodName);
-            }
-        }
-        // Pattern 2: obj.Property.Method() — subclient chain, e.g., client.Widgets.ListWidgetsAsync()
-        else if (receiver is MemberAccessExpressionSyntax innerMember &&
-                 innerMember.Expression is IdentifierNameSyntax sourceId)
-        {
-            var sourceVar = sourceId.Identifier.Text;
-            var propName = innerMember.Name.Identifier.Text;
-
-            if (varTypes.TryGetValue(sourceVar, out var sourceType))
-            {
-                // Resolve property type from API data only
-                var propKey = $"{sourceType}.{propName}";
-                if (propertyTypeMap.TryGetValue(propKey, out var resolvedType) &&
-                    clientMethods.TryGetValue(resolvedType, out var methods) &&
-                    methods.Contains(methodName))
-                {
-                    return (resolvedType, methodName);
-                }
-            }
-        }
-        // Pattern 3: obj.GetClient().Method() — chained method call returning a client type
-        else if (receiver is InvocationExpressionSyntax chainedCall &&
-                 chainedCall.Expression is MemberAccessExpressionSyntax chainedAccess &&
-                 chainedAccess.Expression is IdentifierNameSyntax chainedReceiverId)
-        {
-            var chainedReceiverName = chainedReceiverId.Identifier.Text;
-            var chainedMethodName = chainedAccess.Name.Identifier.Text;
-
-            if (varTypes.TryGetValue(chainedReceiverName, out var chainedReceiverType))
-            {
-                var chainedKey = $"{chainedReceiverType}.{chainedMethodName}";
-                if (methodReturnTypeMap.TryGetValue(chainedKey, out var chainedRetType) &&
-                    clientMethods.TryGetValue(chainedRetType, out var methods) &&
-                    methods.Contains(methodName))
-                {
-                    return (chainedRetType, methodName);
-                }
-            }
-        }
-
-        return (null, null);
-    }
-
-    /// <summary>
-    /// Builds a map of variable names to their inferred client types from syntax.
-    /// Tracks: new Type(), explicit Type x = ..., property access (via API data),
-    /// method return types (via API data), and static factory calls.
-    /// </summary>
-    private static Dictionary<string, string> BuildVarTypeMap(
-        SyntaxNode root,
-        Dictionary<string, HashSet<string>> clientMethods,
-        Dictionary<string, string> propertyTypeMap,
-        Dictionary<string, string> methodReturnTypeMap,
-        Dictionary<string, string> allTypeNames)
-    {
-        var varTypes = new Dictionary<string, string>(StringComparer.Ordinal);
-
-        foreach (var declaration in root.DescendantNodes().OfType<VariableDeclaratorSyntax>())
-        {
-            var varName = declaration.Identifier.Text;
-            var initializer = declaration.Initializer?.Value;
-
-            // Pattern: var x = new ChatClient()
-            if (initializer is ObjectCreationExpressionSyntax creation)
-            {
-                var typeName = GetSimpleTypeName(creation.Type);
-                if (typeName is not null && allTypeNames.TryGetValue(typeName, out var canonical))
-                {
-                    varTypes[varName] = canonical;
-                    continue;
-                }
-            }
-
-            // Pattern: ChatClient x = new(...)
-            if (initializer is ImplicitObjectCreationExpressionSyntax &&
-                declaration.Parent is VariableDeclarationSyntax implDecl)
-            {
-                var typeName = GetSimpleTypeName(implDecl.Type);
-                if (typeName is not null && allTypeNames.TryGetValue(typeName, out var canonical))
-                {
-                    varTypes[varName] = canonical;
-                    continue;
-                }
-            }
-
-            // Pattern: ChatClient x = ...  (explicit type declaration)
-            if (declaration.Parent is VariableDeclarationSyntax explDecl)
-            {
-                var typeName = GetSimpleTypeName(explDecl.Type);
-                if (typeName is not null && typeName != "var" && allTypeNames.TryGetValue(typeName, out var canonical))
-                {
-                    varTypes[varName] = canonical;
-                    continue;
-                }
-            }
-
-            // Pattern: var blob = storage.Blobs  (property access → subclient type from API data)
-            if (initializer is MemberAccessExpressionSyntax memberAccess &&
-                memberAccess.Expression is IdentifierNameSyntax sourceId)
-            {
-                var sourceVar = sourceId.Identifier.Text;
-                if (varTypes.TryGetValue(sourceVar, out var sourceType))
-                {
-                    var propName = memberAccess.Name.Identifier.Text;
-                    var propKey = $"{sourceType}.{propName}";
-                    if (propertyTypeMap.TryGetValue(propKey, out var propType))
-                    {
-                        varTypes[varName] = propType;
-                        continue;
-                    }
-                }
-            }
-
-            // Pattern: var x = obj.GetChatClient() or ChatClient.Create() (method call → return type from API data)
-            if (initializer is InvocationExpressionSyntax invocation)
-            {
-                if (invocation.Expression is MemberAccessExpressionSyntax methodAccess)
-                {
-                    var methodName = methodAccess.Name.Identifier.Text;
-
-                    // Static factory: ChatClient.Create() — receiver is a known API type
-                    if (methodAccess.Expression is IdentifierNameSyntax typeId &&
-                        allTypeNames.TryGetValue(typeId.Identifier.Text, out var canonical))
-                    {
-                        // Check if the receiver type itself is the return type (static factory on self)
-                        // Also check method return type map for the actual return type
-                        var staticKey = $"{canonical}.{methodName}";
-                        if (methodReturnTypeMap.TryGetValue(staticKey, out var staticRetType))
-                        {
-                            varTypes[varName] = staticRetType;
-                        }
-                        else
-                        {
-                            varTypes[varName] = canonical;
-                        }
-                        continue;
-                    }
-
-                    // Instance method: service.GetChatClient() — look up return type from API data
-                    if (methodAccess.Expression is IdentifierNameSyntax receiverId &&
-                        varTypes.TryGetValue(receiverId.Identifier.Text, out var receiverType))
-                    {
-                        var methodKey = $"{receiverType}.{methodName}";
-                        if (methodReturnTypeMap.TryGetValue(methodKey, out var retType))
-                        {
-                            varTypes[varName] = retType;
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-
-        return varTypes;
-    }
-
-    /// <summary>
-    /// Builds a map of (OwnerType.PropertyName) → ReturnTypeName from API index properties.
-    /// </summary>
-    private static Dictionary<string, string> BuildPropertyTypeMap(
-        ApiIndex apiIndex,
-        Dictionary<string, HashSet<string>> clientMethods,
-        Dictionary<string, string> canonicalClientNames)
-    {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var ns in apiIndex.Namespaces ?? [])
-        {
-            foreach (var type in ns.Types ?? [])
-            {
-                foreach (var member in type.Members ?? [])
-                {
-                    if (member.Kind == "property" && member.Signature is not null)
-                    {
-                        var returnType = ExtractReturnTypeFromPropertySignature(member.Signature);
-                        if (returnType is not null && clientMethods.ContainsKey(returnType))
-                        {
-                            var key = $"{type.Name}.{member.Name}";
-                            map[key] = GetCanonicalClientName(returnType, canonicalClientNames);
-                        }
-                    }
-                }
-            }
-        }
-
-        return map;
-    }
-
-    /// <summary>
-    /// Extracts the return type from a property signature like "WidgetClient Widgets { get; }".
-    /// </summary>
-    private static string? ExtractReturnTypeFromPropertySignature(string signature)
-    {
-        var trimmed = signature.Trim();
-        var spaceIdx = trimmed.IndexOf(' ');
-        return spaceIdx > 0 ? trimmed[..spaceIdx] : null;
-    }
-
-    /// <summary>
-    /// Builds a map of (OwnerType.MethodName) → ReturnTypeName from API index method signatures.
-    /// Parses method signatures to extract return types, unwrapping async wrappers
-    /// (Task&lt;T&gt;, ValueTask&lt;T&gt;). Only includes entries where the return type
-    /// is a known API type with methods (i.e., a client/subclient type).
-    /// </summary>
-    private static Dictionary<string, string> BuildMethodReturnTypeMap(
-        ApiIndex apiIndex,
-        Dictionary<string, HashSet<string>> clientMethods,
-        Dictionary<string, string> canonicalClientNames)
-    {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var ns in apiIndex.Namespaces ?? [])
-        {
-            foreach (var type in ns.Types ?? [])
-            {
-                foreach (var member in type.Members ?? [])
-                {
-                    if (member.Kind == "method" && member.Signature is not null)
-                    {
-                        var returnType = ExtractReturnTypeFromMethodSignature(member.Signature);
-                        if (returnType is not null)
-                        {
-                            var unwrapped = UnwrapAsyncReturnType(returnType);
-                            if (unwrapped is not null && clientMethods.ContainsKey(unwrapped))
-                            {
-                                var key = $"{type.Name}.{member.Name}";
-                                map[key] = GetCanonicalClientName(unwrapped, canonicalClientNames);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return map;
-    }
-
-    /// <summary>
-    /// Extracts the return type from a method signature like "ChatClient GetChatClient(string name)".
-    /// Returns the part of the signature before the method name (i.e., the return type).
-    /// </summary>
-    private static string? ExtractReturnTypeFromMethodSignature(string signature)
-    {
-        var parenIdx = signature.IndexOf('(');
-        if (parenIdx < 0) return null;
-
-        var prefix = signature[..parenIdx].TrimEnd();
-        var lastSpaceIdx = prefix.LastIndexOf(' ');
-        if (lastSpaceIdx < 0) return null;
-
-        return prefix[..lastSpaceIdx].Trim();
-    }
-
-    /// <summary>
-    /// Unwraps async wrapper types to get the inner type.
-    /// E.g., "Task&lt;BlobClient&gt;" → "BlobClient", "ValueTask&lt;ChatClient&gt;" → "ChatClient".
-    /// Returns the type as-is if it's not wrapped.
-    /// </summary>
-    private static string? UnwrapAsyncReturnType(string returnType)
-    {
-        ReadOnlySpan<string> wrappers = ["Task", "ValueTask", "IAsyncEnumerable"];
-        foreach (var wrapper in wrappers)
-        {
-            if (returnType.StartsWith(wrapper + "<", StringComparison.Ordinal) &&
-                returnType.EndsWith('>'))
-            {
-                return returnType[(wrapper.Length + 1)..^1];
-            }
-        }
-        return returnType;
-    }
-
-    /// <summary>
-    /// Gets the canonical (stored) key name from the pre-built canonical names dictionary.
-    /// O(1) lookup via case-insensitive dictionary.
-    /// </summary>
-    private static string GetCanonicalClientName(
-        string name,
-        Dictionary<string, string> canonicalClientNames)
-    {
-        return canonicalClientNames.TryGetValue(name, out var canonical) ? canonical : name;
-    }
-
-    /// <summary>
-    /// Extracts the simple type name from a TypeSyntax node.
-    /// </summary>
-    private static string? GetSimpleTypeName(TypeSyntax type)
-    {
-        return type switch
-        {
-            IdentifierNameSyntax id => id.Identifier.Text,
-            QualifiedNameSyntax qualified => qualified.Right.Identifier.Text,
-            GenericNameSyntax generic => generic.Identifier.Text,
-            NullableTypeSyntax nullable => GetSimpleTypeName(nullable.ElementType),
-            _ => null
-        };
     }
 }

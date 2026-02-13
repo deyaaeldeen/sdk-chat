@@ -73,11 +73,12 @@ public class SmartTruncationTests
             Members = [new MemberInfo { Name = "SendAsync", Kind = "method", Signature = "() -> Task" }]
         };
 
-        var optionsType = new DotNet.TypeInfo
+        var errorType = new DotNet.TypeInfo
         {
-            Name = "ChatOptions",
+            Name = "ChatException",
             Kind = "class",
-            Members = [new MemberInfo { Name = "MaxTokens", Kind = "property", Signature = "int" }]
+            Base = "Exception",
+            IsError = true
         };
 
         var modelType = new DotNet.TypeInfo
@@ -87,8 +88,8 @@ public class SmartTruncationTests
             Members = [new MemberInfo { Name = "Content", Kind = "property", Signature = "string" }]
         };
 
-        Assert.True(clientType.TruncationPriority < optionsType.TruncationPriority);
-        Assert.True(optionsType.TruncationPriority < modelType.TruncationPriority);
+        Assert.True(clientType.TruncationPriority < errorType.TruncationPriority);
+        Assert.True(errorType.TruncationPriority < modelType.TruncationPriority);
     }
 
     [Fact]
@@ -1546,75 +1547,368 @@ public class SmartTruncationTests
     #region Issue 3d: TruncationPriority Error/Exception Consistency Tests
 
     [Fact]
-    public void DotNet_TruncationPriority_RecognizesBothExceptionAndError()
+    public void DotNet_TruncationPriority_RecognizesErrorTypesStructurally()
     {
-        var exception = new DotNet.TypeInfo { Name = "SomeException", Kind = "class" };
-        var error = new DotNet.TypeInfo { Name = "SomeError", Kind = "class" };
+        var exception = new DotNet.TypeInfo { Name = "SomeException", Kind = "class", Base = "InvalidOperationException", IsError = true };
+        var error = new DotNet.TypeInfo { Name = "SomeError", Kind = "class", Base = "Exception", IsError = true };
+        var notError = new DotNet.TypeInfo { Name = "SomeError", Kind = "class" };
 
-        Assert.Equal(2, exception.TruncationPriority);
-        Assert.Equal(2, error.TruncationPriority);
+        Assert.Equal(1, exception.TruncationPriority);
+        Assert.Equal(1, error.TruncationPriority);
+        Assert.NotEqual(1, notError.TruncationPriority); // No IsError → not an error type
     }
 
     [Fact]
-    public void Python_TruncationPriority_RecognizesBothExceptionAndError()
+    public void Python_TruncationPriority_RecognizesErrorTypesStructurally()
     {
-        var exception = new Python.ClassInfo { Name = "SomeException" };
-        var error = new Python.ClassInfo { Name = "SomeError" };
+        var exception = new Python.ClassInfo { Name = "SomeException", Base = "ValueError" };
+        var error = new Python.ClassInfo { Name = "SomeError", Base = "Exception" };
+        var notError = new Python.ClassInfo { Name = "SomeError" };
 
-        Assert.Equal(2, exception.TruncationPriority);
-        Assert.Equal(2, error.TruncationPriority);
+        Assert.Equal(1, exception.TruncationPriority);
+        Assert.Equal(1, error.TruncationPriority);
+        Assert.NotEqual(1, notError.TruncationPriority);
     }
 
     [Fact]
-    public void TypeScript_TruncationPriority_RecognizesBothExceptionAndError()
+    public void TypeScript_TruncationPriority_RecognizesErrorTypesStructurally()
     {
-        var error = new TypeScript.ClassInfo { Name = "SomeError" };
-        var exception = new TypeScript.ClassInfo { Name = "SomeException" };
+        var error = new TypeScript.ClassInfo { Name = "SomeError", Extends = "Error" };
+        var exception = new TypeScript.ClassInfo { Name = "SomeException", Extends = "RestError" };
+        var notError = new TypeScript.ClassInfo { Name = "SomeError" };
 
-        Assert.Equal(2, error.TruncationPriority);
-        Assert.Equal(2, exception.TruncationPriority);
+        Assert.Equal(1, error.TruncationPriority);
+        Assert.Equal(1, exception.TruncationPriority);
+        Assert.NotEqual(1, notError.TruncationPriority);
     }
 
     [Fact]
-    public void Go_TruncationPriority_RecognizesBothExceptionAndError()
+    public void Go_TruncationPriority_RecognizesErrorTypesStructurally()
     {
-        var error = new Go.StructApi { Name = "SomeError" };
-        var exception = new Go.StructApi { Name = "SomeException" };
+        var error = new Go.StructApi
+        {
+            Name = "SomeError",
+            Methods = [new Go.FuncApi { Name = "Error", Sig = "()", Ret = "string" }]
+        };
+        var notError = new Go.StructApi { Name = "SomeError" };
 
-        Assert.Equal(2, error.TruncationPriority);
-        Assert.Equal(2, exception.TruncationPriority);
+        Assert.Equal(1, error.TruncationPriority);
+        Assert.NotEqual(1, notError.TruncationPriority);
     }
 
     [Fact]
-    public void Java_TruncationPriority_RecognizesBothExceptionAndError()
+    public void Java_TruncationPriority_RecognizesErrorTypesStructurally()
     {
-        var exception = new Java.ClassInfo { Name = "SomeException" };
-        var error = new Java.ClassInfo { Name = "SomeError" };
+        var exception = new Java.ClassInfo { Name = "SomeException", Extends = "RuntimeException" };
+        var error = new Java.ClassInfo { Name = "SomeError", Extends = "Error" };
+        var notError = new Java.ClassInfo { Name = "SomeError" };
 
-        Assert.Equal(2, exception.TruncationPriority);
-        Assert.Equal(2, error.TruncationPriority);
+        Assert.Equal(1, exception.TruncationPriority);
+        Assert.Equal(1, error.TruncationPriority);
+        Assert.NotEqual(1, notError.TruncationPriority);
     }
 
     [Fact]
-    public void AllLanguages_TruncationPriority_ErrorAndExceptionSamePriority()
+    public void AllLanguages_TruncationPriority_ErrorTypesDetectedStructurally()
     {
-        // Verify all 5 languages treat Exception and Error types with equal priority
-        var dotnetEx = new DotNet.TypeInfo { Name = "FooException", Kind = "class" };
-        var dotnetErr = new DotNet.TypeInfo { Name = "FooError", Kind = "class" };
-        var pyEx = new Python.ClassInfo { Name = "FooException" };
-        var pyErr = new Python.ClassInfo { Name = "FooError" };
-        var tsEx = new TypeScript.ClassInfo { Name = "FooException" };
-        var tsErr = new TypeScript.ClassInfo { Name = "FooError" };
-        var goEx = new Go.StructApi { Name = "FooException" };
-        var goErr = new Go.StructApi { Name = "FooError" };
-        var javaEx = new Java.ClassInfo { Name = "FooException" };
-        var javaErr = new Java.ClassInfo { Name = "FooError" };
+        // Verify all 5 languages detect error types via base type, not name
+        var dotnetEx = new DotNet.TypeInfo { Name = "FooException", Kind = "class", Base = "Exception", IsError = true };
+        var dotnetErr = new DotNet.TypeInfo { Name = "FooError", Kind = "class", Base = "HttpRequestException", IsError = true };
+        var pyEx = new Python.ClassInfo { Name = "FooException", Base = "Exception" };
+        var pyErr = new Python.ClassInfo { Name = "FooError", Base = "RuntimeError" };
+        var tsEx = new TypeScript.ClassInfo { Name = "FooException", Extends = "Error" };
+        var tsErr = new TypeScript.ClassInfo { Name = "FooError", Extends = "RestError" };
+        var goErr = new Go.StructApi { Name = "FooError", Methods = [new Go.FuncApi { Name = "Error", Sig = "()", Ret = "string" }] };
+        var javaEx = new Java.ClassInfo { Name = "FooException", Extends = "Exception" };
+        var javaErr = new Java.ClassInfo { Name = "FooError", Extends = "Error" };
 
         Assert.Equal(dotnetEx.TruncationPriority, dotnetErr.TruncationPriority);
         Assert.Equal(pyEx.TruncationPriority, pyErr.TruncationPriority);
         Assert.Equal(tsEx.TruncationPriority, tsErr.TruncationPriority);
-        Assert.Equal(goEx.TruncationPriority, goErr.TruncationPriority);
         Assert.Equal(javaEx.TruncationPriority, javaErr.TruncationPriority);
+        // Go error detection is structural (Error() method), so only one variant
+        Assert.Equal(1, goErr.TruncationPriority);
+    }
+
+    #endregion
+
+    #region Structural IsErrorType Edge Cases
+
+    [Fact]
+    public void DotNet_IsErrorType_NamespacedBase_Detected()
+    {
+        // IsError is set structurally by Roslyn during extraction
+        var t = new DotNet.TypeInfo { Name = "MyError", Kind = "class", Base = "System.InvalidOperationException", IsError = true };
+        Assert.True(t.IsErrorType);
+        Assert.Equal(1, t.TruncationPriority);
+    }
+
+    [Fact]
+    public void DotNet_IsErrorType_GenericBase_Detected()
+    {
+        // IsError is set structurally by Roslyn during extraction
+        var t = new DotNet.TypeInfo { Name = "WrappedException", Kind = "class", Base = "ServiceException<ErrorDetail>", IsError = true };
+        Assert.True(t.IsErrorType);
+    }
+
+    [Fact]
+    public void DotNet_IsErrorType_FalsePositivePrevention_BaseContainingException()
+    {
+        // Base that *contains* "Exception" but doesn't end with it should NOT match
+        var t = new DotNet.TypeInfo { Name = "MyHandler", Kind = "class", Base = "ExceptionHandler" };
+        Assert.False(t.IsErrorType);
+    }
+
+    [Fact]
+    public void DotNet_IsErrorType_EmptyBase_NotDetected()
+    {
+        var t = new DotNet.TypeInfo { Name = "SomeException", Kind = "class", Base = "" };
+        Assert.False(t.IsErrorType);
+    }
+
+    [Fact]
+    public void DotNet_IsErrorType_NamedExceptionButNoBase_NotDetected()
+    {
+        // A type *named* "FooException" with no base should NOT be an error type
+        var t = new DotNet.TypeInfo { Name = "FooException", Kind = "class" };
+        Assert.False(t.IsErrorType);
+    }
+
+    [Fact]
+    public void Go_IsErrorType_WrongReturnType_NotDetected()
+    {
+        // Error method returning int instead of string should not match
+        var s = new Go.StructApi
+        {
+            Name = "BadError",
+            Methods = [new Go.FuncApi { Name = "Error", Sig = "()", Ret = "int" }]
+        };
+        Assert.False(s.IsErrorType);
+    }
+
+    [Fact]
+    public void Go_IsErrorType_MethodWithParams_NotDetected()
+    {
+        // Error method with parameters doesn't implement the error interface
+        var s = new Go.StructApi
+        {
+            Name = "NotAnError",
+            Methods = [new Go.FuncApi { Name = "Error", Sig = "(ctx context.Context)", Ret = "string" }]
+        };
+        Assert.False(s.IsErrorType);
+    }
+
+    [Fact]
+    public void Go_IsErrorType_NullSig_Detected()
+    {
+        // Null Sig is treated as no parameters (valid error interface)
+        var s = new Go.StructApi
+        {
+            Name = "SimpleError",
+            Methods = [new Go.FuncApi { Name = "Error", Sig = null, Ret = "string" }]
+        };
+        Assert.True(s.IsErrorType);
+    }
+
+    [Fact]
+    public void Go_IsErrorType_NamedError_NoMethod_NotDetected()
+    {
+        // Struct named "Error" but without Error() method is not an error type
+        var s = new Go.StructApi
+        {
+            Name = "Error",
+            Fields = [new Go.FieldApi { Name = "Message", Type = "string" }]
+        };
+        Assert.False(s.IsErrorType);
+    }
+
+    [Fact]
+    public void Java_IsErrorType_Throwable_Detected()
+    {
+        var c = new Java.ClassInfo { Name = "CriticalFailure", Extends = "Throwable" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Java_IsErrorType_FullyQualifiedBase_Detected()
+    {
+        var c = new Java.ClassInfo { Name = "MyException", Extends = "java.lang.RuntimeException" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Java_IsErrorType_GenericBase_Detected()
+    {
+        var c = new Java.ClassInfo { Name = "TypedError", Extends = "ServiceException<ErrorInfo>" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Java_IsErrorType_FalsePositivePrevention_ErrorHandlerBase()
+    {
+        // Extends "ErrorHandler" should NOT be detected — doesn't end with "Error" or "Exception"
+        var c = new Java.ClassInfo { Name = "MyHandler", Extends = "ErrorHandler" };
+        Assert.False(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Java_IsErrorType_ExtendsError_Detected()
+    {
+        // "Error" is in Java's exception hierarchy (java.lang.Error)
+        var c = new Java.ClassInfo { Name = "OutOfMemory", Extends = "Error" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Python_IsErrorType_BaseException_Detected()
+    {
+        var c = new Python.ClassInfo { Name = "CriticalError", Base = "BaseException" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Python_IsErrorType_Warning_Detected()
+    {
+        var c = new Python.ClassInfo { Name = "DeprecationNotice", Base = "Warning" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Python_IsErrorType_QualifiedBase_Detected()
+    {
+        var c = new Python.ClassInfo { Name = "MyError", Base = "builtins.ValueError" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Python_IsErrorType_GenericLikeBase_Detected()
+    {
+        // Python uses [] for generics, e.g. Exception[T]
+        var c = new Python.ClassInfo { Name = "TypedError", Base = "Exception[ErrorDetail]" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Python_IsErrorType_FalsePositivePrevention_ErrorUtilBase()
+    {
+        // Base containing "Error" in middle but not ending with it
+        var c = new Python.ClassInfo { Name = "Helper", Base = "ErrorProcessor" };
+        Assert.False(c.IsErrorType);
+    }
+
+    [Fact]
+    public void Python_IsErrorType_NamedError_NoBase_NotDetected()
+    {
+        var c = new Python.ClassInfo { Name = "ValidationError" };
+        Assert.False(c.IsErrorType);
+    }
+
+    [Fact]
+    public void TypeScript_IsErrorType_GenericExtends_Detected()
+    {
+        var c = new TypeScript.ClassInfo { Name = "RestError", Extends = "Error<ErrorResponse>" };
+        Assert.True(c.IsErrorType);
+    }
+
+    [Fact]
+    public void TypeScript_IsErrorType_FalsePositivePrevention_ErrorHandlerBase()
+    {
+        var c = new TypeScript.ClassInfo { Name = "MyHandler", Extends = "ErrorHandler" };
+        Assert.False(c.IsErrorType);
+    }
+
+    [Fact]
+    public void TypeScript_IsErrorType_NamedError_NoExtends_NotDetected()
+    {
+        // Named "FooError" but no extends → not an error type
+        var c = new TypeScript.ClassInfo { Name = "FooError" };
+        Assert.False(c.IsErrorType);
+    }
+
+    #endregion
+
+    #region Options Name Heuristic Removed Edge Cases
+
+    [Fact]
+    public void DotNet_TruncationPriority_OptionsNameNoLongerSpecial()
+    {
+        // Types named "Options" should no longer get a special priority level
+        var options = new DotNet.TypeInfo
+        {
+            Name = "ChatOptions",
+            Kind = "class",
+            Members = [new MemberInfo { Name = "MaxTokens", Kind = "property", Signature = "int" }]
+        };
+
+        // Should be a model type (properties only), priority 3 — not special priority 1
+        Assert.True(options.IsModelType);
+        Assert.Equal(3, options.TruncationPriority);
+    }
+
+    [Fact]
+    public void DotNet_TruncationPriority_SettingsNameNoLongerSpecial()
+    {
+        var settings = new DotNet.TypeInfo
+        {
+            Name = "AppSettings",
+            Kind = "class",
+            Members = [new MemberInfo { Name = "Endpoint", Kind = "property", Signature = "string" }]
+        };
+
+        Assert.True(settings.IsModelType);
+        Assert.Equal(3, settings.TruncationPriority);
+    }
+
+    [Fact]
+    public void Go_TruncationPriority_OptionsNameNoLongerSpecial()
+    {
+        var opts = new Go.StructApi
+        {
+            Name = "ClientOptions",
+            Fields = [new Go.FieldApi { Name = "MaxRetries", Type = "int" }]
+        };
+
+        Assert.True(opts.IsModelType);
+        Assert.Equal(2, opts.TruncationPriority);
+    }
+
+    [Fact]
+    public void Java_TruncationPriority_ConfigNameNoLongerSpecial()
+    {
+        var config = new Java.ClassInfo
+        {
+            Name = "ConnectionConfig",
+            Fields = [new Java.FieldInfo { Name = "endpoint", Type = "String" }]
+        };
+
+        Assert.True(config.IsModelType);
+        Assert.Equal(2, config.TruncationPriority);
+    }
+
+    [Fact]
+    public void Python_TruncationPriority_OptionsNameNoLongerSpecial()
+    {
+        var opts = new Python.ClassInfo
+        {
+            Name = "RequestOptions",
+            Properties = [new Python.PropertyInfo("timeout", "float", null)]
+        };
+
+        Assert.True(opts.IsModelType);
+        Assert.Equal(2, opts.TruncationPriority);
+    }
+
+    [Fact]
+    public void TypeScript_TruncationPriority_ConfigNameNoLongerSpecial()
+    {
+        var config = new TypeScript.ClassInfo
+        {
+            Name = "ServiceConfig",
+            Properties = [new TypeScript.PropertyInfo { Name = "endpoint", Type = "string" }]
+        };
+
+        Assert.True(config.IsModelType);
+        Assert.Equal(2, config.TruncationPriority);
     }
 
     #endregion
