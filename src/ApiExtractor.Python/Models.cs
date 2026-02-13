@@ -22,6 +22,14 @@ public sealed record ApiIndex(
     public IEnumerable<ClassInfo> GetClientClasses() =>
         GetAllClasses().Where(c => c.IsClientType);
 
+    /// <summary>Gets the names of all types in the API surface.</summary>
+    public IEnumerable<string> GetAllTypeNames() =>
+        GetAllClasses().Select(c => c.Name);
+
+    /// <summary>Gets the names of client/entry-point types.</summary>
+    public IEnumerable<string> GetClientTypeNames() =>
+        GetClientClasses().Select(c => c.Name);
+
     public string ToJson(bool pretty = false) => pretty
         ? JsonSerializer.Serialize(this, ApiIndexContext.Indented.ApiIndex)
         : JsonSerializer.Serialize(this, ApiIndexContext.Default.ApiIndex);

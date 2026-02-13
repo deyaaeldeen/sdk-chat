@@ -229,7 +229,7 @@ public static class TypeScriptFormatter
                     if (includedTypeNames.Contains(cls.Name)) continue;
 
                     var classStr = FormatClass(cls);
-                    if (sb.Length + classStr.Length > maxLength && includedItems > 0)
+                    if (sb.Length + classStr.Length > maxLength - 100 && includedItems > 0)
                         break;
 
                     sb.Append(classStr);
@@ -244,7 +244,7 @@ public static class TypeScriptFormatter
                     if (includedTypeNames.Contains(iface.Name)) continue;
 
                     var ifaceStr = FormatInterface(iface);
-                    if (sb.Length + ifaceStr.Length > maxLength && includedItems > 0)
+                    if (sb.Length + ifaceStr.Length > maxLength - 100 && includedItems > 0)
                         break;
 
                     sb.Append(ifaceStr);
@@ -258,7 +258,7 @@ public static class TypeScriptFormatter
                     if (sb.Length >= maxLength) break;
 
                     var fnStr = FormatFunction(fn);
-                    if (sb.Length + fnStr.Length > maxLength && includedItems > 0)
+                    if (sb.Length + fnStr.Length > maxLength - 100 && includedItems > 0)
                         break;
 
                     sb.Append(fnStr);
@@ -284,7 +284,7 @@ public static class TypeScriptFormatter
 
                 // Include this class
                 var classStr = FormatClass(cls);
-                if (sb.Length + classStr.Length > maxLength && includedItems > 0)
+                if (sb.Length + classStr.Length > maxLength - 100 && includedItems > 0)
                     break;
 
                 sb.Append(classStr);

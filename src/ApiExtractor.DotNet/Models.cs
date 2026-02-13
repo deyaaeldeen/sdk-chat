@@ -45,6 +45,14 @@ public sealed record ApiIndex : IApiIndex
     public IEnumerable<TypeInfo> GetClientTypes() =>
         GetAllTypes().Where(t => t.IsClientType);
 
+    /// <summary>Gets the names of all types in the API surface.</summary>
+    public IEnumerable<string> GetAllTypeNames() =>
+        GetAllTypes().Select(t => t.Name);
+
+    /// <summary>Gets the names of client/entry-point types.</summary>
+    public IEnumerable<string> GetClientTypeNames() =>
+        GetClientTypes().Select(t => t.Name);
+
     /// <summary>
     /// Builds a dependency graph: for each type, which other types it references.
     /// Used for smart truncation to avoid orphan types.

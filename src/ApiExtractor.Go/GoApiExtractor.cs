@@ -14,7 +14,7 @@ namespace ApiExtractor.Go;
 public class GoApiExtractor : IApiExtractor<ApiIndex>
 {
     private static readonly SemaphoreSlim CompileLock = new(1, 1);
-    private static string? _cachedBinaryPath;
+    private static volatile string? _cachedBinaryPath;
 
     /// <summary>Shared availability configuration for all Go extractor components.</summary>
     internal static readonly ExtractorConfig SharedConfig = new()

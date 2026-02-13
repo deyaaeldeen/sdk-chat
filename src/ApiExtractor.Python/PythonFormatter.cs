@@ -269,7 +269,7 @@ public static class PythonFormatter
         foreach (var prop in cls.Properties ?? [])
         {
             if (!string.IsNullOrEmpty(prop.Doc))
-                sb.AppendLine($"        \"\"\"{prop.Doc}\"\"\"");
+                sb.AppendLine($"    # {prop.Doc}");
 
             var typeHint = !string.IsNullOrEmpty(prop.Type) ? $": {prop.Type}" : "";
             sb.AppendLine($"    {prop.Name}{typeHint}");

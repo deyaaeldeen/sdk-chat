@@ -146,7 +146,7 @@ public static class ExtractorAvailability
     /// </summary>
     private static bool IsDockerImageAvailable(string imageName) =>
         DockerImageCache.GetOrAdd(imageName, name =>
-            ValidateExecutable("docker", $"image inspect {name}").Success);
+            ValidateExecutable("docker", ["image", "inspect", name]).Success);
 
     private static ExtractorAvailabilityResult CheckInternal(
         string language,
@@ -220,10 +220,19 @@ public static class ExtractorAvailability
     }
 
     /// <summary>
+    /// Validates that an executable runs successfully with given args (string overload).
+    /// Splits <paramref name="args"/> on whitespace — safe for single-token arguments
+    /// like "--help" and "--version". Use the <c>string[]</c> overload for arguments
+    /// that may contain spaces.
+    /// </summary>
+    private static (bool Success, string? Error) ValidateExecutable(string path, string args)
+        => ValidateExecutable(path, args.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>
     /// Validates that an executable runs successfully with given args.
     /// More robust than just checking file existence.
     /// </summary>
-    private static (bool Success, string? Error) ValidateExecutable(string path, string args)
+    private static (bool Success, string? Error) ValidateExecutable(string path, string[] args)
     {
         try
         {
@@ -237,7 +246,7 @@ public static class ExtractorAvailability
             };
 
             // SECURITY: Use ArgumentList for proper escaping - prevents injection
-            foreach (var arg in args.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            foreach (var arg in args)
             {
                 psi.ArgumentList.Add(arg);
             }
@@ -267,8 +276,7 @@ public static class ExtractorAvailability
             // Exit code 0 or 1 are acceptable for --help (some tools return 1 for help)
             // Exit code 0 is required for --version
             // Use exact token match to avoid false positives from substrings like "--helper"
-            var splitArgs = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var isHelpArgs = Array.Exists(splitArgs, a => a == "--help");
+            var isHelpArgs = Array.Exists(args, a => a == "--help");
             var acceptableExitCodes = isHelpArgs ? new[] { 0, 1 } : new[] { 0 };
             if (acceptableExitCodes.Contains(process.ExitCode))
             {

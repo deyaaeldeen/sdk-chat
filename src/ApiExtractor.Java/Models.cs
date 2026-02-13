@@ -40,6 +40,15 @@ public sealed record ApiIndex : IApiIndex
     public IEnumerable<ClassInfo> GetClientClasses() =>
         GetAllClasses().Where(c => c.IsClientType);
 
+    /// <summary>Gets the names of all types (classes, interfaces, enums, annotations) in the API surface.</summary>
+    public IEnumerable<string> GetAllTypeNames() =>
+        GetAllTypes().Select(t => t.Name)
+            .Concat(Packages.SelectMany(p => (p.Enums ?? []).Select(e => e.Name)));
+
+    /// <summary>Gets the names of client/entry-point types.</summary>
+    public IEnumerable<string> GetClientTypeNames() =>
+        GetClientClasses().Select(c => c.Name);
+
     public string ToJson(bool pretty = false) => pretty
         ? JsonSerializer.Serialize(this, SourceGenerationContext.Indented.ApiIndex)
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);

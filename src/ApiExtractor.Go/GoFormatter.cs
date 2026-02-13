@@ -30,8 +30,11 @@ public static class GoFormatter
         var allStructs = index.GetAllStructs().ToList();
         var structsWithUncovered = allStructs.Where(s => uncoveredByClient.ContainsKey(s.Name)).ToList();
 
-        // Build set of all type names for dependency tracking
+        // Build set of all type names for dependency tracking (structs + interfaces)
         var allTypeNames = allStructs.Select(s => s.Name).ToHashSet();
+        foreach (var pkg in index.Packages ?? [])
+            foreach (var iface in pkg.Interfaces ?? [])
+                allTypeNames.Add(iface.Name);
         var structsByName = allStructs.ToDictionary(s => s.Name);
 
         HashSet<string> includedStructs = [];
@@ -83,6 +86,35 @@ public static class GoFormatter
             }
         }
 
+        // Interfaces with uncovered operations
+        foreach (var pkg in index.Packages ?? [])
+        {
+            foreach (var iface in pkg.Interfaces ?? [])
+            {
+                if (!uncoveredByClient.ContainsKey(iface.Name))
+                    continue;
+
+                var filteredIface = iface;
+                if (uncoveredByClient.TryGetValue(iface.Name, out var uncoveredIfaceOps))
+                {
+                    filteredIface = iface with
+                    {
+                        Methods = iface.Methods?
+                            .Where(m => uncoveredIfaceOps.Contains(m.Name))
+                            .ToList() ?? []
+                    };
+                }
+
+                var ifaceContent = FormatInterfaceToString(filteredIface);
+
+                if (currentLength + ifaceContent.Length > maxLength - 100)
+                    break;
+
+                sb.Append(ifaceContent);
+                currentLength += ifaceContent.Length;
+            }
+        }
+
         // Include dependency types from external packages if space permits
         if (index.Dependencies?.Count > 0)
         {
@@ -110,6 +142,24 @@ public static class GoFormatter
     {
         var sb = new StringBuilder();
         FormatStruct(sb, st);
+        return sb.ToString();
+    }
+
+    private static string FormatInterfaceToString(IfaceApi iface)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrEmpty(iface.Doc))
+            sb.AppendLine($"// {iface.Doc}");
+        sb.AppendLine($"type {iface.Name} interface {{");
+        foreach (var embed in iface.Embeds ?? [])
+            sb.AppendLine($"    {embed}");
+        foreach (var m in iface.Methods ?? [])
+        {
+            var ret = !string.IsNullOrEmpty(m.Ret) ? $" {m.Ret}" : "";
+            sb.AppendLine($"    {m.Name}({m.Sig}){ret}");
+        }
+        sb.AppendLine("}");
+        sb.AppendLine();
         return sb.ToString();
     }
 

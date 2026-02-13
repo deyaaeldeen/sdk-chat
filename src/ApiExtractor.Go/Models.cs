@@ -32,6 +32,17 @@ public sealed record ApiIndex : IApiIndex
     public IEnumerable<StructApi> GetClientStructs() =>
         GetAllStructs().Where(s => s.IsClientType);
 
+    /// <summary>Gets the names of all types (structs, interfaces, type definitions) in the API surface.</summary>
+    public IEnumerable<string> GetAllTypeNames() =>
+        Packages.SelectMany(p =>
+            (p.Structs ?? []).Select(s => s.Name)
+                .Concat((p.Interfaces ?? []).Select(i => i.Name))
+                .Concat((p.Types ?? []).Select(t => t.Name)));
+
+    /// <summary>Gets the names of client/entry-point types.</summary>
+    public IEnumerable<string> GetClientTypeNames() =>
+        GetClientStructs().Select(s => s.Name);
+
     public string ToJson(bool pretty = false) => pretty
         ? JsonSerializer.Serialize(this, SourceGenerationContext.Indented.ApiIndex)
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
@@ -229,6 +240,23 @@ public sealed record IfaceApi
 
     [JsonPropertyName("methods")]
     public IReadOnlyList<FuncApi>? Methods { get; init; }
+
+    /// <summary>Gets type names referenced in method signatures and embeds.</summary>
+    public void CollectReferencedTypes(HashSet<string> allTypeNames, HashSet<string> result)
+    {
+        result.Clear();
+        foreach (var embed in Embeds ?? [])
+        {
+            if (allTypeNames.Contains(embed))
+                result.Add(embed);
+        }
+        foreach (var method in Methods ?? [])
+        {
+            SignatureTokenizer.TokenizeInto(method.Sig, result);
+            SignatureTokenizer.TokenizeInto(method.Ret, result);
+        }
+        result.IntersectWith(allTypeNames);
+    }
 }
 
 /// <summary>A function or method.</summary>

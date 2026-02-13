@@ -32,6 +32,18 @@ public sealed record ApiIndex : IApiIndex
     public IEnumerable<ClassInfo> GetClientClasses() =>
         GetAllClasses().Where(c => c.IsClientType);
 
+    /// <summary>Gets the names of all types (classes, interfaces, enums, type aliases) in the API surface.</summary>
+    public IEnumerable<string> GetAllTypeNames() =>
+        Modules.SelectMany(m =>
+            (m.Classes ?? []).Select(c => c.Name)
+                .Concat((m.Interfaces ?? []).Select(i => i.Name))
+                .Concat((m.Enums ?? []).Select(e => e.Name))
+                .Concat((m.Types ?? []).Select(t => t.Name)));
+
+    /// <summary>Gets the names of client/entry-point types.</summary>
+    public IEnumerable<string> GetClientTypeNames() =>
+        GetClientClasses().Select(c => c.Name);
+
     public string ToJson(bool pretty = false) => pretty
         ? JsonSerializer.Serialize(this, SourceGenerationContext.Indented.ApiIndex)
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
@@ -47,6 +59,15 @@ public sealed record ApiIndex : IApiIndex
         var graph = new Dictionary<string, HashSet<string>>();
         var allClasses = GetAllClasses().ToList();
         var allTypeNames = allClasses.Select(c => c.Name).ToHashSet();
+
+        // Include interfaces, enums, and type aliases in the type name set
+        foreach (var m in Modules)
+        {
+            foreach (var i in m.Interfaces ?? []) allTypeNames.Add(i.Name);
+            foreach (var e in m.Enums ?? []) allTypeNames.Add(e.Name);
+            foreach (var t in m.Types ?? []) allTypeNames.Add(t.Name);
+        }
+
         HashSet<string> reusable = [];
 
         foreach (var cls in allClasses)
@@ -294,6 +315,14 @@ public sealed record TypeAliasInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    /// <summary>Gets type names referenced in this type alias definition.</summary>
+    public void CollectReferencedTypes(HashSet<string> allTypeNames, HashSet<string> result)
+    {
+        result.Clear();
+        SignatureTokenizer.TokenizeInto(Type, result);
+        result.IntersectWith(allTypeNames);
+    }
 }
 
 /// <summary>A function declaration.</summary>
