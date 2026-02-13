@@ -46,6 +46,12 @@ public static class ScriptUsageAnalyzerHelper
         /// were not provided by the script output.
         /// </summary>
         public Dictionary<string, string>? SignatureLookup { get; init; }
+
+        /// <summary>
+        /// Lookup for deprecated operations (key = "TypeName.MethodName").
+        /// Used to mark uncovered operations as deprecated.
+        /// </summary>
+        public HashSet<string>? DeprecationLookup { get; init; }
     }
 
     /// <summary>
@@ -98,11 +104,13 @@ public static class ScriptUsageAnalyzerHelper
                 if (sig is null && config.SignatureLookup is not null)
                     sig = config.SignatureLookup.GetValueOrDefault($"{u.Client}.{u.Method}");
                 sig ??= $"{u.Method}(...)";
+                var opKey = $"{u.Client}.{u.Method}";
                 return new UncoveredOperation
                 {
                     ClientType = u.Client ?? "",
                     Operation = u.Method ?? "",
-                    Signature = sig
+                    Signature = sig,
+                    IsDeprecated = config.DeprecationLookup?.Contains(opKey) == true ? true : null
                 };
             }).ToList() ?? []
         };

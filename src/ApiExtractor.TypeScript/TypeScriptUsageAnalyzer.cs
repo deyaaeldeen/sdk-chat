@@ -65,7 +65,8 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     WorkingDirectory: scriptDir),
                 _ => new(["--usage", "-", samplesPath])
             },
-            SignatureLookup = BuildSignatureLookup(apiIndex)
+            SignatureLookup = BuildSignatureLookup(apiIndex),
+            DeprecationLookup = BuildDeprecationLookup(apiIndex)
         }, ct).ConfigureAwait(false);
 
         if (analysisResult.Errors.Count > 0)
@@ -219,6 +220,24 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             foreach (var iface in module.Interfaces ?? [])
                 foreach (var method in iface.Methods ?? [])
                     lookup.TryAdd($"{iface.Name}.{method.Name}", $"{method.Name}{method.Sig}");
+        }
+        return lookup;
+    }
+
+    internal static HashSet<string> BuildDeprecationLookup(ApiIndex apiIndex)
+    {
+        var lookup = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var module in apiIndex.Modules)
+        {
+            foreach (var cls in module.Classes ?? [])
+                foreach (var method in cls.Methods ?? [])
+                    if (method.IsDeprecated == true || cls.IsDeprecated == true)
+                        lookup.Add($"{cls.Name}.{method.Name}");
+
+            foreach (var iface in module.Interfaces ?? [])
+                foreach (var method in iface.Methods ?? [])
+                    if (method.IsDeprecated == true || iface.IsDeprecated == true)
+                        lookup.Add($"{iface.Name}.{method.Name}");
         }
         return lookup;
     }

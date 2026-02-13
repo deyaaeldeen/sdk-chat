@@ -492,6 +492,11 @@ public static class TypeScriptFormatter
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(cls.Doc))
             sb.AppendLine($"/** {cls.Doc} */");
+        if (cls.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(cls.DeprecatedMessage) ? $" {cls.DeprecatedMessage}" : "";
+            sb.AppendLine($"/** @deprecated{msg} */");
+        }
         var ext = !string.IsNullOrEmpty(cls.Extends) ? $" extends {cls.Extends}" : "";
         var impl = cls.Implements?.Count > 0 ? $" implements {string.Join(", ", cls.Implements)}" : "";
         var typeParams = !string.IsNullOrEmpty(cls.TypeParams) ? $"<{cls.TypeParams}>" : "";
@@ -500,6 +505,11 @@ public static class TypeScriptFormatter
 
         foreach (var prop in cls.Properties ?? [])
         {
+            if (prop.IsDeprecated == true)
+            {
+                var pmsg = !string.IsNullOrEmpty(prop.DeprecatedMessage) ? $" {prop.DeprecatedMessage}" : "";
+                sb.AppendLine($"    /** @deprecated{pmsg} */");
+            }
             var opt = prop.Optional == true ? "?" : "";
             var ro = prop.Readonly == true ? "readonly " : "";
             sb.AppendLine($"    {ro}{prop.Name}{opt}: {prop.Type};");
@@ -512,6 +522,11 @@ public static class TypeScriptFormatter
 
         foreach (var m in cls.Methods ?? [])
         {
+            if (m.IsDeprecated == true)
+            {
+                var mmsg = !string.IsNullOrEmpty(m.DeprecatedMessage) ? $" {m.DeprecatedMessage}" : "";
+                sb.AppendLine($"    /** @deprecated{mmsg} */");
+            }
             var async = m.Async == true ? "async " : "";
             var stat = m.Static == true ? "static " : "";
             var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : "";
@@ -533,7 +548,11 @@ public static class TypeScriptFormatter
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(iface.Doc))
             sb.AppendLine($"/** {iface.Doc} */");
-        var ext = !string.IsNullOrEmpty(iface.Extends) ? $" extends {iface.Extends}" : "";
+        if (iface.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(iface.DeprecatedMessage) ? $" {iface.DeprecatedMessage}" : "";
+            sb.AppendLine($"/** @deprecated{msg} */");
+        }        var ext = !string.IsNullOrEmpty(iface.Extends) ? $" extends {iface.Extends}" : "";
         var typeParams = !string.IsNullOrEmpty(iface.TypeParams) ? $"<{iface.TypeParams}>" : "";
         var export = exportKeyword ? "export " : "";
         sb.AppendLine($"{export}interface {iface.Name}{typeParams}{ext} {{");
@@ -562,6 +581,11 @@ public static class TypeScriptFormatter
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(e.Doc))
             sb.AppendLine($"/** {e.Doc} */");
+        if (e.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(e.DeprecatedMessage) ? $" {e.DeprecatedMessage}" : "";
+            sb.AppendLine($"/** @deprecated{msg} */");
+        }
         var export = exportKeyword ? "export " : "";
         sb.AppendLine($"{export}enum {e.Name} {{");
         if (e.Values is not null)
@@ -576,6 +600,11 @@ public static class TypeScriptFormatter
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(t.Doc))
             sb.AppendLine($"/** {t.Doc} */");
+        if (t.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(t.DeprecatedMessage) ? $" {t.DeprecatedMessage}" : "";
+            sb.AppendLine($"/** @deprecated{msg} */");
+        }
         var export = exportKeyword ? "export " : "";
         sb.AppendLine($"{export}type {t.Name} = {t.Type};");
         sb.AppendLine();
@@ -587,6 +616,11 @@ public static class TypeScriptFormatter
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(fn.Doc))
             sb.AppendLine($"/** {fn.Doc} */");
+        if (fn.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(fn.DeprecatedMessage) ? $" {fn.DeprecatedMessage}" : "";
+            sb.AppendLine($"/** @deprecated{msg} */");
+        }
         var async = fn.Async == true ? "async " : "";
         var ret = !string.IsNullOrEmpty(fn.Ret) ? $": {fn.Ret}" : "";
         sb.AppendLine($"export {async}function {fn.Name}({fn.Sig}){ret};");

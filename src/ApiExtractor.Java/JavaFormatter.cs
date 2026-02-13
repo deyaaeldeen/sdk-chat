@@ -281,6 +281,11 @@ public static class JavaFormatter
         if (!string.IsNullOrEmpty(type.Doc))
             sb.AppendLine($"/** {type.Doc} */");
 
+        if (type.IsDeprecated == true)
+        {
+            sb.AppendLine("@Deprecated");
+        }
+
         var mods = type.Modifiers is not null ? string.Join(" ", type.Modifiers) + " " : "";
         var typeParams = !string.IsNullOrEmpty(type.TypeParams) ? $"<{type.TypeParams}>" : "";
         var ext = !string.IsNullOrEmpty(type.Extends) ? $" extends {type.Extends}" : "";
@@ -293,6 +298,8 @@ public static class JavaFormatter
         {
             foreach (var f in type.Fields)
             {
+                if (f.IsDeprecated == true)
+                    sb.AppendLine("    @Deprecated");
                 var fm = f.Modifiers is not null ? string.Join(" ", f.Modifiers) + " " : "";
                 var val = !string.IsNullOrEmpty(f.Value) ? $" = {f.Value}" : "";
                 sb.AppendLine($"    {fm}{f.Type} {f.Name}{val};");
@@ -324,6 +331,9 @@ public static class JavaFormatter
             if (!string.IsNullOrEmpty(e.Doc))
                 sb.AppendLine($"/** {e.Doc} */");
 
+            if (e.IsDeprecated == true)
+                sb.AppendLine("@Deprecated");
+
             sb.AppendLine($"public enum {e.Name} {{");
 
             if (e.Values?.Count > 0)
@@ -344,6 +354,9 @@ public static class JavaFormatter
     {
         if (!string.IsNullOrEmpty(m.Doc))
             sb.AppendLine($"    /** {m.Doc} */");
+
+        if (m.IsDeprecated == true)
+            sb.AppendLine("    @Deprecated");
 
         var mods = m.Modifiers is not null ? string.Join(" ", m.Modifiers) + " " : "";
         var typeParams = !string.IsNullOrEmpty(m.TypeParams) ? $"<{m.TypeParams}> " : "";

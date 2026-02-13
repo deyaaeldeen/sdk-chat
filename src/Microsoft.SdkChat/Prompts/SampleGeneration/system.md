@@ -26,5 +26,5 @@ Return ONLY valid JSON array. No markdown, no explanation:
 ## Never:
 - Hardcode secrets
 - Ignore exceptions
-- Use deprecated APIs
+- Use deprecated APIs. If the only way to accomplish a task uses a deprecated API, note the deprecation and suggest the replacement.
 - Use Console.WriteLine/print for non-demo output

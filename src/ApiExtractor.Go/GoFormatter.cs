@@ -271,6 +271,11 @@ public static class GoFormatter
             {
                 if (!string.IsNullOrEmpty(iface.Doc))
                     sb.AppendLine($"// {iface.Doc}");
+                if (iface.IsDeprecated == true)
+                {
+                    var imsg = !string.IsNullOrEmpty(iface.DeprecatedMessage) ? $" {iface.DeprecatedMessage}" : "";
+                    sb.AppendLine($"// Deprecated:{imsg}");
+                }
                 sb.AppendLine($"type {iface.Name} interface {{");
                 foreach (var embed in iface.Embeds ?? [])
                 {
@@ -322,6 +327,11 @@ public static class GoFormatter
             {
                 if (!string.IsNullOrEmpty(f.Doc))
                     sb.AppendLine($"// {f.Doc}");
+                if (f.IsDeprecated == true)
+                {
+                    var fmsg = !string.IsNullOrEmpty(f.DeprecatedMessage) ? $" {f.DeprecatedMessage}" : "";
+                    sb.AppendLine($"// Deprecated:{fmsg}");
+                }
                 var ret = !string.IsNullOrEmpty(f.Ret) ? $" {f.Ret}" : "";
                 var funcTypeParams = f.TypeParams?.Count > 0 ? $"[{string.Join(", ", f.TypeParams)}]" : "";
                 sb.AppendLine($"func {f.Name}{funcTypeParams}({f.Sig}){ret}");
@@ -396,6 +406,11 @@ public static class GoFormatter
     {
         if (!string.IsNullOrEmpty(s.Doc))
             sb.AppendLine($"// {s.Doc}");
+        if (s.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(s.DeprecatedMessage) ? $" {s.DeprecatedMessage}" : "";
+            sb.AppendLine($"// Deprecated:{msg}");
+        }
         var typeParams = s.TypeParams?.Count > 0 ? $"[{string.Join(", ", s.TypeParams)}]" : "";
         sb.AppendLine($"type {s.Name}{typeParams} struct {{");
 
@@ -407,6 +422,11 @@ public static class GoFormatter
 
         foreach (var f in s.Fields ?? [])
         {
+            if (f.IsDeprecated == true)
+            {
+                var fmsg = !string.IsNullOrEmpty(f.DeprecatedMessage) ? $" {f.DeprecatedMessage}" : "";
+                sb.AppendLine($"    // Deprecated:{fmsg}");
+            }
             var tag = !string.IsNullOrEmpty(f.Tag) ? $" {f.Tag}" : "";
             sb.AppendLine($"    {f.Name} {f.Type}{tag}");
         }
@@ -415,6 +435,11 @@ public static class GoFormatter
         // Methods
         foreach (var m in s.Methods ?? [])
         {
+            if (m.IsDeprecated == true)
+            {
+                var mmsg = !string.IsNullOrEmpty(m.DeprecatedMessage) ? $" {m.DeprecatedMessage}" : "";
+                sb.AppendLine($"// Deprecated:{mmsg}");
+            }
             var ret = !string.IsNullOrEmpty(m.Ret) ? $" {m.Ret}" : "";
             var funcTypeParams = m.TypeParams?.Count > 0 ? $"[{string.Join(", ", m.TypeParams)}]" : "";
             if (!string.IsNullOrEmpty(m.Receiver))
