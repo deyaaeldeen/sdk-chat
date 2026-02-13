@@ -159,6 +159,14 @@ public sealed record ClassInfo
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+
     [JsonPropertyName("constructors")]
     public IReadOnlyList<ConstructorInfo>? Constructors { get; init; }
 
@@ -278,6 +286,14 @@ public sealed record InterfaceInfo
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+
     [JsonPropertyName("methods")]
     public IReadOnlyList<MethodInfo>? Methods { get; init; }
 
@@ -295,6 +311,14 @@ public sealed record EnumInfo
     public string? ReExportedFrom { get; init; }
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     [JsonPropertyName("values")]
     public IReadOnlyList<string>? Values { get; init; }
@@ -315,6 +339,14 @@ public sealed record TypeAliasInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     /// <summary>Gets type names referenced in this type alias definition.</summary>
     public void CollectReferencedTypes(HashSet<string> allTypeNames, HashSet<string> result)
@@ -353,6 +385,14 @@ public sealed record FunctionInfo
 
     [JsonPropertyName("async")]
     public bool? Async { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 /// <summary>A method declaration.</summary>
@@ -375,6 +415,14 @@ public sealed record MethodInfo
 
     [JsonPropertyName("static")]
     public bool? Static { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 /// <summary>A property declaration.</summary>
@@ -394,6 +442,14 @@ public sealed record PropertyInfo
 
     [JsonPropertyName("optional")]
     public bool? Optional { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 /// <summary>A constructor declaration.</summary>

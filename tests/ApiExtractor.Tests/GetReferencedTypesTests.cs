@@ -148,7 +148,7 @@ public class GetReferencedTypesTests
             Name = "BlobClient",
             Methods =
             [
-                new PyModels.MethodInfo("download_blob", "download_blob(self, offset: int) -> BlobProperties", null, null, null, null)
+                new PyModels.MethodInfo { Name = "download_blob", Signature = "download_blob(self, offset: int) -> BlobProperties" }
             ]
         };
 
@@ -181,7 +181,7 @@ public class GetReferencedTypesTests
             Name = "BlobClient",
             Properties =
             [
-                new PyModels.PropertyInfo("pipeline", "Pipeline", null)
+                new PyModels.PropertyInfo { Name = "pipeline", Type = "Pipeline" }
             ]
         };
 
@@ -198,7 +198,7 @@ public class GetReferencedTypesTests
             Name = "Foo",
             Properties =
             [
-                new PyModels.PropertyInfo("bar", null, null)
+                new PyModels.PropertyInfo { Name = "bar" }
             ]
         };
 
@@ -232,7 +232,7 @@ public class GetReferencedTypesTests
             Name = "MyClient",
             Methods =
             [
-                new PyModels.MethodInfo("handle", "handle(self, handler: ErrorHandler) -> None", null, null, null, null)
+                new PyModels.MethodInfo { Name = "handle", Signature = "handle(self, handler: ErrorHandler) -> None" }
             ]
         };
 
@@ -345,8 +345,11 @@ public class GetReferencedTypesTests
         // Python
         var pyMethods = new List<PyModels.MethodInfo>();
         for (int i = 0; i < 20; i++)
-            pyMethods.Add(new PyModels.MethodInfo(
-                $"method{i}", $"method{i}(self, arg: Type{i % 50}) -> Type{(i + 1) % 50}", null, null, null, null));
+            pyMethods.Add(new PyModels.MethodInfo
+            {
+                Name = $"method{i}",
+                Signature = $"method{i}(self, arg: Type{i % 50}) -> Type{(i + 1) % 50}"
+            });
 
         var pyClass = new PyModels.ClassInfo { Name = "Client", Methods = pyMethods };
         var pyRefs = pyClass.GetReferencedTypes(typeNames);
@@ -729,7 +732,7 @@ public class GetReferencedTypesTests
         {
             Name = "Client",
             Base = "BaseClient",
-            Methods = [new PyModels.MethodInfo("do_work", "self, opts: WorkOptions", null, false, null, null, "Result")]
+            Methods = [new PyModels.MethodInfo { Name = "do_work", Signature = "self, opts: WorkOptions", IsAsync = false, Ret = "Result" }]
         };
         HashSet<string> allTypes = ["BaseClient", "WorkOptions", "Result"];
 

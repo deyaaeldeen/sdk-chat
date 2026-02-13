@@ -28,7 +28,7 @@ public class FormatterTests
                     Name = "Client",
                     Methods =
                     [
-                        new Python.MethodInfo("get_item", "self, id: str", null, false, null, null, "Item")
+                        new Python.MethodInfo { Name = "get_item", Signature = "self, id: str", IsAsync = false, Ret = "Item" }
                     ]
                 }
             ], null)
@@ -73,7 +73,7 @@ public class FormatterTests
                     Name = "Client",
                     Methods =
                     [
-                        new Python.MethodInfo("close", "self", null, false, null, null, null)
+                        new Python.MethodInfo { Name = "close", Signature = "self", IsAsync = false }
                     ]
                 }
             ], null)
@@ -96,7 +96,7 @@ public class FormatterTests
                     Name = "Client",
                     Methods =
                     [
-                        new Python.MethodInfo("from_string", "cls, s: str", "Create from string.", false, true, null, "Client")
+                        new Python.MethodInfo { Name = "from_string", Signature = "cls, s: str", Doc = "Create from string.", IsAsync = false, IsClassMethod = true, Ret = "Client" }
                     ]
                 }
             ], null)
@@ -123,7 +123,7 @@ public class FormatterTests
                     Name = "Client",
                     Methods =
                     [
-                        new Python.MethodInfo("do_work", "self", "Does work.", false, null, null, null)
+                        new Python.MethodInfo { Name = "do_work", Signature = "self", Doc = "Does work.", IsAsync = false }
                     ]
                 }
             ], null)
@@ -150,7 +150,7 @@ public class FormatterTests
                     Name = "Client",
                     Methods =
                     [
-                        new Python.MethodInfo("fetch_async", "self", null, true, null, null, "str")
+                        new Python.MethodInfo { Name = "fetch_async", Signature = "self", IsAsync = true, Ret = "str" }
                     ]
                 }
             ], null)
@@ -758,7 +758,7 @@ public class FormatterTests
                     EntryPoint = true,
                     Methods =
                     [
-                        new MethodInfo("get_item", "self, id: str, opts: Item", null, false, null, null, null)
+                        new MethodInfo { Name = "get_item", Signature = "self, id: str, opts: Item", IsAsync = false }
                     ]
                 },
                 new ClassInfo
@@ -766,7 +766,7 @@ public class FormatterTests
                     Name = "Item",
                     Properties =
                     [
-                        new PropertyInfo("Name", "str", null)
+                        new PropertyInfo { Name = "Name", Type = "str" }
                     ]
                 }
             ], null)
@@ -800,7 +800,7 @@ public class FormatterTests
                     EntryPoint = true,
                     Methods =
                     [
-                        new MethodInfo("create", "self", null, false, null, null, "Response")
+                        new MethodInfo { Name = "create", Signature = "self", IsAsync = false, Ret = "Response" }
                     ]
                 }
             ], null)
@@ -850,7 +850,7 @@ public class FormatterTests
                     new ClassInfo
                     {
                         Name = "TokenCredential",
-                        Methods = [new MethodInfo("get_token", "self", null, false, null, null, "str")]
+                        Methods = [new MethodInfo { Name = "get_token", Signature = "self", IsAsync = false, Ret = "str" }]
                     }
                 ]
             }

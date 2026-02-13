@@ -157,6 +157,8 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         private volatile List<string>? _values;
         public volatile bool IsEntryPoint;
         public volatile bool IsError;
+        public volatile bool IsDeprecated;
+        public volatile string? DeprecatedMessage;
         public ConcurrentBag<string> RawBaseTypes { get; } = [];
 
         public void AddInterface(string iface) => Interfaces.TryAdd(iface, 0);
@@ -207,7 +209,9 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Members = !Members.IsEmpty ? Members.Values.ToList() : null,
             Values = _values,
             EntryPoint = IsEntryPoint ? true : null,
-            IsError = IsError ? true : null
+            IsError = IsError ? true : null,
+            IsDeprecated = IsDeprecated ? true : null,
+            DeprecatedMessage = DeprecatedMessage
         };
     }
 
@@ -276,6 +280,15 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Take first doc - thread-safe
         merged.SetDocIfNull(GetXmlDoc(type));
 
+        // Detect [Obsolete] attribute
+        var (isDeprecated, deprecatedMsg) = GetTypeDeprecationInfo(type);
+        if (isDeprecated)
+        {
+            merged.IsDeprecated = true;
+            if (deprecatedMsg != null)
+                merged.DeprecatedMessage ??= deprecatedMsg;
+        }
+
         if (type is EnumDeclarationSyntax e)
         {
             merged.SetValuesIfNull(e.Members.Select(m => m.Identifier.Text).ToList());
@@ -289,6 +302,7 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 // separate MemberInfo entries so none are silently dropped.
                 if (member is FieldDeclarationSyntax f && f.Modifiers.Any(SyntaxKind.ConstKeyword))
                 {
+                    var (constDeprecated, constDeprecatedMsg) = GetMemberDeprecationInfo(f);
                     foreach (var v in f.Declaration.Variables)
                     {
                         var constInfo = new MemberInfo
@@ -297,7 +311,9 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
                             Kind = "const",
                             Signature = $"const {Simplify(f.Declaration.Type)} {v.Identifier.Text}" +
                                 (v.Initializer != null && v.Initializer.Value.ToString().Length < 30 ? $" = {v.Initializer.Value}" : ""),
-                            Doc = GetXmlDoc(f)
+                            Doc = GetXmlDoc(f),
+                            IsDeprecated = constDeprecated ? true : null,
+                            DeprecatedMessage = constDeprecatedMsg
                         };
                         merged.Members.TryAdd(constInfo.Signature, constInfo);
                     }
@@ -507,90 +523,107 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         return name;
     }
 
-    private MemberInfo? ExtractMember(MemberDeclarationSyntax member) => member switch
+    private MemberInfo? ExtractMember(MemberDeclarationSyntax member)
     {
-        ConstructorDeclarationSyntax ctor => new MemberInfo
+        var info = member switch
         {
-            Name = ctor.Identifier.Text,
-            Kind = "ctor",
-            Signature = $"({FormatParams(ctor.ParameterList)})",
-            Doc = GetXmlDoc(ctor)
-        },
-        MethodDeclarationSyntax m => new MemberInfo
-        {
-            Name = m.Identifier.Text,
-            Kind = "method",
-            Signature = $"{Simplify(m.ReturnType)} {m.Identifier.Text}{TypeParams(m)}({FormatParams(m.ParameterList)})",
-            Doc = GetXmlDoc(m),
-            IsStatic = m.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null,
-            IsAsync = IsAsyncMethod(m) ? true : null
-        },
-        PropertyDeclarationSyntax p => new MemberInfo
-        {
-            Name = p.Identifier.Text,
-            Kind = "property",
-            Signature = $"{Simplify(p.Type)} {p.Identifier.Text}{Accessors(p)}",
-            Doc = GetXmlDoc(p),
-            IsStatic = p.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null
-        },
-        IndexerDeclarationSyntax idx => new MemberInfo
-        {
-            Name = "this[]",
-            Kind = "indexer",
-            Signature = $"{Simplify(idx.Type)} this[{FormatParams(idx.ParameterList)}]",
-            Doc = GetXmlDoc(idx)
-        },
-        EventDeclarationSyntax evt => new MemberInfo
-        {
-            Name = evt.Identifier.Text,
-            Kind = "event",
-            Signature = $"event {Simplify(evt.Type)} {evt.Identifier.Text}",
-            Doc = GetXmlDoc(evt)
-        },
-        EventFieldDeclarationSyntax ef =>
-            ef.Declaration.Variables.FirstOrDefault() is { } ev ? new MemberInfo
+            ConstructorDeclarationSyntax ctor => new MemberInfo
             {
-                Name = ev.Identifier.Text,
+                Name = ctor.Identifier.Text,
+                Kind = "ctor",
+                Signature = $"({FormatParams(ctor.ParameterList)})",
+                Doc = GetXmlDoc(ctor)
+            },
+            MethodDeclarationSyntax m => new MemberInfo
+            {
+                Name = m.Identifier.Text,
+                Kind = "method",
+                Signature = $"{Simplify(m.ReturnType)} {m.Identifier.Text}{TypeParams(m)}({FormatParams(m.ParameterList)})",
+                Doc = GetXmlDoc(m),
+                IsStatic = m.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null,
+                IsAsync = IsAsyncMethod(m) ? true : null
+            },
+            PropertyDeclarationSyntax p => new MemberInfo
+            {
+                Name = p.Identifier.Text,
+                Kind = "property",
+                Signature = $"{Simplify(p.Type)} {p.Identifier.Text}{Accessors(p)}",
+                Doc = GetXmlDoc(p),
+                IsStatic = p.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null
+            },
+            IndexerDeclarationSyntax idx => new MemberInfo
+            {
+                Name = "this[]",
+                Kind = "indexer",
+                Signature = $"{Simplify(idx.Type)} this[{FormatParams(idx.ParameterList)}]",
+                Doc = GetXmlDoc(idx)
+            },
+            EventDeclarationSyntax evt => new MemberInfo
+            {
+                Name = evt.Identifier.Text,
                 Kind = "event",
-                Signature = $"event {Simplify(ef.Declaration.Type)} {ev.Identifier.Text}",
-                Doc = GetXmlDoc(ef)
-            } : null,
-        FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.ConstKeyword) =>
-            f.Declaration.Variables.FirstOrDefault() is { } v ? new MemberInfo
+                Signature = $"event {Simplify(evt.Type)} {evt.Identifier.Text}",
+                Doc = GetXmlDoc(evt)
+            },
+            EventFieldDeclarationSyntax ef =>
+                ef.Declaration.Variables.FirstOrDefault() is { } ev ? new MemberInfo
+                {
+                    Name = ev.Identifier.Text,
+                    Kind = "event",
+                    Signature = $"event {Simplify(ef.Declaration.Type)} {ev.Identifier.Text}",
+                    Doc = GetXmlDoc(ef)
+                } : null,
+            FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.ConstKeyword) =>
+                f.Declaration.Variables.FirstOrDefault() is { } v ? new MemberInfo
+                {
+                    Name = v.Identifier.Text,
+                    Kind = "const",
+                    Signature = $"const {Simplify(f.Declaration.Type)} {v.Identifier.Text}" +
+                        (v.Initializer != null && v.Initializer.Value.ToString().Length < 30 ? $" = {v.Initializer.Value}" : ""),
+                    Doc = GetXmlDoc(f)
+                } : null,
+            FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.StaticKeyword) && f.Modifiers.Any(SyntaxKind.ReadOnlyKeyword) =>
+                f.Declaration.Variables.FirstOrDefault() is { } sv ? new MemberInfo
+                {
+                    Name = sv.Identifier.Text,
+                    Kind = "field",
+                    Signature = $"static readonly {Simplify(f.Declaration.Type)} {sv.Identifier.Text}",
+                    Doc = GetXmlDoc(f),
+                    IsStatic = true
+                } : null,
+            OperatorDeclarationSyntax op => new MemberInfo
             {
-                Name = v.Identifier.Text,
-                Kind = "const",
-                Signature = $"const {Simplify(f.Declaration.Type)} {v.Identifier.Text}" +
-                    (v.Initializer != null && v.Initializer.Value.ToString().Length < 30 ? $" = {v.Initializer.Value}" : ""),
-                Doc = GetXmlDoc(f)
-            } : null,
-        FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.StaticKeyword) && f.Modifiers.Any(SyntaxKind.ReadOnlyKeyword) =>
-            f.Declaration.Variables.FirstOrDefault() is { } sv ? new MemberInfo
-            {
-                Name = sv.Identifier.Text,
-                Kind = "field",
-                Signature = $"static readonly {Simplify(f.Declaration.Type)} {sv.Identifier.Text}",
-                Doc = GetXmlDoc(f),
+                Name = $"operator {op.OperatorToken.Text}",
+                Kind = "operator",
+                Signature = $"static {Simplify(op.ReturnType)} operator {op.OperatorToken.Text}({FormatParams(op.ParameterList)})",
+                Doc = GetXmlDoc(op),
                 IsStatic = true
-            } : null,
-        OperatorDeclarationSyntax op => new MemberInfo
+            },
+            ConversionOperatorDeclarationSyntax conv => new MemberInfo
+            {
+                Name = $"{conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}",
+                Kind = "operator",
+                Signature = $"static {conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}({FormatParams(conv.ParameterList)})",
+                Doc = GetXmlDoc(conv),
+                IsStatic = true
+            },
+            _ => null
+        };
+
+        if (info is null) return null;
+
+        var (isDeprecated, deprecatedMsg) = GetMemberDeprecationInfo(member);
+        if (isDeprecated)
         {
-            Name = $"operator {op.OperatorToken.Text}",
-            Kind = "operator",
-            Signature = $"static {Simplify(op.ReturnType)} operator {op.OperatorToken.Text}({FormatParams(op.ParameterList)})",
-            Doc = GetXmlDoc(op),
-            IsStatic = true
-        },
-        ConversionOperatorDeclarationSyntax conv => new MemberInfo
-        {
-            Name = $"{conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}",
-            Kind = "operator",
-            Signature = $"static {conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}({FormatParams(conv.ParameterList)})",
-            Doc = GetXmlDoc(conv),
-            IsStatic = true
-        },
-        _ => null
-    };
+            info = info with
+            {
+                IsDeprecated = true,
+                DeprecatedMessage = deprecatedMsg
+            };
+        }
+
+        return info;
+    }
 
     private static string TypeParams(MethodDeclarationSyntax m) =>
         m.TypeParameterList != null
@@ -608,6 +641,43 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         var name = GetOutermostTypeName(m.ReturnType);
         return name is "Task" or "ValueTask" or "IAsyncEnumerable";
     }
+
+    /// <summary>
+    /// Extracts deprecation info from [Obsolete("message")] or [System.Obsolete] attributes.
+    /// Returns (true, message) if the attribute is present; (false, null) otherwise.
+    /// </summary>
+    private static (bool IsDeprecated, string? Message) GetDeprecationInfo(SyntaxList<AttributeListSyntax> attributeLists)
+    {
+        foreach (var attrList in attributeLists)
+        {
+            foreach (var attr in attrList.Attributes)
+            {
+                var attrName = attr.Name.ToString();
+                if (attrName is "Obsolete" or "System.Obsolete" or "ObsoleteAttribute" or "System.ObsoleteAttribute")
+                {
+                    string? message = null;
+                    if (attr.ArgumentList?.Arguments.Count > 0)
+                    {
+                        var firstArg = attr.ArgumentList.Arguments[0].Expression;
+                        if (firstArg is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+                        {
+                            message = literal.Token.ValueText;
+                        }
+                    }
+                    return (true, message);
+                }
+            }
+        }
+        return (false, null);
+    }
+
+    /// <summary>Gets deprecation info from a member declaration.</summary>
+    private static (bool IsDeprecated, string? Message) GetMemberDeprecationInfo(MemberDeclarationSyntax member) =>
+        GetDeprecationInfo(member.AttributeLists);
+
+    /// <summary>Gets deprecation info from a type declaration.</summary>
+    private static (bool IsDeprecated, string? Message) GetTypeDeprecationInfo(BaseTypeDeclarationSyntax type) =>
+        GetDeprecationInfo(type.AttributeLists);
 
     /// <summary>
     /// Extracts the outermost type identifier from a TypeSyntax node,

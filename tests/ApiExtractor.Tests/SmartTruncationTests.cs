@@ -259,7 +259,7 @@ public class SmartTruncationTests
             EntryPoint = true,
             Base = null,
             Doc = null,
-            Methods = [new Python.MethodInfo("send", "self, message", null, null, null, null)],
+            Methods = [new Python.MethodInfo { Name = "send", Signature = "self, message" }],
             Properties = null
         };
 
@@ -269,7 +269,7 @@ public class SmartTruncationTests
             Base = null,
             Doc = null,
             Methods = null,
-            Properties = [new Python.PropertyInfo("content", "str", null)]
+            Properties = [new Python.PropertyInfo { Name = "content", Type = "str" }]
         };
 
         Assert.True(clientClass.IsClientType);
@@ -285,7 +285,7 @@ public class SmartTruncationTests
             EntryPoint = true,
             Base = null,
             Doc = null,
-            Methods = [new Python.MethodInfo("send", "self", null, null, null, null)],
+            Methods = [new Python.MethodInfo { Name = "send", Signature = "self" }],
             Properties = null
         };
 
@@ -295,7 +295,7 @@ public class SmartTruncationTests
             Base = null,
             Doc = null,
             Methods = null,
-            Properties = [new Python.PropertyInfo("content", "str", null)]
+            Properties = [new Python.PropertyInfo { Name = "content", Type = "str" }]
         };
 
         Assert.True(clientClass.TruncationPriority < modelClass.TruncationPriority);
@@ -309,7 +309,7 @@ public class SmartTruncationTests
             Name = "ChatClient",
             Base = "BaseClient",
             Doc = null,
-            Methods = [new Python.MethodInfo("send", "self, message: ChatMessage -> ChatResponse", null, null, null, null)],
+            Methods = [new Python.MethodInfo { Name = "send", Signature = "self, message: ChatMessage -> ChatResponse" }],
             Properties = null
         };
 
@@ -343,7 +343,7 @@ public class SmartTruncationTests
             EntryPoint = true,
             Base = null,
             Doc = null,
-            Methods = [new Python.MethodInfo("do_something", "self, param1: str, param2: int", null, null, null, null)],
+            Methods = [new Python.MethodInfo { Name = "do_something", Signature = "self, param1: str, param2: int" }],
             Properties = null
         });
 
@@ -357,9 +357,9 @@ public class SmartTruncationTests
                 Doc = $"This is a documentation comment for Model{i}.",
                 Methods = null,
                 Properties = [
-                    new Python.PropertyInfo($"property_one_{i}", "str", null),
-                    new Python.PropertyInfo($"property_two_{i}", "int", null),
-                    new Python.PropertyInfo($"property_three_{i}", "bool", null)
+                    new Python.PropertyInfo { Name = $"property_one_{i}", Type = "str" },
+                    new Python.PropertyInfo { Name = $"property_two_{i}", Type = "int" },
+                    new Python.PropertyInfo { Name = $"property_three_{i}", Type = "bool" }
                 ]
             });
         }
@@ -641,7 +641,7 @@ public class SmartTruncationTests
             EntryPoint = true,
             Base = null,
             Doc = null,
-            Methods = [new Python.MethodInfo("send", "self", null, null, null, null)],
+            Methods = [new Python.MethodInfo { Name = "send", Signature = "self" }],
             Properties = null
         };
 
@@ -1256,7 +1256,7 @@ public class SmartTruncationTests
                     EntryPoint = true,
                     Base = "BaseClient",
                     Doc = "This is a client for something.",
-                    Methods = [new Python.MethodInfo("do_thing", "self", null, null, null, null)],
+                    Methods = [new Python.MethodInfo { Name = "do_thing", Signature = "self" }],
                     Properties = null
                 }
             ], null)]
@@ -1285,7 +1285,7 @@ public class SmartTruncationTests
                     Base = null,
                     Doc = null,
                     Methods = null,
-                    Properties = [new Python.PropertyInfo("value", "str", null)]
+                    Properties = [new Python.PropertyInfo { Name = "value", Type = "str" }]
                 }
             ], null)]
         );
@@ -1891,7 +1891,7 @@ public class SmartTruncationTests
         var opts = new Python.ClassInfo
         {
             Name = "RequestOptions",
-            Properties = [new Python.PropertyInfo("timeout", "float", null)]
+            Properties = [new Python.PropertyInfo { Name = "timeout", Type = "float" }]
         };
 
         Assert.True(opts.IsModelType);
@@ -2062,11 +2062,11 @@ public class SmartTruncationTests
                 {
                     Name = "Client",
                     EntryPoint = true,
-                    Methods = [new Python.MethodInfo("send", "(msg: Message)", null, null, null, null, Ret: "Response")]
+                    Methods = [new Python.MethodInfo { Name = "send", Signature = "(msg: Message)", Ret = "Response" }]
                 },
-                new Python.ClassInfo { Name = "Message", Properties = [new Python.PropertyInfo("text", "str", null)] },
-                new Python.ClassInfo { Name = "Response", Properties = [new Python.PropertyInfo("status", "int", null)] },
-                new Python.ClassInfo { Name = "Unrelated", Properties = [new Python.PropertyInfo("value", "int", null)] }
+                new Python.ClassInfo { Name = "Message", Properties = [new Python.PropertyInfo { Name = "text", Type = "str" }] },
+                new Python.ClassInfo { Name = "Response", Properties = [new Python.PropertyInfo { Name = "status", Type = "int" }] },
+                new Python.ClassInfo { Name = "Unrelated", Properties = [new Python.PropertyInfo { Name = "value", Type = "int" }] }
             ], null)
         ]);
 

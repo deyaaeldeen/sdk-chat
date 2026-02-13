@@ -795,8 +795,8 @@ public class UsageAnalyzerTests
                             Name = "BlobClient",
                             Methods =
                             [
-                                new PyModels.MethodInfo("download_blob", "self, offset=None, length=None", null, null, null, null),
-                                new PyModels.MethodInfo("upload_blob", "self, data, **kwargs", null, null, null, null)
+                                new PyModels.MethodInfo { Name = "download_blob", Signature = "self, offset=None, length=None" },
+                                new PyModels.MethodInfo { Name = "upload_blob", Signature = "self, data, **kwargs" }
                             ]
                         }
                     ],
@@ -815,7 +815,7 @@ public class UsageAnalyzerTests
         var apiIndex = new PyModels.ApiIndex(
             "test",
             [new PyModels.ModuleInfo("m",
-                Classes: [new PyModels.ClassInfo { Name = "Client", Methods = [new PyModels.MethodInfo("get_item", "self", null, null, null, null)] }],
+                Classes: [new PyModels.ClassInfo { Name = "Client", Methods = [new PyModels.MethodInfo { Name = "get_item", Signature = "self" }] }],
                 Functions: null)]);
 
         var lookup = PyModels.PythonUsageAnalyzer.BuildSignatureLookup(apiIndex);

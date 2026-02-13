@@ -447,9 +447,9 @@ public class StdlibDetectionTests
                             Name = "Client",
                             Methods =
                             [
-                                new Python.MethodInfo("get", "(self)", null, null, null, null, "Optional[str]"),
-                                new Python.MethodInfo("list", "(self)", null, null, null, null, "List[Dict[str, Any]]"),
-                                new Python.MethodInfo("created_at", "(self)", null, null, null, null, "datetime.datetime")
+                                new Python.MethodInfo { Name = "get", Signature = "(self)", Ret = "Optional[str]" },
+                                new Python.MethodInfo { Name = "list", Signature = "(self)", Ret = "List[Dict[str, Any]]" },
+                                new Python.MethodInfo { Name = "created_at", Signature = "(self)", Ret = "datetime.datetime" }
                             ]
                         }
                     ],

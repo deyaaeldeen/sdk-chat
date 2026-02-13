@@ -146,6 +146,14 @@ public sealed record ClassInfo
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+
     [JsonPropertyName("modifiers")]
     public IReadOnlyList<string>? Modifiers { get; init; }
 
@@ -273,6 +281,14 @@ public sealed record EnumInfo
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+
     [JsonPropertyName("values")]
     public IReadOnlyList<string>? Values { get; init; }
 
@@ -295,6 +311,14 @@ public sealed record MethodInfo
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+
     [JsonPropertyName("modifiers")]
     public IReadOnlyList<string>? Modifiers { get; init; }
 
@@ -316,6 +340,14 @@ public sealed record FieldInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     [JsonPropertyName("modifiers")]
     public IReadOnlyList<string>? Modifiers { get; init; }

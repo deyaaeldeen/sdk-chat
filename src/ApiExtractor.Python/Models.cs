@@ -96,6 +96,14 @@ public sealed record ClassInfo
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+
     [JsonPropertyName("methods")]
     public IReadOnlyList<MethodInfo>? Methods { get; init; }
 
@@ -184,16 +192,64 @@ public sealed record ClassInfo
     }
 }
 
-public record MethodInfo(
-    string Name,
-    string Signature,
-    string? Doc,
-    bool? IsAsync,
-    bool? IsClassMethod,
-    bool? IsStaticMethod,
-    [property: JsonPropertyName("ret")] string? Ret = null);
+public record MethodInfo
+{
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
 
-public record PropertyInfo(string Name, string? Type, string? Doc);
+    [JsonPropertyName("signature")]
+    public string Signature { get; init; } = "";
+
+    [JsonPropertyName("doc")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Doc { get; init; }
+
+    [JsonPropertyName("isAsync")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsAsync { get; init; }
+
+    [JsonPropertyName("isClassMethod")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsClassMethod { get; init; }
+
+    [JsonPropertyName("isStaticMethod")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsStaticMethod { get; init; }
+
+    [JsonPropertyName("ret")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Ret { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+}
+
+public record PropertyInfo
+{
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    [JsonPropertyName("type")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("doc")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+}
 
 public sealed record FunctionInfo
 {
@@ -218,6 +274,14 @@ public sealed record FunctionInfo
 
     [JsonPropertyName("async")]
     public bool? IsAsync { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 [JsonSourceGenerationOptions(

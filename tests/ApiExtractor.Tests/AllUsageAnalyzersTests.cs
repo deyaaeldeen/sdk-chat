@@ -478,14 +478,11 @@ client.send()
                     {
                         Name = c.ClassName,
                         EntryPoint = true,
-                        Methods = c.Methods.Select(m => new Python.MethodInfo(
-                            Name: m,
-                            Signature: "(self)",
-                            Doc: null,
-                            IsAsync: null,
-                            IsClassMethod: null,
-                            IsStaticMethod: null
-                        )).ToList()
+                        Methods = c.Methods.Select(m => new Python.MethodInfo
+                        {
+                            Name = m,
+                            Signature = "(self)"
+                        }).ToList()
                     }).ToList(),
                     Functions: functions.Select(f => new Python.FunctionInfo
                     {
@@ -596,8 +593,8 @@ client.widgets.list_widgets()
                             EntryPoint = true,
                             Methods =
                             [
-                                new Python.MethodInfo(Name: "send", Signature: "(self)", Doc: null, IsAsync: null, IsClassMethod: null, IsStaticMethod: null),
-                                new Python.MethodInfo(Name: "with_retry", Signature: "(self)", Doc: null, IsAsync: null, IsClassMethod: null, IsStaticMethod: null, Ret: "FluentClient")
+                                new Python.MethodInfo { Name = "send", Signature = "(self)" },
+                                new Python.MethodInfo { Name = "with_retry", Signature = "(self)", Ret = "FluentClient" }
                             ]
                         }
                     ],
@@ -631,16 +628,13 @@ client.send()
                         Name = c.ClassName,
                         EntryPoint = true,
                         Base = c.Base,
-                        Methods = c.Methods.Select(m => new Python.MethodInfo(
-                            Name: m,
-                            Signature: "(self)",
-                            Doc: null,
-                            IsAsync: null,
-                            IsClassMethod: null,
-                            IsStaticMethod: null
-                        )).ToList(),
+                        Methods = c.Methods.Select(m => new Python.MethodInfo
+                        {
+                            Name = m,
+                            Signature = "(self)"
+                        }).ToList(),
                         Properties = c.Properties.Length > 0
-                            ? c.Properties.Select(p => new Python.PropertyInfo(p.Name, p.Type, null)).ToList()
+                            ? c.Properties.Select(p => new Python.PropertyInfo { Name = p.Name, Type = p.Type }).ToList()
                             : null
                     }).ToList(),
                     Functions: functions.Select(f => new Python.FunctionInfo
