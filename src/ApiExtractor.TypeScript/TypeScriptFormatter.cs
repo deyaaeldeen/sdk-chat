@@ -552,7 +552,8 @@ public static class TypeScriptFormatter
         {
             var msg = !string.IsNullOrEmpty(iface.DeprecatedMessage) ? $" {iface.DeprecatedMessage}" : "";
             sb.AppendLine($"/** @deprecated{msg} */");
-        }        var ext = !string.IsNullOrEmpty(iface.Extends) ? $" extends {iface.Extends}" : "";
+        }
+        var ext = !string.IsNullOrEmpty(iface.Extends) ? $" extends {iface.Extends}" : "";
         var typeParams = !string.IsNullOrEmpty(iface.TypeParams) ? $"<{iface.TypeParams}>" : "";
         var export = exportKeyword ? "export " : "";
         sb.AppendLine($"{export}interface {iface.Name}{typeParams}{ext} {{");
