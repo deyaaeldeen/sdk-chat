@@ -40,37 +40,11 @@ public sealed record ApiIndex : IApiIndex
         Namespaces.SelectMany(ns => ns.Types);
 
     /// <summary>
-    /// Gets client types (classes ending with "Client" that have operations).
+    /// Gets client types (entry-point classes that have operations).
     /// </summary>
     public IEnumerable<TypeInfo> GetClientTypes() =>
         GetAllTypes().Where(t => t.IsClientType);
 
-    /// <summary>Gets the names of all types in the API surface.</summary>
-    public IEnumerable<string> GetAllTypeNames() =>
-        GetAllTypes().Select(t => t.Name);
-
-    /// <summary>Gets the names of client/entry-point types.</summary>
-    public IEnumerable<string> GetClientTypeNames() =>
-        GetClientTypes().Select(t => t.Name);
-
-    /// <summary>
-    /// Builds a dependency graph: for each type, which other types it references.
-    /// Used for smart truncation to avoid orphan types.
-    /// </summary>
-    public Dictionary<string, HashSet<string>> BuildDependencyGraph()
-    {
-        var graph = new Dictionary<string, HashSet<string>>();
-        var allTypeNames = GetAllTypes().Select(t => IApiIndex.NormalizeTypeName(t.Name)).ToHashSet();
-        HashSet<string> reusable = [];
-
-        foreach (var type in GetAllTypes())
-        {
-            type.CollectReferencedTypes(allTypeNames, reusable);
-            graph[type.Name] = [.. reusable];
-        }
-
-        return graph;
-    }
 }
 
 /// <summary>Information about types from a dependency package/assembly.</summary>

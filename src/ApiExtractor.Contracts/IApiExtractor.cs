@@ -18,12 +18,6 @@ public interface IApiIndex
     /// <summary>Formats the API index as human-readable language-native stubs.</summary>
     string ToStubs();
 
-    /// <summary>Gets the names of all types in the API surface.</summary>
-    IEnumerable<string> GetAllTypeNames() => [];
-
-    /// <summary>Gets the names of client/entry-point types that have operations.</summary>
-    IEnumerable<string> GetClientTypeNames() => [];
-
     /// <summary>
     /// Strips language-specific generic/type-parameter suffixes from a type name to produce
     /// a canonical form suitable for cross-extractor comparison.

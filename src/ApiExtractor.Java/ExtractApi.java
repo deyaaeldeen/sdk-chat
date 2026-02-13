@@ -883,16 +883,35 @@ public class ExtractApi {
 
     /**
      * Collector for type references during extraction using proper AST traversal.
+     * Tracks which context a reference appeared in to enable classification
+     * (e.g., types seen only in {@code implements} clauses are interfaces).
      */
     private static class TypeReferenceCollector {
         private final Set<String> refs = new HashSet<>();
         private final Set<String> definedTypes = new HashSet<>();
+        /** Types seen in {@code implements} clauses (definitely interfaces). */
+        private final Set<String> implementsRefs = new HashSet<>();
 
         void addDefinedType(String name) {
             if (name != null) {
                 String baseName = name.contains("<") ? name.substring(0, name.indexOf('<')) : name;
                 definedTypes.add(baseName);
             }
+        }
+
+        /**
+         * Record a type reference that appeared in an {@code implements} clause.
+         * Such types are definitionally interfaces in Java.
+         */
+        void addImplementsRef(Type type) {
+            if (type == null) return;
+            if (type.isClassOrInterfaceType()) {
+                String name = type.asClassOrInterfaceType().getNameAsString();
+                if (!isBuiltinType(name)) {
+                    implementsRefs.add(name);
+                }
+            }
+            collectFromType(type);
         }
 
         /**
@@ -974,9 +993,18 @@ public class ExtractApi {
             return result;
         }
 
+        /**
+         * Check if a base type name was seen in an {@code implements} clause,
+         * meaning it is definitionally an interface.
+         */
+        boolean isKnownInterface(String baseName) {
+            return implementsRefs.contains(baseName);
+        }
+
         void clear() {
             refs.clear();
             definedTypes.clear();
+            implementsRefs.clear();
         }
     }
 
@@ -1005,20 +1033,30 @@ public class ExtractApi {
             }
         }
 
-        // Convert to dependency list
+        // Convert to dependency list, classifying types as classes or interfaces
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<String, List<String>> entry : byPackage.entrySet()) {
             Map<String, Object> depInfo = new LinkedHashMap<>();
             depInfo.put("package", entry.getKey());
 
             List<Map<String, Object>> classes = new ArrayList<>();
+            List<Map<String, Object>> interfaces = new ArrayList<>();
             for (String typeName : entry.getValue().stream().distinct().sorted().collect(Collectors.toList())) {
-                Map<String, Object> cls = new LinkedHashMap<>();
-                cls.put("name", typeName.contains(".") ? typeName.substring(typeName.lastIndexOf('.') + 1) : typeName);
-                classes.add(cls);
+                Map<String, Object> typeEntry = new LinkedHashMap<>();
+                String baseName = typeName.contains(".") ? typeName.substring(typeName.lastIndexOf('.') + 1) : typeName;
+                typeEntry.put("name", baseName);
+
+                if (typeCollector.isKnownInterface(baseName)) {
+                    interfaces.add(typeEntry);
+                } else {
+                    classes.add(typeEntry);
+                }
             }
             if (!classes.isEmpty()) {
                 depInfo.put("classes", classes);
+            }
+            if (!interfaces.isEmpty()) {
+                depInfo.put("interfaces", interfaces);
             }
 
             result.add(depInfo);
@@ -1130,7 +1168,12 @@ public class ExtractApi {
         if (!cid.getExtendedTypes().isEmpty()) {
             ClassOrInterfaceType extType = cid.getExtendedTypes().get(0);
             info.put("extends", extType.toString());
-            typeCollector.collectFromType(extType);
+            // When an interface extends another type, that target is also an interface
+            if (isInterface) {
+                typeCollector.addImplementsRef(extType);
+            } else {
+                typeCollector.collectFromType(extType);
+            }
         }
 
         if (!cid.getImplementedTypes().isEmpty()) {
@@ -1138,7 +1181,7 @@ public class ExtractApi {
                 .map(t -> t.toString())
                 .collect(Collectors.toList()));
             for (ClassOrInterfaceType implType : cid.getImplementedTypes()) {
-                typeCollector.collectFromType(implType);
+                typeCollector.addImplementsRef(implType);
             }
         }
 
@@ -1229,7 +1272,7 @@ public class ExtractApi {
                 .map(t -> t.toString())
                 .collect(Collectors.toList()));
             for (ClassOrInterfaceType implType : rd.getImplementedTypes()) {
-                typeCollector.collectFromType(implType);
+                typeCollector.addImplementsRef(implType);
             }
         }
 

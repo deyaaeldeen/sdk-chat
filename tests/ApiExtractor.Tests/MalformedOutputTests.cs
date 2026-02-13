@@ -133,8 +133,6 @@ public class MalformedOutputTests
         var index = new Go.ApiIndex { Package = "test" };
         Assert.Empty(index.GetAllStructs());
         Assert.Empty(index.GetClientStructs());
-        Assert.Empty(index.GetAllTypeNames());
-        Assert.Empty(index.GetClientTypeNames());
     }
 
     [Fact]
@@ -142,17 +140,14 @@ public class MalformedOutputTests
     {
         var index = new Go.ApiIndex { Package = "test", Packages = [] };
         Assert.Empty(index.GetAllStructs());
-        Assert.Empty(index.GetAllTypeNames());
     }
 
     [Fact]
     public void JavaApiIndex_GetAllTypes_NullPackages_ReturnsEmpty()
     {
         var index = new Java.ApiIndex { Package = "test" };
-        Assert.Empty(index.GetAllClasses());
         Assert.Empty(index.GetAllTypes());
         Assert.Empty(index.GetClientClasses());
-        Assert.Empty(index.GetAllTypeNames());
     }
 
     [Fact]
@@ -161,7 +156,6 @@ public class MalformedOutputTests
         var index = new TypeScript.ApiIndex { Package = "test" };
         Assert.Empty(index.GetAllClasses());
         Assert.Empty(index.GetClientClasses());
-        Assert.Empty(index.GetAllTypeNames());
     }
 
     [Fact]
@@ -169,7 +163,7 @@ public class MalformedOutputTests
     {
         var index = new Python.ApiIndex("test", [], null);
         Assert.Empty(index.GetAllClasses());
-        Assert.Empty(index.GetAllTypeNames());
+        Assert.Empty(index.GetClientClasses());
     }
 
     [Fact]
@@ -178,8 +172,6 @@ public class MalformedOutputTests
         var index = new DotNet.ApiIndex { Package = "test", Namespaces = [] };
         Assert.Empty(index.GetAllTypes());
         Assert.Empty(index.GetClientTypes());
-        Assert.Empty(index.GetAllTypeNames());
-        Assert.Empty(index.GetClientTypeNames());
     }
 
     #endregion
@@ -256,50 +248,6 @@ public class MalformedOutputTests
         var index = new DotNet.ApiIndex { Package = "test", Namespaces = [] };
         var result = new ExtractorResult.Success(index);
         Assert.True(result.IsSuccess);
-    }
-
-    #endregion
-
-    #region BuildDependencyGraph Edge Cases
-
-    [Fact]
-    public void GoApiIndex_BuildDependencyGraph_NullPackages_ReturnsEmpty()
-    {
-        var index = new Go.ApiIndex { Package = "test" };
-        var graph = index.BuildDependencyGraph();
-        Assert.Empty(graph);
-    }
-
-    [Fact]
-    public void TypeScriptApiIndex_BuildDependencyGraph_NullModules_ReturnsEmpty()
-    {
-        var index = new TypeScript.ApiIndex { Package = "test" };
-        var graph = index.BuildDependencyGraph();
-        Assert.Empty(graph);
-    }
-
-    [Fact]
-    public void JavaApiIndex_BuildDependencyGraph_NullPackages_ReturnsEmpty()
-    {
-        var index = new Java.ApiIndex { Package = "test" };
-        var graph = index.BuildDependencyGraph();
-        Assert.Empty(graph);
-    }
-
-    [Fact]
-    public void PythonApiIndex_BuildDependencyGraph_EmptyModules_ReturnsEmpty()
-    {
-        var index = new Python.ApiIndex("test", [], null);
-        var graph = index.BuildDependencyGraph();
-        Assert.Empty(graph);
-    }
-
-    [Fact]
-    public void DotNetApiIndex_BuildDependencyGraph_EmptyNamespaces_ReturnsEmpty()
-    {
-        var index = new DotNet.ApiIndex { Package = "test", Namespaces = [] };
-        var graph = index.BuildDependencyGraph();
-        Assert.Empty(graph);
     }
 
     #endregion

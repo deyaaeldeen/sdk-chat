@@ -176,13 +176,23 @@ public static class TypeScriptFormatter
         var enumsByName = SafeToDictionary(allEnums, e => e.Name);
         var typesByName = SafeToDictionary(allTypes, t => t.Name);
 
-        // Build dependency graph for classes
-        var classDeps = new Dictionary<string, HashSet<string>>();
+        // Build dependency graph for classes, interfaces, and type aliases
+        var typeDeps = new Dictionary<string, HashSet<string>>();
         HashSet<string> reusableDeps2 = [];
         foreach (var cls in allClasses)
         {
             cls.CollectReferencedTypes(allTypeNames, reusableDeps2);
-            classDeps[cls.Name] = new HashSet<string>(reusableDeps2);
+            typeDeps[cls.Name] = new HashSet<string>(reusableDeps2);
+        }
+        foreach (var iface in allInterfaces)
+        {
+            iface.CollectReferencedTypes(allTypeNames, reusableDeps2);
+            typeDeps[iface.Name] = new HashSet<string>(reusableDeps2);
+        }
+        foreach (var t in allTypes)
+        {
+            t.CollectReferencedTypes(allTypeNames, reusableDeps2);
+            typeDeps[t.Name] = new HashSet<string>(reusableDeps2);
         }
 
         // Group entry points by export path
@@ -221,7 +231,7 @@ public static class TypeScriptFormatter
 
                 // Get classes for this export path
                 var pathClasses = allClasses.Where(c => c.ExportPath == exportPath).ToList();
-                var prioritizedClasses = GetPrioritizedClasses(pathClasses, classDeps);
+                var prioritizedClasses = GetPrioritizedClasses(pathClasses, typeDeps);
 
                 foreach (var cls in prioritizedClasses)
                 {
@@ -275,7 +285,7 @@ public static class TypeScriptFormatter
         else
         {
             // Original behavior: no export path grouping
-            var prioritizedClasses = GetPrioritizedClasses(allClasses, classDeps);
+            var prioritizedClasses = GetPrioritizedClasses(allClasses, typeDeps);
 
             // First pass: Include client classes and their dependencies
             foreach (var cls in prioritizedClasses)
@@ -292,7 +302,7 @@ public static class TypeScriptFormatter
                 includedItems++;
 
                 // Include its dependencies (interfaces, enums, types)
-                foreach (var depName in classDeps.GetValueOrDefault(cls.Name, []))
+                foreach (var depName in typeDeps.GetValueOrDefault(cls.Name, []))
                 {
                     if (includedTypeNames.Contains(depName)) continue;
                     if (sb.Length >= maxLength) break;

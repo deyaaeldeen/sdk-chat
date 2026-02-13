@@ -68,41 +68,41 @@ public class ToolPathResolverTests
     #region Resolve Method Tests
 
     [Fact]
-    public void Resolve_FindsDotNet_WhenAvailable()
+    public void ResolveWithDetails_FindsDotNet_WhenAvailable()
     {
         // dotnet is always available since we're running on it
-        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"]);
+        var result = ToolPathResolver.ResolveWithDetails("dotnet", ["dotnet"]);
 
-        Assert.NotNull(result);
-        Assert.Equal("dotnet", result);
+        Assert.True(result.IsAvailable);
+        Assert.Equal("dotnet", result.Path);
     }
 
     [Fact]
-    public void Resolve_ReturnsNull_WhenToolNotFound()
+    public void ResolveWithDetails_ReturnsNotAvailable_WhenToolNotFound()
     {
-        var result = ToolPathResolver.Resolve(
+        var result = ToolPathResolver.ResolveWithDetails(
             "nonexistent_tool_xyz_123",
             ["nonexistent_tool_xyz_123", "/path/to/nowhere/tool"]
         );
 
-        Assert.Null(result);
+        Assert.False(result.IsAvailable);
     }
 
     [Fact]
-    public void Resolve_TriesMultipleCandidates()
+    public void ResolveWithDetails_TriesMultipleCandidates()
     {
         // First candidate doesn't exist, second (dotnet) does
-        var result = ToolPathResolver.Resolve(
+        var result = ToolPathResolver.ResolveWithDetails(
             "dotnet",
             ["nonexistent_first_candidate", "dotnet"]
         );
 
-        Assert.NotNull(result);
-        Assert.Equal("dotnet", result);
+        Assert.True(result.IsAvailable);
+        Assert.Equal("dotnet", result.Path);
     }
 
     [Fact]
-    public void Resolve_RespectsEnvironmentVariableOverride()
+    public void ResolveWithDetails_RespectsEnvironmentVariableOverride()
     {
         const string envVar = "SDK_CHAT_TESTENV_PATH";
         var originalValue = Environment.GetEnvironmentVariable(envVar);
@@ -112,14 +112,15 @@ public class ToolPathResolverTests
             // Set environment variable to dotnet (which exists)
             Environment.SetEnvironmentVariable(envVar, "dotnet");
 
-            var result = ToolPathResolver.Resolve(
+            var result = ToolPathResolver.ResolveWithDetails(
                 "testenv",
                 ["nonexistent_candidate"],
                 "--version"
             );
 
             // Should find dotnet via env var override
-            Assert.Equal("dotnet", result);
+            Assert.True(result.IsAvailable);
+            Assert.Equal("dotnet", result.Path);
         }
         finally
         {
@@ -129,73 +130,15 @@ public class ToolPathResolverTests
     }
 
     [Fact]
-    public void Resolve_FallsBackToDefaults_WhenEnvVarInvalid()
+    public void ResolveWithDetails_UsesCustomVersionArgs()
     {
-        const string envVar = "SDK_CHAT_TESTFALLBACK_PATH";
-        var originalValue = Environment.GetEnvironmentVariable(envVar);
-
-        try
-        {
-            // Set environment variable to invalid path
-            Environment.SetEnvironmentVariable(envVar, "/nonexistent/invalid/path");
-
-            var result = ToolPathResolver.Resolve(
-                "testfallback",
-                ["dotnet"],  // Valid fallback
-                "--version"
-            );
-
-            // Should fall back to dotnet
-            Assert.Equal("dotnet", result);
-
-            // Note: Resolve() no longer prints warnings - use ResolveWithDetails() for that
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(envVar, originalValue);
-        }
-    }
-
-    [Fact]
-    public void ResolveWithDetails_ReturnsWarning_WhenEnvVarInvalid()
-    {
-        const string envVar = "SDK_CHAT_TESTFALLBACK2_PATH";
-        var originalValue = Environment.GetEnvironmentVariable(envVar);
-
-        try
-        {
-            // Set environment variable to invalid path
-            Environment.SetEnvironmentVariable(envVar, "/nonexistent/invalid/path");
-
-            var result = ToolPathResolver.ResolveWithDetails(
-                "testfallback2",
-                ["dotnet"],  // Valid fallback
-                "--version"
-            );
-
-            // Should indicate not available due to invalid env var
-            Assert.False(result.IsAvailable);
-            Assert.NotNull(result.WarningOrError);
-            Assert.Contains("SDK_CHAT_TESTFALLBACK2_PATH", result.WarningOrError);
-            Assert.Contains("not a valid", result.WarningOrError);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(envVar, originalValue);
-        }
-    }
-
-    [Fact]
-    public void Resolve_UsesCustomVersionArgs()
-    {
-        // Test with "version" instead of "--version" (Go uses "go version")
-        var result = ToolPathResolver.Resolve(
+        var result = ToolPathResolver.ResolveWithDetails(
             "dotnet",
             ["dotnet"],
-            "--version"  // dotnet uses --version
+            "--version"
         );
 
-        Assert.NotNull(result);
+        Assert.True(result.IsAvailable);
     }
 
     #endregion
@@ -247,7 +190,7 @@ public class ToolPathResolverTests
     [InlineData("node", "SDK_CHAT_NODE_PATH")]
     [InlineData("jbang", "SDK_CHAT_JBANG_PATH")]
     [InlineData("MyTool", "SDK_CHAT_MYTOOL_PATH")]
-    public void Resolve_UsesCorrectEnvVarFormat(string toolName, string expectedEnvVar)
+    public void ResolveWithDetails_UsesCorrectEnvVarFormat(string toolName, string expectedEnvVar)
     {
         // Verify the environment variable naming convention by setting a known value
         var originalValue = Environment.GetEnvironmentVariable(expectedEnvVar);
@@ -257,10 +200,11 @@ public class ToolPathResolverTests
             // Set to a known valid executable
             Environment.SetEnvironmentVariable(expectedEnvVar, "dotnet");
 
-            var result = ToolPathResolver.Resolve(toolName, ["nonexistent"]);
+            var result = ToolPathResolver.ResolveWithDetails(toolName, ["nonexistent"]);
 
             // If env var is respected, it should find dotnet
-            Assert.Equal("dotnet", result);
+            Assert.True(result.IsAvailable);
+            Assert.Equal("dotnet", result.Path);
         }
         finally
         {
@@ -273,24 +217,7 @@ public class ToolPathResolverTests
     #region Edge Cases
 
     [Fact]
-    public void Resolve_HandlesEmptyCandidateArray()
-    {
-        var result = ToolPathResolver.Resolve("test", []);
-
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void Resolve_HandlesNullInCandidates()
-    {
-        // This should not throw, just skip null entries
-        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"]);
-
-        Assert.NotNull(result);
-    }
-
-    [Fact]
-    public void ResolveWithDetails_HandlesEmptyCandidateArray()
+    public void ResolveWithDetails_HandlesEmptyCandidateArray_Edge()
     {
         var result = ToolPathResolver.ResolveWithDetails("test", []);
 
@@ -299,42 +226,51 @@ public class ToolPathResolverTests
     }
 
     [Fact]
-    public void Resolve_WithHelpArgs_AcceptsExitCode0Or1()
+    public void ResolveWithDetails_HandlesNullInCandidates()
+    {
+        // This should not throw, just skip null entries
+        var result = ToolPathResolver.ResolveWithDetails("dotnet", ["dotnet"]);
+
+        Assert.True(result.IsAvailable);
+    }
+
+    [Fact]
+    public void ResolveWithDetails_WithHelpArgs_AcceptsExitCode0Or1()
     {
         // dotnet --help returns exit code 0, validating the happy path
-        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"], "--help");
+        var result = ToolPathResolver.ResolveWithDetails("dotnet", ["dotnet"], "--help");
 
         // dotnet should be found — --help should succeed with exit 0 or 1
-        Assert.NotNull(result);
+        Assert.True(result.IsAvailable);
     }
 
     [Fact]
-    public void Resolve_WithVersionArgs_OnlyAcceptsExitCode0()
+    public void ResolveWithDetails_WithVersionArgs_OnlyAcceptsExitCode0()
     {
         // dotnet --version returns exit code 0
-        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"], "--version");
+        var result = ToolPathResolver.ResolveWithDetails("dotnet", ["dotnet"], "--version");
 
-        Assert.NotNull(result);
+        Assert.True(result.IsAvailable);
     }
 
     [Fact]
-    public void Resolve_RejectsExitCode1_ForNonHelpArgs()
+    public void ResolveWithDetails_RejectsExitCode1_ForNonHelpArgs()
     {
         // Using a nonexistent flag that would cause exit code 1
         // should not be accepted for non-help args
-        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"], "--nonexistent-flag-xyz");
+        var result = ToolPathResolver.ResolveWithDetails("dotnet", ["dotnet"], "--nonexistent-flag-xyz");
 
-        // dotnet returns non-zero for unknown flags, so result should be null
-        Assert.Null(result);
+        // dotnet returns non-zero for unknown flags, so result should indicate unavailable
+        Assert.False(result.IsAvailable);
     }
 
     [Fact]
-    public void Resolve_TimesOutGracefully()
+    public void ResolveWithDetails_TimesOutGracefully()
     {
-        // Resolve should not hang if a tool produces excessive output
+        // ResolveWithDetails should not hang if a tool produces excessive output
         // This is tested implicitly by the 3-second timeout in ValidateExecutable
-        var result = ToolPathResolver.Resolve("dotnet", ["dotnet"]);
-        Assert.NotNull(result);
+        var result = ToolPathResolver.ResolveWithDetails("dotnet", ["dotnet"]);
+        Assert.True(result.IsAvailable);
     }
 
     #endregion
@@ -342,24 +278,24 @@ public class ToolPathResolverTests
     #region Integration Tests with Real Tools
 
     [Fact]
-    public void Resolve_FindsPython_WhenAvailable()
+    public void ResolveWithDetails_FindsPython_WhenAvailable()
     {
         // Python may or may not be installed, so we just verify no exception
-        var result = ToolPathResolver.Resolve("python", ["python3", "python"]);
+        var result = ToolPathResolver.ResolveWithDetails("python", ["python3", "python"]);
 
-        // Result is either a valid path or null - both are acceptable
-        if (result != null)
+        // Result is either available or not - both are acceptable
+        if (result.IsAvailable)
         {
-            Assert.True(result == "python3" || result == "python");
+            Assert.True(result.Path == "python3" || result.Path == "python");
         }
     }
 
     [Fact]
-    public void Resolve_FindsNode_WhenAvailable()
+    public void ResolveWithDetails_FindsNode_WhenAvailable()
     {
-        var result = ToolPathResolver.Resolve("node", ["node"]);
+        var result = ToolPathResolver.ResolveWithDetails("node", ["node"]);
 
-        // Result is either a valid path or null - both are acceptable
+        // Result is either available or not - both are acceptable
         // Just verify no exception is thrown
     }
 

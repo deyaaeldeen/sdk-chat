@@ -32,51 +32,11 @@ public sealed record ApiIndex : IApiIndex
     public IEnumerable<StructApi> GetClientStructs() =>
         GetAllStructs().Where(s => s.IsClientType);
 
-    /// <summary>Gets the names of all types (structs, interfaces, type definitions) in the API surface.</summary>
-    public IEnumerable<string> GetAllTypeNames() =>
-        Packages.SelectMany(p =>
-            (p.Structs ?? []).Select(s => s.Name)
-                .Concat((p.Interfaces ?? []).Select(i => i.Name))
-                .Concat((p.Types ?? []).Select(t => t.Name)));
-
-    /// <summary>Gets the names of client/entry-point types.</summary>
-    public IEnumerable<string> GetClientTypeNames() =>
-        GetClientStructs().Select(s => s.Name);
-
     public string ToJson(bool pretty = false) => pretty
         ? JsonSerializer.Serialize(this, SourceGenerationContext.Indented.ApiIndex)
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => GoFormatter.Format(this);
-
-    /// <summary>
-    /// Builds a dependency graph: for each type, which other types it references.
-    /// Used for smart truncation to avoid orphan types.
-    /// </summary>
-    public Dictionary<string, HashSet<string>> BuildDependencyGraph()
-    {
-        var graph = new Dictionary<string, HashSet<string>>();
-        var allTypeNames = GetAllTypeNames().ToHashSet();
-        HashSet<string> reusable = [];
-
-        foreach (var st in GetAllStructs())
-        {
-            st.CollectReferencedTypes(allTypeNames, reusable);
-            graph[st.Name] = [.. reusable];
-        }
-
-        // Include interface dependencies
-        foreach (var pkg in Packages ?? [])
-        {
-            foreach (var iface in pkg.Interfaces ?? [])
-            {
-                iface.CollectReferencedTypes(allTypeNames, reusable);
-                graph[iface.Name] = [.. reusable];
-            }
-        }
-
-        return graph;
-    }
 }
 
 /// <summary>Information about types from a dependency module.</summary>

@@ -24,56 +24,19 @@ public sealed record ApiIndex : IApiIndex
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
 
-    /// <summary>Gets all classes in the API.</summary>
-    public IEnumerable<ClassInfo> GetAllClasses() =>
-        Packages.SelectMany(p => p.Classes ?? []);
-
     /// <summary>Gets all types (classes + interfaces + annotations) in the API.</summary>
     public IEnumerable<ClassInfo> GetAllTypes() =>
         Packages.SelectMany(p => (p.Classes ?? []).Concat(p.Interfaces ?? []).Concat(p.Annotations ?? []));
 
-    /// <summary>Gets all interfaces in the API.</summary>
-    public IEnumerable<ClassInfo> GetAllInterfaces() =>
-        Packages.SelectMany(p => p.Interfaces ?? []);
-
     /// <summary>Gets client classes (entry points for SDK operations).</summary>
     public IEnumerable<ClassInfo> GetClientClasses() =>
-        GetAllClasses().Where(c => c.IsClientType);
-
-    /// <summary>Gets the names of all types (classes, interfaces, enums, annotations) in the API surface.</summary>
-    public IEnumerable<string> GetAllTypeNames() =>
-        GetAllTypes().Select(t => t.Name)
-            .Concat(Packages.SelectMany(p => (p.Enums ?? []).Select(e => e.Name)));
-
-    /// <summary>Gets the names of client/entry-point types.</summary>
-    public IEnumerable<string> GetClientTypeNames() =>
-        GetClientClasses().Select(c => c.Name);
+        GetAllTypes().Where(c => c.IsClientType);
 
     public string ToJson(bool pretty = false) => pretty
         ? JsonSerializer.Serialize(this, SourceGenerationContext.Indented.ApiIndex)
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => JavaFormatter.Format(this);
-
-    /// <summary>
-    /// Builds a dependency graph: for each type, which other types it references.
-    /// Used for smart truncation to avoid orphan types.
-    /// </summary>
-    public Dictionary<string, HashSet<string>> BuildDependencyGraph()
-    {
-        var graph = new Dictionary<string, HashSet<string>>();
-        var allTypes = GetAllTypes().ToList();
-        var allTypeNames = allTypes.Select(c => IApiIndex.NormalizeTypeName(c.Name)).ToHashSet();
-        HashSet<string> reusable = [];
-
-        foreach (var cls in allTypes)
-        {
-            cls.CollectReferencedTypes(allTypeNames, reusable);
-            graph[cls.Name] = new HashSet<string>(reusable);
-        }
-
-        return graph;
-    }
 }
 
 /// <summary>Information about types from a dependency package.</summary>

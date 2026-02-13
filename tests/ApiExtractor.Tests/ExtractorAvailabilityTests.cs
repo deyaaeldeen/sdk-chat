@@ -186,28 +186,6 @@ public class ExtractorAvailabilityTests : IDisposable
         Assert.Equal(result1.Mode, result2.Mode);
     }
 
-    [Fact]
-    public void ClearCache_AllowsFreshCheck()
-    {
-        var result1 = ExtractorAvailability.Check(
-            "cache_clear_test",
-            "nonexistent_binary",
-            "nonexistent_runtime",
-            []);
-
-        ExtractorAvailability.ClearCache();
-
-        var result2 = ExtractorAvailability.Check(
-            "cache_clear_test",
-            "nonexistent_binary",
-            "nonexistent_runtime",
-            []);
-
-        // Both results should have the same mode, but be distinct objects after cache clear
-        Assert.Equal(result1.Mode, result2.Mode);
-        Assert.NotSame(result1, result2);
-    }
-
     #endregion
 
     #region Check Fallback Behavior

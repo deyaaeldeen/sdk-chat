@@ -383,11 +383,6 @@ public class FormatterTests
         Assert.Equal(2, allTypes.Count);
         Assert.Contains(allTypes, t => t.Name == "Foo");
         Assert.Contains(allTypes, t => t.Name == "IFoo");
-
-        // GetAllClasses should still only return classes
-        var allClasses = api.GetAllClasses().ToList();
-        Assert.Single(allClasses);
-        Assert.Equal("Foo", allClasses[0].Name);
     }
 
     #endregion

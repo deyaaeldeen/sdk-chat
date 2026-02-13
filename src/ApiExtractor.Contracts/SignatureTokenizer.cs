@@ -50,16 +50,6 @@ public static class SignatureTokenizer
         TokenizeInto(signature.AsSpan(), tokens);
     }
 
-    /// <summary>
-    /// Returns the set of all identifier tokens in <paramref name="signature"/>.
-    /// </summary>
-    public static HashSet<string> Tokenize(string? signature)
-    {
-        HashSet<string> tokens = [];
-        TokenizeInto(signature, tokens);
-        return tokens;
-    }
-
     private static bool IsIdentifierChar(char c) =>
         char.IsLetterOrDigit(c) || c == '_';
 }

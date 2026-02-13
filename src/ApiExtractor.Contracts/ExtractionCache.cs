@@ -66,36 +66,4 @@ public sealed class ExtractionCache<TIndex> where TIndex : class, IApiIndex
         return value;
     }
 
-    /// <summary>
-    /// Checks whether a valid cached result exists for the given path
-    /// and the directory fingerprint still matches.
-    /// </summary>
-    public bool IsCached(string rootPath)
-    {
-        lock (_lock)
-        {
-            if (_cachedValue is null || _cachedPath is null)
-                return false;
-
-            var normalized = Path.GetFullPath(rootPath);
-            if (_cachedPath != normalized)
-                return false;
-
-            var fingerprint = DirectoryFingerprint.Compute(normalized, _extensions);
-            return _cachedFingerprint == fingerprint;
-        }
-    }
-
-    /// <summary>
-    /// Clears the cached result, forcing re-extraction on the next call.
-    /// </summary>
-    public void Invalidate()
-    {
-        lock (_lock)
-        {
-            _cachedValue = null;
-            _cachedFingerprint = null;
-            _cachedPath = null;
-        }
-    }
 }

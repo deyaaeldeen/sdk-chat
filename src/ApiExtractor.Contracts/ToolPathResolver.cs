@@ -58,54 +58,6 @@ public static partial class ToolPathResolver
     }
 
     /// <summary>
-    /// Resolves the path to an external tool, checking environment overrides first.
-    /// </summary>
-    /// <param name="toolName">The tool name (e.g., "python", "go", "node")</param>
-    /// <param name="defaultCandidates">Default executable names/paths to try</param>
-    /// <param name="versionArgs">Arguments to get version (for validation)</param>
-    /// <returns>The resolved path, or null if not found</returns>
-    public static string? Resolve(string toolName, string[] defaultCandidates, string versionArgs = "--version")
-    {
-        // SECURITY: Validate tool name to prevent command injection
-        ValidateSafeInput(toolName, nameof(toolName), allowPath: false);
-
-        // 1. Check environment variable override first
-        var envVar = $"{EnvVarPrefix}{toolName.ToUpperInvariant()}_PATH";
-        var envPath = Environment.GetEnvironmentVariable(envVar);
-
-        if (!string.IsNullOrEmpty(envPath))
-        {
-            // SECURITY: Validate environment path before use
-            if (!SafePathPattern().IsMatch(envPath))
-            {
-                // Unsafe path in env var - skip silently and fall through to default candidates
-                // (callers can use ResolveWithDetails for warnings)
-            }
-            else if (ValidateExecutable(envPath, versionArgs))
-            {
-                return envPath;
-            }
-            // Environment variable set but invalid - fall through to default candidates
-            // Do NOT log to Console.Error - callers should use ResolveWithDetails for warnings
-        }
-
-        // 2. Try default candidates
-        foreach (var candidate in defaultCandidates)
-        {
-            // SECURITY: Skip candidates with unsafe characters
-            if (!SafePathPattern().IsMatch(candidate))
-                continue;
-
-            if (ValidateExecutable(candidate, versionArgs))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// Resolves the path with detailed result including security warnings.
     /// Use this method instead of Resolve() when you need warning information.
     /// </summary>

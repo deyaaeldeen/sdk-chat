@@ -254,14 +254,6 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.All(clients, c => Assert.True(c.EntryPoint == true && (c.Methods?.Any() ?? false)));
     }
 
-    [Fact]
-    public void Extract_GetClientTypeNames_IncludesSampleClient()
-    {
-        var api = GetApi();
-        var clientNames = api.GetClientTypeNames().ToList();
-        Assert.Contains("SampleClient", clientNames);
-    }
-
     #endregion
 
     #region Model and Error Type Detection Tests
@@ -382,27 +374,7 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
 
     #endregion
 
-    #region Dependency Graph Tests
-
-    [Fact]
-    public void Extract_BuildDependencyGraph_ReturnsNonEmptyGraph()
-    {
-        var api = GetApi();
-        var graph = api.BuildDependencyGraph();
-        Assert.NotEmpty(graph);
-    }
-
-    [Fact]
-    public void Extract_BuildDependencyGraph_SampleClientReferencesWidgetClient()
-    {
-        var api = GetApi();
-        var graph = api.BuildDependencyGraph();
-
-        // SampleClient has a WidgetClient property, so it should reference WidgetClient
-        Assert.True(graph.ContainsKey("SampleClient"));
-        var deps = graph["SampleClient"];
-        Assert.Contains("WidgetClient", deps);
-    }
+    #region CollectReferencedTypes Tests
 
     [Fact]
     public void ClassInfo_CollectReferencedTypes_FindsExtends()
@@ -462,34 +434,6 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
 
         var refs = cls.GetReferencedTypes(allTypes);
         Assert.Contains("Options", refs);
-    }
-
-    #endregion
-
-    #region GetAllTypeNames Tests
-
-    [Fact]
-    public void Extract_GetAllTypeNames_IncludesClasses()
-    {
-        var api = GetApi();
-        var names = api.GetAllTypeNames().ToList();
-        Assert.Contains("SampleClient", names);
-    }
-
-    [Fact]
-    public void Extract_GetAllTypeNames_IncludesInterfaces()
-    {
-        var api = GetApi();
-        var names = api.GetAllTypeNames().ToList();
-        Assert.Contains("Resource", names);
-    }
-
-    [Fact]
-    public void Extract_GetAllTypeNames_IncludesEnums()
-    {
-        var api = GetApi();
-        var names = api.GetAllTypeNames().ToList();
-        Assert.Contains("ResultStatus", names);
     }
 
     #endregion

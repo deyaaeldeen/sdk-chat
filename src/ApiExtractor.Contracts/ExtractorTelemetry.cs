@@ -79,20 +79,4 @@ public static class ExtractorTelemetry
         }
     }
 
-    /// <summary>
-    /// Records process execution metrics.
-    /// </summary>
-    public static void RecordProcessResult(Activity? activity, int exitCode, TimeSpan duration, bool timedOut = false)
-    {
-        if (activity is null) return;
-
-        activity.SetTag("exit_code", exitCode);
-        activity.SetTag("duration_ms", duration.TotalMilliseconds);
-        activity.SetTag("timed_out", timedOut);
-
-        if (exitCode != 0 || timedOut)
-        {
-            activity.SetStatus(ActivityStatusCode.Error, timedOut ? "Process timed out" : $"Exit code: {exitCode}");
-        }
-    }
 }
