@@ -242,7 +242,7 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
     }
 
     [Fact]
-    public void ClassInfo_IsModelType_ClassWithNoMethods_IsModel()
+    public void ClassInfo_IsModelType_ClassWithNullMethodsAndNoFields_IsNotModel()
     {
         var classInfo = new ClassInfo
         {
@@ -250,7 +250,22 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
             Methods = null
         };
 
-        Assert.True(classInfo.IsModelType, "Class with null methods should be a model");
+        Assert.False(classInfo.IsModelType,
+            "Class with null methods and no fields is a marker type, not a model");
+    }
+
+    [Fact]
+    public void ClassInfo_IsModelType_ClassWithNullMethodsAndFields_IsModel()
+    {
+        var classInfo = new ClassInfo
+        {
+            Name = "DataPojo",
+            Methods = null,
+            Fields = [new FieldInfo { Name = "value", Type = "String" }]
+        };
+
+        Assert.True(classInfo.IsModelType,
+            "Class with null methods but with fields should be a model");
     }
 
     [Fact]

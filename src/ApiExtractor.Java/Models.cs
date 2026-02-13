@@ -169,8 +169,9 @@ public sealed record ClassInfo
         (Methods?.Any() ?? false);
 
     /// <summary>Returns true if this is a model/DTO class.
-    /// A model type has no public methods and has fields, or Methods wasn't extracted (null).
-    /// An empty class (empty Methods list + no fields) is a marker type, not a model.</summary>
+    /// A model type has no public methods and has fields.
+    /// An empty class (no methods + no fields) or a type with unknown methods
+    /// (Methods is null) and no fields is a marker type, not a model.</summary>
     [JsonIgnore]
     public bool IsModelType
     {
@@ -180,7 +181,7 @@ public sealed record ClassInfo
 
             if (!hasPublicMethods)
             {
-                return (Fields?.Count > 0) || Methods is null;
+                return Fields?.Count > 0;
             }
 
             return false;

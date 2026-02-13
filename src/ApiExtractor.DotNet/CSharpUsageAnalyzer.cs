@@ -38,11 +38,15 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             return new UsageIndex { FileCount = 0 };
 
         var files = Directory.EnumerateFiles(normalizedPath, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("\\obj\\", StringComparison.Ordinal)
-                     && !f.Contains("/bin/", StringComparison.Ordinal) && !f.Contains("\\bin\\", StringComparison.Ordinal)
-                     && !f.Contains("/.git/", StringComparison.Ordinal) && !f.Contains("\\.git\\", StringComparison.Ordinal)
-                     && !f.Contains("/.vs/", StringComparison.Ordinal) && !f.Contains("\\.vs\\", StringComparison.Ordinal)
-                     && !f.Contains("/node_modules/", StringComparison.Ordinal) && !f.Contains("\\node_modules\\", StringComparison.Ordinal))
+            .Where(f =>
+            {
+                var relativePath = Path.GetRelativePath(normalizedPath, f);
+                return !CSharpApiExtractor.ContainsSegment(relativePath, "obj")
+                    && !CSharpApiExtractor.ContainsSegment(relativePath, "bin")
+                    && !CSharpApiExtractor.ContainsSegment(relativePath, ".git")
+                    && !CSharpApiExtractor.ContainsSegment(relativePath, ".vs")
+                    && !CSharpApiExtractor.ContainsSegment(relativePath, "node_modules");
+            })
             .ToList();
 
         List<SyntaxTree> syntaxTrees = [];

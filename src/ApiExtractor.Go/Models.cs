@@ -50,20 +50,29 @@ public sealed record ApiIndex : IApiIndex
     public string ToStubs() => GoFormatter.Format(this);
 
     /// <summary>
-    /// Builds a dependency graph: for each struct, which other structs it references.
+    /// Builds a dependency graph: for each type, which other types it references.
     /// Used for smart truncation to avoid orphan types.
     /// </summary>
     public Dictionary<string, HashSet<string>> BuildDependencyGraph()
     {
         var graph = new Dictionary<string, HashSet<string>>();
-        var allStructs = GetAllStructs().ToList();
-        var allTypeNames = allStructs.Select(s => s.Name).ToHashSet();
+        var allTypeNames = GetAllTypeNames().ToHashSet();
         HashSet<string> reusable = [];
 
-        foreach (var st in allStructs)
+        foreach (var st in GetAllStructs())
         {
             st.CollectReferencedTypes(allTypeNames, reusable);
             graph[st.Name] = [.. reusable];
+        }
+
+        // Include interface dependencies
+        foreach (var pkg in Packages ?? [])
+        {
+            foreach (var iface in pkg.Interfaces ?? [])
+            {
+                iface.CollectReferencedTypes(allTypeNames, reusable);
+                graph[iface.Name] = [.. reusable];
+            }
         }
 
         return graph;

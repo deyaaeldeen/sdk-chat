@@ -37,7 +37,7 @@ public sealed record ApiIndex(
     public string ToStubs() => PythonFormatter.Format(this);
 
     /// <summary>
-    /// Builds a dependency graph: for each class, which other classes it references.
+    /// Builds a dependency graph: for each type, which other types it references.
     /// Used for smart truncation to avoid orphan types.
     /// </summary>
     public Dictionary<string, HashSet<string>> BuildDependencyGraph()
@@ -88,6 +88,10 @@ public sealed record ClassInfo
     public string? ReExportedFrom { get; init; }
     [JsonPropertyName("base")]
     public string? Base { get; init; }
+
+    [JsonPropertyName("typeParams")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TypeParams { get; init; }
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
