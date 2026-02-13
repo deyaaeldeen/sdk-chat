@@ -461,4 +461,66 @@ public class DotNetApiExtractorTests
     }
 
     #endregion
+
+    #region Deprecation Tracking
+
+    [Fact]
+    public async Task Extract_DetectsDeprecatedType()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var legacy = types.FirstOrDefault(t => t.Name == "LegacyClient");
+        Assert.NotNull(legacy);
+        Assert.True(legacy.IsDeprecated);
+        Assert.Equal("Use SampleClient instead.", legacy.DeprecatedMessage);
+    }
+
+    [Fact]
+    public async Task Extract_DetectsDeprecatedMember()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var mixed = types.FirstOrDefault(t => t.Name == "MixedDeprecationClient");
+        Assert.NotNull(mixed);
+        Assert.NotNull(mixed.Members);
+
+        var oldMethod = mixed.Members.FirstOrDefault(m => m.Name == "OldMethodAsync");
+        Assert.NotNull(oldMethod);
+        Assert.True(oldMethod.IsDeprecated);
+        Assert.Equal("Use NewMethodAsync instead.", oldMethod.DeprecatedMessage);
+
+        var newMethod = mixed.Members.FirstOrDefault(m => m.Name == "NewMethodAsync");
+        Assert.NotNull(newMethod);
+        Assert.Null(newMethod.IsDeprecated);
+    }
+
+    [Fact]
+    public async Task Extract_DeprecatedPropertyDetected()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var mixed = types.FirstOrDefault(t => t.Name == "MixedDeprecationClient");
+        Assert.NotNull(mixed);
+        Assert.NotNull(mixed.Members);
+
+        var legacyProp = mixed.Members.FirstOrDefault(m => m.Name == "LegacyProperty");
+        Assert.NotNull(legacyProp);
+        Assert.True(legacyProp.IsDeprecated);
+
+        var currentProp = mixed.Members.FirstOrDefault(m => m.Name == "CurrentProperty");
+        Assert.NotNull(currentProp);
+        Assert.Null(currentProp.IsDeprecated);
+    }
+
+    [Fact]
+    public async Task Extract_NonDeprecatedTypeNotMarked()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+        var sampleClient = types.FirstOrDefault(t => t.Name == "SampleClient");
+        Assert.NotNull(sampleClient);
+        Assert.Null(sampleClient.IsDeprecated);
+    }
+
+    #endregion
 }

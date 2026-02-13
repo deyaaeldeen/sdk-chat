@@ -339,3 +339,33 @@ public readonly struct Money
     /// <inheritdoc />
     public override int GetHashCode() => HashCode.Combine(Amount, Currency);
 }
+
+/// <summary>
+/// A deprecated client for testing deprecation extraction.
+/// </summary>
+[Obsolete("Use SampleClient instead.")]
+public class LegacyClient
+{
+    /// <summary>Gets a resource the old way.</summary>
+    public Task<Resource> GetResourceAsync(string id) => Task.FromResult(new Resource { Id = id, Name = "Legacy" });
+}
+
+/// <summary>
+/// A client with deprecated members.
+/// </summary>
+public class MixedDeprecationClient
+{
+    /// <summary>Old method that should not be used.</summary>
+    [Obsolete("Use NewMethodAsync instead.")]
+    public Task<Resource> OldMethodAsync(string id) => Task.FromResult(new Resource { Id = id, Name = "Old" });
+
+    /// <summary>New replacement method.</summary>
+    public Task<Resource> NewMethodAsync(string id) => Task.FromResult(new Resource { Id = id, Name = "New" });
+
+    /// <summary>Deprecated property.</summary>
+    [Obsolete]
+    public string? LegacyProperty { get; set; }
+
+    /// <summary>Current property.</summary>
+    public string? CurrentProperty { get; set; }
+}

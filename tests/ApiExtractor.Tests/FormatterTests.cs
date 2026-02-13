@@ -1039,4 +1039,58 @@ public class CoverageFormatterTests
         CoverageFormatter.AppendCoverageSummary(sb, coverage);
         Assert.Contains("(+5 more)", sb.ToString());
     }
+
+    [Fact]
+    public void AppendCoverageSummary_DeprecatedOps_ExcludedFromUncovered()
+    {
+        var coverage = new UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "Client", Operation = "OldMethod", Signature = "OldMethod()", IsDeprecated = true },
+                new UncoveredOperation { ClientType = "Client", Operation = "NewMethod", Signature = "NewMethod()" }
+            ]
+        };
+
+        var sb = new StringBuilder();
+        var result = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        var text = sb.ToString();
+
+        // Deprecated should be in separate section
+        Assert.Contains("DEPRECATED API (1 operations)", text);
+        Assert.Contains("OldMethod", text);
+        // Uncovered should only count non-deprecated
+        Assert.Contains("UNCOVERED API (1 operations)", text);
+        // The uncovered dict should not contain deprecated
+        Assert.NotNull(result);
+        Assert.True(result.ContainsKey("Client"));
+        Assert.Contains("NewMethod", result["Client"]);
+        Assert.DoesNotContain("OldMethod", result["Client"]);
+    }
+
+    [Fact]
+    public void AppendCoverageSummary_AllUncoveredAreDeprecated_ReturnsNull()
+    {
+        var coverage = new UsageIndex
+        {
+            FileCount = 1,
+            CoveredOperations = [],
+            UncoveredOperations =
+            [
+                new UncoveredOperation { ClientType = "Client", Operation = "OldMethod", Signature = "OldMethod()", IsDeprecated = true },
+            ]
+        };
+
+        var sb = new StringBuilder();
+        var result = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        var text = sb.ToString();
+
+        // Should show deprecated section
+        Assert.Contains("DEPRECATED API", text);
+        // But uncovered should be "all covered" since non-deprecated are all covered
+        Assert.Contains("All operations are covered", text);
+        Assert.Null(result);
+    }
 }

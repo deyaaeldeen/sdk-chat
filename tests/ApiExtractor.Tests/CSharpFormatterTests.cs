@@ -475,6 +475,92 @@ public class CSharpFormatterTests
 
     #endregion
 
+    #region Deprecation Formatting
+
+    [Fact]
+    public void Format_DeprecatedType_ShowsObsoleteAttribute()
+    {
+        var index = new ApiIndex
+        {
+            Package = "TestPkg",
+            Namespaces =
+            [
+                new NamespaceInfo
+                {
+                    Name = "TestPkg",
+                    Types = [new TypeInfo
+                    {
+                        Name = "OldClient",
+                        Kind = "class",
+                        IsDeprecated = true,
+                        DeprecatedMessage = "Use NewClient instead.",
+                        Members = [new MemberInfo { Name = "DoWork", Kind = "method", Signature = "void DoWork()" }]
+                    }]
+                }
+            ]
+        };
+
+        var stubs = CSharpFormatter.Format(index);
+        Assert.Contains("[Obsolete(\"Use NewClient instead.\")]", stubs);
+    }
+
+    [Fact]
+    public void Format_DeprecatedMember_ShowsObsoleteAttribute()
+    {
+        var index = new ApiIndex
+        {
+            Package = "TestPkg",
+            Namespaces =
+            [
+                new NamespaceInfo
+                {
+                    Name = "TestPkg",
+                    Types = [new TypeInfo
+                    {
+                        Name = "Client",
+                        Kind = "class",
+                        Members =
+                        [
+                            new MemberInfo { Name = "OldMethod", Kind = "method", Signature = "void OldMethod()", IsDeprecated = true, DeprecatedMessage = "Use NewMethod." },
+                            new MemberInfo { Name = "NewMethod", Kind = "method", Signature = "void NewMethod()" }
+                        ]
+                    }]
+                }
+            ]
+        };
+
+        var stubs = CSharpFormatter.Format(index);
+        Assert.Contains("[Obsolete(\"Use NewMethod.\")]", stubs);
+    }
+
+    [Fact]
+    public void Format_DeprecatedWithoutMessage_ShowsObsoleteAttributeNoMessage()
+    {
+        var index = new ApiIndex
+        {
+            Package = "TestPkg",
+            Namespaces =
+            [
+                new NamespaceInfo
+                {
+                    Name = "TestPkg",
+                    Types = [new TypeInfo
+                    {
+                        Name = "OldClient",
+                        Kind = "class",
+                        IsDeprecated = true,
+                        Members = [new MemberInfo { Name = "DoWork", Kind = "method", Signature = "void DoWork()" }]
+                    }]
+                }
+            ]
+        };
+
+        var stubs = CSharpFormatter.Format(index);
+        Assert.Contains("[Obsolete]", stubs);
+    }
+
+    #endregion
+
     #region Helpers
 
     private static TypeInfo MakeClass(string name, string memberKind, string signature)
