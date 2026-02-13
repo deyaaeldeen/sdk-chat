@@ -36,6 +36,8 @@ export interface MethodInfo {
     doc?: string;
     async?: boolean;
     static?: boolean;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface PropertyInfo {
@@ -44,6 +46,8 @@ export interface PropertyInfo {
     readonly?: boolean;
     optional?: boolean;
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface ConstructorInfo {
@@ -59,6 +63,8 @@ export interface ClassInfo {
     implements?: string[];
     typeParams?: string;
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
     constructors?: ConstructorInfo[];
     methods?: MethodInfo[];
     properties?: PropertyInfo[];
@@ -72,6 +78,8 @@ export interface InterfaceInfo {
     extends?: string;
     typeParams?: string;
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
     methods?: MethodInfo[];
     properties?: PropertyInfo[];
 }
@@ -80,6 +88,8 @@ export interface EnumInfo {
     name: string;
     reExportedFrom?: string;  // External package this is re-exported from
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
     values: string[];
 }
 
@@ -88,6 +98,8 @@ export interface TypeAliasInfo {
     type: string;
     reExportedFrom?: string;  // External package this is re-exported from
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface FunctionInfo {
@@ -99,6 +111,8 @@ export interface FunctionInfo {
     ret?: string;
     doc?: string;
     async?: boolean;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface ModuleInfo {
@@ -497,6 +511,18 @@ function hasInternalOrHiddenTag(node: JSDocableNode): boolean {
     return false;
 }
 
+function getDeprecationInfo(node: JSDocableNode): { deprecated?: boolean; deprecatedMsg?: string } {
+    for (const jsDoc of node.getJsDocs()) {
+        for (const tag of jsDoc.getTags()) {
+            if (tag.getTagName() === "deprecated") {
+                const comment = tag.getCommentText()?.trim();
+                return { deprecated: true, deprecatedMsg: comment || undefined };
+            }
+        }
+    }
+    return {};
+}
+
 function simplifyType(type: string): string {
     if (!type) return type;
     // Remove import() statements
@@ -544,6 +570,8 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
     if (method.isAsync()) result.async = true;
     if (method.isStatic()) result.static = true;
 
+    Object.assign(result, getDeprecationInfo(method));
+
     return result;
 }
 
@@ -564,6 +592,8 @@ function extractProperty(prop: PropertyDeclaration): PropertyInfo {
     const doc = getDocString(prop);
     if (doc) result.doc = doc;
 
+    Object.assign(result, getDeprecationInfo(prop));
+
     return result;
 }
 
@@ -577,7 +607,7 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
     const name = cls.getName();
     if (!name) throw new Error("Class must have a name");
 
-    const result: ClassInfo = { name };
+    const result: ClassInfo = { name, ...getDeprecationInfo(cls) };
 
     // Base class - collect type reference
     const ext = cls.getExtends();
@@ -653,6 +683,8 @@ function extractInterfaceMethod(method: Node): MethodInfo | undefined {
     const doc = getDocString(method);
     if (doc) result.doc = doc;
 
+    Object.assign(result, getDeprecationInfo(method));
+
     return result;
 }
 
@@ -681,6 +713,8 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
     const doc = getDocString(prop);
     if (doc) result.doc = doc;
 
+    Object.assign(result, getDeprecationInfo(prop));
+
     return result;
 }
 
@@ -698,12 +732,15 @@ function extractInterfaceProperty(prop: Node): PropertyInfo | undefined {
     const doc = getDocString(prop);
     if (doc) result.doc = doc;
 
+    Object.assign(result, getDeprecationInfo(prop));
+
     return result;
 }
 
 function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
     const result: InterfaceInfo = {
         name: iface.getName(),
+        ...getDeprecationInfo(iface),
     };
 
     // Extends
@@ -749,6 +786,7 @@ function extractEnum(en: EnumDeclaration): EnumInfo {
     return {
         name: en.getName(),
         doc: getDocString(en),
+        ...getDeprecationInfo(en),
         values: en.getMembers().map((m) => m.getName()),
     };
 }
@@ -763,6 +801,7 @@ function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
         name: alias.getName(),
         type: simplifyType(type.getText()),
         doc: getDocString(alias),
+        ...getDeprecationInfo(alias),
     };
 }
 
@@ -790,6 +829,8 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     if (doc) result.doc = doc;
 
     if (fn.isAsync()) result.async = true;
+
+    Object.assign(result, getDeprecationInfo(fn));
 
     return result;
 }

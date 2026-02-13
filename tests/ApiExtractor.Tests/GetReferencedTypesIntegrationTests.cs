@@ -282,24 +282,24 @@ public class GetReferencedTypesIntegrationTests : IDisposable
                             EntryPoint = true,
                             Methods =
                             [
-                                new PyModels.MethodInfo("upload", "upload(self, data: bytes, options: UploadOptions) -> BlobProperties", null, null, null, null),
-                                new PyModels.MethodInfo("download", "download(self) -> bytes", null, null, null, null)
+                                new PyModels.MethodInfo { Name = "upload", Signature = "upload(self, data: bytes, options: UploadOptions) -> BlobProperties" },
+                                new PyModels.MethodInfo { Name = "download", Signature = "download(self) -> bytes" }
                             ]
                         },
                         new PyModels.ClassInfo
                         {
                             Name = "UploadOptions",
-                            Properties = [new PyModels.PropertyInfo("overwrite", "bool", null)]
+                            Properties = [new PyModels.PropertyInfo { Name = "overwrite", Type = "bool" }]
                         },
                         new PyModels.ClassInfo
                         {
                             Name = "BlobProperties",
-                            Properties = [new PyModels.PropertyInfo("name", "str", null)]
+                            Properties = [new PyModels.PropertyInfo { Name = "name", Type = "str" }]
                         },
                         new PyModels.ClassInfo
                         {
                             Name = "UnrelatedModel",
-                            Properties = [new PyModels.PropertyInfo("value", "int", null)]
+                            Properties = [new PyModels.PropertyInfo { Name = "value", Type = "int" }]
                         }
                     ],
                     Functions: null
@@ -331,7 +331,7 @@ public class GetReferencedTypesIntegrationTests : IDisposable
                             EntryPoint = true,
                             Methods =
                             [
-                                new PyModels.MethodInfo("process", "process(self, handler: ErrorHandler) -> None", null, null, null, null)
+                                new PyModels.MethodInfo { Name = "process", Signature = "process(self, handler: ErrorHandler) -> None" }
                             ]
                         },
                         new PyModels.ClassInfo { Name = "ErrorHandler" },
@@ -751,7 +751,7 @@ public class GetReferencedTypesIntegrationTests : IDisposable
         var pyClass = new PyModels.ClassInfo
         {
             Name = "Client",
-            Methods = [new PyModels.MethodInfo("handle", signatureWithSubstring, null, null, null, null)]
+            Methods = [new PyModels.MethodInfo { Name = "handle", Signature = signatureWithSubstring }]
         };
         var pyRefs = pyClass.GetReferencedTypes(allTypeNames);
         Assert.Contains("ErrorHandler", pyRefs);

@@ -59,7 +59,8 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 ExtractorMode.RuntimeInterpreter => new([GetScriptPath(), "--usage", "-", samplesPath]),
                 _ => new(["--usage", "-", samplesPath])
             },
-            SignatureLookup = BuildSignatureLookup(apiIndex)
+            SignatureLookup = BuildSignatureLookup(apiIndex),
+            DeprecationLookup = BuildDeprecationLookup(apiIndex)
         }, ct).ConfigureAwait(false);
 
         if (analysisResult.Errors.Count > 0)
@@ -137,6 +138,16 @@ public class PythonUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         foreach (var cls in apiIndex.GetAllClasses())
             foreach (var method in cls.Methods ?? [])
                 lookup.TryAdd($"{cls.Name}.{method.Name}", $"{method.Name}({method.Signature})");
+        return lookup;
+    }
+
+    internal static HashSet<string> BuildDeprecationLookup(ApiIndex apiIndex)
+    {
+        var lookup = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var cls in apiIndex.GetAllClasses())
+            foreach (var method in cls.Methods ?? [])
+                if (method.IsDeprecated == true || cls.IsDeprecated == true)
+                    lookup.Add($"{cls.Name}.{method.Name}");
         return lookup;
     }
 }

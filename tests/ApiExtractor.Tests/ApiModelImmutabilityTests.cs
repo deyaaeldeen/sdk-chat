@@ -411,7 +411,7 @@ public class ApiModelImmutabilityTests
                     EntryPoint = true,
                     Methods =
                     [
-                        new PyModels.MethodInfo("get_data", "self", null, false, null, null, "Data")
+                        new PyModels.MethodInfo { Name = "get_data", Signature = "self", IsAsync = false, Ret = "Data" }
                     ]
                 },
                 new PyModels.ClassInfo
@@ -419,7 +419,7 @@ public class ApiModelImmutabilityTests
                     Name = "myclient",
                     Methods =
                     [
-                        new PyModels.MethodInfo("other", "self", null, false, null, null, null)
+                        new PyModels.MethodInfo { Name = "other", Signature = "self", IsAsync = false }
                     ]
                 }
             ], null)

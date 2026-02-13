@@ -83,7 +83,7 @@ public class ApiIndexTypeNameTests
         [
             new PyModels.ModuleInfo("mod",
             [
-                new PyModels.ClassInfo { Name = "MyClient", EntryPoint = true, Methods = [new PyModels.MethodInfo("op", "self", null, null, null, null)] },
+                new PyModels.ClassInfo { Name = "MyClient", EntryPoint = true, Methods = [new PyModels.MethodInfo { Name = "op", Signature = "self" }] },
                 new PyModels.ClassInfo { Name = "Options" }
             ], null)
         ]);
@@ -101,7 +101,7 @@ public class ApiIndexTypeNameTests
         [
             new PyModels.ModuleInfo("mod",
             [
-                new PyModels.ClassInfo { Name = "MyClient", EntryPoint = true, Methods = [new PyModels.MethodInfo("op", "self", null, null, null, null)] },
+                new PyModels.ClassInfo { Name = "MyClient", EntryPoint = true, Methods = [new PyModels.MethodInfo { Name = "op", Signature = "self" }] },
                 new PyModels.ClassInfo { Name = "Options" }
             ], null)
         ]);

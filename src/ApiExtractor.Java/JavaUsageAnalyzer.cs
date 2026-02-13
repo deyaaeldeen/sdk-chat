@@ -61,7 +61,8 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     WorkingDirectory: scriptDir),
                 _ => new(["--usage", "-", samplesPath])
             },
-            SignatureLookup = BuildSignatureLookup(apiIndex)
+            SignatureLookup = BuildSignatureLookup(apiIndex),
+            DeprecationLookup = BuildDeprecationLookup(apiIndex)
         }, ct).ConfigureAwait(false);
 
         if (analysisResult.Errors.Count > 0)
@@ -159,6 +160,16 @@ public class JavaUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     lookup.TryAdd($"{iface.Name}.{method.Name}", $"{ret}{method.Name}{method.Sig}");
                 }
         }
+        return lookup;
+    }
+
+    internal static HashSet<string> BuildDeprecationLookup(ApiIndex apiIndex)
+    {
+        var lookup = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var cls in apiIndex.GetAllTypes())
+            foreach (var method in cls.Methods ?? [])
+                if (method.IsDeprecated == true || cls.IsDeprecated == true)
+                    lookup.Add($"{cls.Name}.{method.Name}");
         return lookup;
     }
 }

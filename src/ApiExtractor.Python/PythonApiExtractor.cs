@@ -180,16 +180,28 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 ReExportedFrom = c.ReExportedFrom,
                 Base = c.Base,
                 Doc = c.Doc,
-                Methods = c.Methods?.Select(mt => new MethodInfo(
-                    mt.Name ?? "",
-                    mt.Sig ?? "",
-                    mt.Doc,
-                    mt.Async,
-                    mt.Classmethod,
-                    mt.Staticmethod,
-                    mt.Ret
-                )).ToList(),
-                Properties = c.Properties?.Select(p => new PropertyInfo(p.Name ?? "", p.Type, p.Doc)).ToList()
+                IsDeprecated = c.Deprecated,
+                DeprecatedMessage = c.DeprecatedMsg,
+                Methods = c.Methods?.Select(mt => new MethodInfo
+                {
+                    Name = mt.Name ?? "",
+                    Signature = mt.Sig ?? "",
+                    Doc = mt.Doc,
+                    IsAsync = mt.Async,
+                    IsClassMethod = mt.Classmethod,
+                    IsStaticMethod = mt.Staticmethod,
+                    Ret = mt.Ret,
+                    IsDeprecated = mt.Deprecated,
+                    DeprecatedMessage = mt.DeprecatedMsg
+                }).ToList(),
+                Properties = c.Properties?.Select(p => new PropertyInfo
+                {
+                    Name = p.Name ?? "",
+                    Type = p.Type,
+                    Doc = p.Doc,
+                    IsDeprecated = p.Deprecated,
+                    DeprecatedMessage = p.DeprecatedMsg
+                }).ToList()
             }).ToList(),
             m.Functions?.Select(f => new FunctionInfo
             {
@@ -199,7 +211,9 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 Signature = f.Sig ?? "",
                 Doc = f.Doc,
                 Ret = f.Ret,
-                IsAsync = f.Async
+                IsAsync = f.Async,
+                IsDeprecated = f.Deprecated,
+                DeprecatedMessage = f.DeprecatedMsg
             }).ToList()
         )).ToList() ?? [];
 
@@ -211,16 +225,28 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 Name = c.Name ?? "",
                 Base = c.Base,
                 Doc = c.Doc,
-                Methods = c.Methods?.Select(mt => new MethodInfo(
-                    mt.Name ?? "",
-                    mt.Sig ?? "",
-                    mt.Doc,
-                    mt.Async,
-                    mt.Classmethod,
-                    mt.Staticmethod,
-                    mt.Ret
-                )).ToList(),
-                Properties = c.Properties?.Select(p => new PropertyInfo(p.Name ?? "", p.Type, p.Doc)).ToList()
+                IsDeprecated = c.Deprecated,
+                DeprecatedMessage = c.DeprecatedMsg,
+                Methods = c.Methods?.Select(mt => new MethodInfo
+                {
+                    Name = mt.Name ?? "",
+                    Signature = mt.Sig ?? "",
+                    Doc = mt.Doc,
+                    IsAsync = mt.Async,
+                    IsClassMethod = mt.Classmethod,
+                    IsStaticMethod = mt.Staticmethod,
+                    Ret = mt.Ret,
+                    IsDeprecated = mt.Deprecated,
+                    DeprecatedMessage = mt.DeprecatedMsg
+                }).ToList(),
+                Properties = c.Properties?.Select(p => new PropertyInfo
+                {
+                    Name = p.Name ?? "",
+                    Type = p.Type,
+                    Doc = p.Doc,
+                    IsDeprecated = p.Deprecated,
+                    DeprecatedMessage = p.DeprecatedMsg
+                }).ToList()
             }).ToList(),
             Functions = d.Functions?.Select(f => new FunctionInfo
             {
@@ -228,7 +254,9 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 Signature = f.Sig ?? "",
                 Doc = f.Doc,
                 Ret = f.Ret,
-                IsAsync = f.Async
+                IsAsync = f.Async,
+                IsDeprecated = f.Deprecated,
+                DeprecatedMessage = f.DeprecatedMsg
             }).ToList()
         }).ToList();
 

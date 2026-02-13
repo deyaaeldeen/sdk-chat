@@ -45,7 +45,9 @@ public sealed record RawPythonClass(
     [property: JsonPropertyName("methods")] List<RawPythonMethod>? Methods,
     [property: JsonPropertyName("properties")] List<RawPythonProperty>? Properties,
     [property: JsonPropertyName("entryPoint")] bool? EntryPoint = null,
-    [property: JsonPropertyName("reExportedFrom")] string? ReExportedFrom = null
+    [property: JsonPropertyName("reExportedFrom")] string? ReExportedFrom = null,
+    [property: JsonPropertyName("deprecated")] bool? Deprecated = null,
+    [property: JsonPropertyName("deprecatedMsg")] string? DeprecatedMsg = null
 );
 
 public sealed record RawPythonMethod(
@@ -55,13 +57,17 @@ public sealed record RawPythonMethod(
     [property: JsonPropertyName("async")] bool? Async,
     [property: JsonPropertyName("classmethod")] bool? Classmethod,
     [property: JsonPropertyName("staticmethod")] bool? Staticmethod,
-    [property: JsonPropertyName("ret")] string? Ret = null
+    [property: JsonPropertyName("ret")] string? Ret = null,
+    [property: JsonPropertyName("deprecated")] bool? Deprecated = null,
+    [property: JsonPropertyName("deprecatedMsg")] string? DeprecatedMsg = null
 );
 
 public sealed record RawPythonProperty(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("type")] string? Type,
-    [property: JsonPropertyName("doc")] string? Doc
+    [property: JsonPropertyName("doc")] string? Doc,
+    [property: JsonPropertyName("deprecated")] bool? Deprecated = null,
+    [property: JsonPropertyName("deprecatedMsg")] string? DeprecatedMsg = null
 );
 
 public sealed record RawPythonFunction(
@@ -71,7 +77,9 @@ public sealed record RawPythonFunction(
     [property: JsonPropertyName("async")] bool? Async,
     [property: JsonPropertyName("ret")] string? Ret = null,
     [property: JsonPropertyName("entryPoint")] bool? EntryPoint = null,
-    [property: JsonPropertyName("reExportedFrom")] string? ReExportedFrom = null
+    [property: JsonPropertyName("reExportedFrom")] string? ReExportedFrom = null,
+    [property: JsonPropertyName("deprecated")] bool? Deprecated = null,
+    [property: JsonPropertyName("deprecatedMsg")] string? DeprecatedMsg = null
 );
 
 /// <summary>

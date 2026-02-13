@@ -295,11 +295,17 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         // Build a quick lookup from "TypeName.MethodName" → full signature from API index
         // so uncovered operations get real parameter signatures instead of "method(...)" placeholders.
         var signatureLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var deprecationLookup = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var ns in apiIndex.Namespaces ?? [])
             foreach (var type in ns.Types ?? [])
                 foreach (var member in type.Members ?? [])
                     if (member.Kind == "method")
-                        signatureLookup.TryAdd($"{type.Name}.{member.Name}", member.Signature);
+                    {
+                        var memberKey = $"{type.Name}.{member.Name}";
+                        signatureLookup.TryAdd(memberKey, member.Signature);
+                        if (member.IsDeprecated == true || type.IsDeprecated == true)
+                            deprecationLookup.Add(memberKey);
+                    }
 
         // Build bidirectional interface ↔ implementation mapping
         var interfaceToImpls = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -364,7 +370,8 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     {
                         ClientType = clientType,
                         Operation = method,
-                        Signature = signatureLookup.TryGetValue(sigKey, out var realSig) ? realSig : $"{method}(...)"
+                        Signature = signatureLookup.TryGetValue(sigKey, out var realSig) ? realSig : $"{method}(...)",
+                        IsDeprecated = deprecationLookup.Contains(sigKey) ? true : null
                     });
                 }
             }

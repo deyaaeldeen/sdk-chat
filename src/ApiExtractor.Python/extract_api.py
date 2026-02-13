@@ -189,6 +189,31 @@ def collect_types_from_annotation(ann: ast.expr | None, refs: set[str]) -> None:
             collect_types_from_annotation(elt, refs)
 
 
+def _get_deprecation_info(node: ast.AST) -> dict[str, Any]:
+    """Check for @deprecated decorator (PEP 702)."""
+    if not hasattr(node, 'decorator_list'):
+        return {}
+    for dec in node.decorator_list:
+        # @deprecated or @deprecated("message")
+        if isinstance(dec, ast.Name) and dec.id == 'deprecated':
+            return {"deprecated": True}
+        if isinstance(dec, ast.Call):
+            func = dec.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name == 'deprecated' and dec.args:
+                arg = dec.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    return {"deprecated": True, "deprecatedMsg": arg.value}
+                return {"deprecated": True}
+            elif name == 'deprecated':
+                return {"deprecated": True}
+    return {}
+
+
 def _get_attribute_name(node: ast.Attribute) -> str | None:
     """Get the full dotted name from an Attribute node."""
     parts: list[str] = []
@@ -432,6 +457,7 @@ def extract_function(
     result: dict[str, Any] = {
         "name": node.name,
         "sig": sig,
+        **_get_deprecation_info(node),
     }
 
     ret = format_annotation(node.returns)
@@ -480,6 +506,7 @@ def extract_class(
 
     result: dict[str, Any] = {
         "name": node.name,
+        **_get_deprecation_info(node),
     }
 
     # Register this class as a defined type
@@ -537,7 +564,7 @@ def extract_class(
                 if not prop_type:
                     sig = func_info.get("sig", "")
                     prop_type = sig.split(" -> ")[-1] if " -> " in sig else None
-                properties.append({"name": func_info["name"], "type": prop_type, "doc": func_info.get("doc")})
+                properties.append({"name": func_info["name"], "type": prop_type, "doc": func_info.get("doc"), **_get_deprecation_info(item)})
             else:
                 # If we have @overload signatures for this method, emit those
                 # instead of the (typically generic *args/**kwargs) implementation.

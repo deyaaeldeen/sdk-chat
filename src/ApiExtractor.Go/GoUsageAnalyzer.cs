@@ -61,7 +61,8 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             ApiJson = apiJson,
             SamplesPath = normalizedPath,
             BuildArgs = (avail, samplesPath) => new(["-usage", "-", samplesPath]),
-            SignatureLookup = BuildSignatureLookup(apiIndex)
+            SignatureLookup = BuildSignatureLookup(apiIndex),
+            DeprecationLookup = BuildDeprecationLookup(apiIndex)
         }, ct).ConfigureAwait(false);
 
         if (analysisResult.Errors.Count > 0)
@@ -214,6 +215,24 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                     var ret = !string.IsNullOrEmpty(method.Ret) ? $" {method.Ret}" : "";
                     lookup.TryAdd($"{iface.Name}.{method.Name}", $"{method.Name}({method.Sig}){ret}");
                 }
+        }
+        return lookup;
+    }
+
+    internal static HashSet<string> BuildDeprecationLookup(ApiIndex apiIndex)
+    {
+        var lookup = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var pkg in apiIndex.Packages ?? [])
+        {
+            foreach (var strct in pkg.Structs ?? [])
+                foreach (var method in strct.Methods ?? [])
+                    if (method.IsDeprecated == true || strct.IsDeprecated == true)
+                        lookup.Add($"{strct.Name}.{method.Name}");
+
+            foreach (var iface in pkg.Interfaces ?? [])
+                foreach (var method in iface.Methods ?? [])
+                    if (method.IsDeprecated == true || iface.IsDeprecated == true)
+                        lookup.Add($"{iface.Name}.{method.Name}");
         }
         return lookup;
     }

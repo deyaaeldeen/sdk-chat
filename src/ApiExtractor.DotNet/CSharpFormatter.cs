@@ -266,6 +266,13 @@ public static class CSharpFormatter
             sb.AppendLine($"{indent}/// <summary>{EscapeXml(type.Doc)}</summary>");
         }
 
+        // Deprecation marker
+        if (type.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(type.DeprecatedMessage) ? $"(\"{type.DeprecatedMessage}\")" : "";
+            sb.AppendLine($"{indent}[Obsolete{msg}]");
+        }
+
         // Type declaration
         var inheritance = BuildInheritance(type);
         sb.Append($"{indent}public {type.Kind} {type.Name}");
@@ -353,6 +360,13 @@ public static class CSharpFormatter
         // XML doc
         if (!string.IsNullOrEmpty(member.Doc))
             sb.AppendLine($"{indent}/// <summary>{EscapeXml(member.Doc)}</summary>");
+
+        // Deprecation marker
+        if (member.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(member.DeprecatedMessage) ? $"(\"{member.DeprecatedMessage}\")" : "";
+            sb.AppendLine($"{indent}[Obsolete{msg}]");
+        }
 
         List<string> modifiers = ["public"];
         if (member.IsStatic == true) modifiers.Add("static");

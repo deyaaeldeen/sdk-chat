@@ -16,6 +16,7 @@ public static class CoverageFormatter
     /// <summary>
     /// Appends the "ALREADY COVERED" summary section and builds the uncovered-by-client dictionary.
     /// Returns <c>null</c> if all operations are covered (and appends the "all covered" message).
+    /// Deprecated operations are excluded from uncovered counts and listed separately.
     /// </summary>
     /// <param name="sb">The <see cref="StringBuilder"/> to append to.</param>
     /// <param name="coverage">The usage coverage index.</param>
@@ -45,8 +46,27 @@ public static class CoverageFormatter
             sb.AppendLine();
         }
 
-        // Section 2: Build uncovered-by-client dictionary
-        var uncoveredByClient = coverage.UncoveredOperations
+        // Separate deprecated operations from non-deprecated uncovered operations
+        var deprecatedOps = coverage.UncoveredOperations.Where(op => op.IsDeprecated == true).ToList();
+        var nonDeprecatedUncovered = coverage.UncoveredOperations.Where(op => op.IsDeprecated != true).ToList();
+
+        // Section 2: Deprecated APIs (informational, should NOT be covered)
+        if (deprecatedOps.Count > 0)
+        {
+            var deprecatedByClient = deprecatedOps
+                .GroupBy(op => op.ClientType)
+                .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToList());
+
+            sb.AppendLine($"{commentPrefix} DEPRECATED API ({deprecatedOps.Count} operations) - Do NOT generate samples for these:");
+            foreach (var (client, ops) in deprecatedByClient.OrderBy(kv => kv.Key))
+            {
+                sb.AppendLine($"{commentPrefix}   {client}: {string.Join(", ", ops)}");
+            }
+            sb.AppendLine();
+        }
+
+        // Section 3: Build uncovered-by-client dictionary (excluding deprecated)
+        var uncoveredByClient = nonDeprecatedUncovered
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
 
@@ -56,7 +76,7 @@ public static class CoverageFormatter
             return null;
         }
 
-        sb.AppendLine($"{commentPrefix} UNCOVERED API ({coverage.UncoveredOperations.Count} operations) - Generate samples for these:");
+        sb.AppendLine($"{commentPrefix} UNCOVERED API ({nonDeprecatedUncovered.Count} operations) - Generate samples for these:");
         sb.AppendLine();
 
         return uncoveredByClient;

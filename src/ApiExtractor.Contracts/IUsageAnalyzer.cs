@@ -112,4 +112,7 @@ public sealed record UncoveredOperation
 
     /// <summary>Brief signature for context.</summary>
     public required string Signature { get; init; }
+
+    /// <summary>Whether this operation is deprecated.</summary>
+    public bool? IsDeprecated { get; init; }
 }

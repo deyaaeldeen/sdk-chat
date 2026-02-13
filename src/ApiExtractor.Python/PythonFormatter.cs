@@ -257,6 +257,11 @@ public static class PythonFormatter
 
     private static void FormatClass(StringBuilder sb, ClassInfo cls)
     {
+        if (cls.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(cls.DeprecatedMessage) ? $": {cls.DeprecatedMessage}" : "";
+            sb.AppendLine($"# @deprecated{msg}");
+        }
         var baseClass = !string.IsNullOrEmpty(cls.Base) ? $"({cls.Base})" : "";
         sb.AppendLine($"class {cls.Name}{baseClass}:");
 
@@ -268,6 +273,11 @@ public static class PythonFormatter
         // Properties
         foreach (var prop in cls.Properties ?? [])
         {
+            if (prop.IsDeprecated == true)
+            {
+                var pmsg = !string.IsNullOrEmpty(prop.DeprecatedMessage) ? $": {prop.DeprecatedMessage}" : "";
+                sb.AppendLine($"    # @deprecated{pmsg}");
+            }
             if (!string.IsNullOrEmpty(prop.Doc))
                 sb.AppendLine($"    # {prop.Doc}");
 
@@ -291,6 +301,12 @@ public static class PythonFormatter
 
     private static void FormatMethod(StringBuilder sb, MethodInfo method, string indent)
     {
+        if (method.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(method.DeprecatedMessage) ? $": {method.DeprecatedMessage}" : "";
+            sb.AppendLine($"{indent}# @deprecated{msg}");
+        }
+
         List<string> decorators = [];
         if (method.IsClassMethod == true) decorators.Add("@classmethod");
         if (method.IsStaticMethod == true) decorators.Add("@staticmethod");
@@ -308,6 +324,11 @@ public static class PythonFormatter
 
     private static void FormatFunction(StringBuilder sb, FunctionInfo func, string indent)
     {
+        if (func.IsDeprecated == true)
+        {
+            var msg = !string.IsNullOrEmpty(func.DeprecatedMessage) ? $": {func.DeprecatedMessage}" : "";
+            sb.AppendLine($"{indent}# @deprecated{msg}");
+        }
         var asyncPrefix = func.IsAsync == true ? "async " : "";
         var retAnnotation = !string.IsNullOrEmpty(func.Ret) ? $" -> {func.Ret}" : "";
         sb.AppendLine($"{indent}{asyncPrefix}def {func.Name}({func.Signature}){retAnnotation}: ...");
