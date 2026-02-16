@@ -12,9 +12,11 @@ namespace ApiExtractor.Tests;
 /// analysis for Java's external dependency type resolution.
 ///
 /// The Java source parser (JavaParser) resolves type references via import
-/// statements and can classify types seen in implements clauses as interfaces.
+/// statements and can classify types seen in implements clauses as interfaces
+/// and types seen in extends clauses as classes. Types that appear only in
+/// parameter/return positions are left unresolved in the Types[] bucket.
 /// However, it cannot:
-/// 1. Classify types seen only in parameter/return positions (defaults to "class")
+/// 1. Classify types seen only in parameter/return positions (left as unresolved)
 /// 2. Determine if an extends target is abstract, final, or concrete
 /// 3. Enumerate members of external types from their JARs
 ///
@@ -40,7 +42,7 @@ public class JavaCompiledPrecisionTests : IClassFixture<JavaCompiledFixture>
     /// HttpRequest and HttpResponse appear only as method parameter/return types.
     /// The Java source parser classifies types in implements clauses as interfaces,
     /// but types in parameter/return positions have no syntactic hint — the parser
-    /// defaults them to the Classes[] bucket.
+    /// leaves them unresolved in the Types[] bucket.
     ///
     /// In the external package, HttpRequest and HttpResponse are interfaces
     /// (following Java's common HTTP abstraction pattern). A compiled extractor
@@ -57,8 +59,8 @@ public class JavaCompiledPrecisionTests : IClassFixture<JavaCompiledFixture>
         Assert.NotNull(dep);
 
         // HttpRequest is defined as an interface in the external package.
-        // The source parser defaults it to Classes[] because it only appears
-        // as a parameter type, not in an implements clause.
+        // The source parser leaves it unresolved in Types[] because it only
+        // appears as a parameter type, not in an implements clause.
         // A compiled extractor loading the JAR would use reflection to
         // determine the actual kind.
         Assert.NotNull(dep.Interfaces);
@@ -67,8 +69,9 @@ public class JavaCompiledPrecisionTests : IClassFixture<JavaCompiledFixture>
 
     /// <summary>
     /// ExtendedClient extends HttpClient from the external package.
-    /// The source parser tracks the dependency and puts HttpClient in Classes[],
-    /// but creates a minimal entry without kind details or member information.
+    /// The source parser tracks the dependency and correctly puts HttpClient
+    /// in Classes[] (since it appears in an extends clause), but creates a
+    /// minimal entry without kind details or member information.
     ///
     /// A compiled extractor using reflection or ASM would determine:
     /// - HttpClient is an abstract class (with abstract methods to override)
