@@ -333,7 +333,7 @@ public sealed class SampleGeneratorAgent(
             return new PromptResponse { StopReason = StopReason.EndTurn };
         }
 
-        if (samples.Count == 0)
+        if (samples.Count is 0)
         {
             await SendTextAsync(connection, request.SessionId, "❌ No samples in array.\n", ct);
             return new PromptResponse { StopReason = StopReason.EndTurn };

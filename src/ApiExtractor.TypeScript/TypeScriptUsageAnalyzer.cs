@@ -140,7 +140,7 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         }
 
         // Build type nodes: classes are root candidates, interfaces are not
-        var typeNodes = new List<ReachabilityAnalyzer.TypeNode>();
+        List<ReachabilityAnalyzer.TypeNode> typeNodes = [];
 
         foreach (var cls in allClasses)
         {

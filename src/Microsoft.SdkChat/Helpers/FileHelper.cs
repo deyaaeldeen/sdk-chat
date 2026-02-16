@@ -118,7 +118,7 @@ public class FileHelper
                 }
             }
 
-            if (files.Count == 0)
+            if (files.Count is 0)
                 continue;
 
             files.Sort((a, b) =>
@@ -129,7 +129,7 @@ public class FileHelper
 
             var plan = CreateLoadingPlan(files, group.Budget, group.PerFileLimit);
 
-            if (plan.Items.Count == 0)
+            if (plan.Items.Count is 0)
                 continue;
 
             yield return new FileChunk($"<{group.SectionName}>\n", "", IsHeader: true, IsFooter: false, IsTruncated: false);

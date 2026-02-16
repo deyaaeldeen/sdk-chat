@@ -34,7 +34,7 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         using var activity = ExtractorTelemetry.StartUsageAnalysis(Language, normalizedPath);
 
         var clientMethods = BuildClientMethodMap(apiIndex);
-        if (clientMethods.Count == 0)
+        if (clientMethods.Count is 0)
             return new UsageIndex { FileCount = 0 };
 
         var files = Directory.EnumerateFiles(normalizedPath, "*.cs", SearchOption.AllDirectories)

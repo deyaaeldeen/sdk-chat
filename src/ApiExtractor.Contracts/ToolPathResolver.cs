@@ -44,8 +44,7 @@ public static partial class ToolPathResolver
     /// <exception cref="ArgumentException">Thrown if the value contains unsafe characters.</exception>
     public static void ValidateSafeInput(string value, string paramName, bool allowPath = false)
     {
-        if (string.IsNullOrWhiteSpace(value))
-            throw new ArgumentException("Value cannot be null or whitespace.", paramName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, paramName);
 
         var pattern = allowPath ? SafePathPattern() : SafeToolNamePattern();
         if (!pattern.IsMatch(value))

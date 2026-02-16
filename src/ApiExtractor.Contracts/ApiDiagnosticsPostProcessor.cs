@@ -53,7 +53,7 @@ public static partial class ApiDiagnosticsPostProcessor
                     });
             }
 
-            if (type.EntryPoint && type.Callables.Count == 0)
+            if (type.EntryPoint && type.Callables.Count is 0)
             {
                 AddDiagnostic(
                     diagnostics,
@@ -134,14 +134,19 @@ public static partial class ApiDiagnosticsPostProcessor
                 continue;
             }
 
-            foreach (var token in ExtractTypeTokens(type.Id ?? type.Name))
+            var id = type.Id ?? type.Name;
+            foreach (var token in ExtractTypeTokens(id))
             {
                 result.Add(token);
             }
 
-            foreach (var token in ExtractTypeTokens(type.Name))
+            // Only extract name tokens separately if Id differs from Name
+            if (id != type.Name)
             {
-                result.Add(token);
+                foreach (var token in ExtractTypeTokens(type.Name))
+                {
+                    result.Add(token);
+                }
             }
         }
 

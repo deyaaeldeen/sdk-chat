@@ -75,7 +75,7 @@ public static class NdjsonStreamParser
                     continue; // normalize CRLF to LF
                 }
 
-                if (braceDepth == 0 && objectBuilder.Length == 0)
+                if (braceDepth == 0 && objectBuilder.Length is 0)
                 {
                     // Handle code fence toggling (```json ... ```)
                     if (ch == '`')

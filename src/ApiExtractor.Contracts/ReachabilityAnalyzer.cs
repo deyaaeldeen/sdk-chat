@@ -69,7 +69,7 @@ public static class ReachabilityAnalyzer
         IReadOnlyDictionary<string, List<string>> additionalEdges,
         StringComparer comparer)
     {
-        if (types.Count == 0)
+        if (types.Count is 0)
             return new HashSet<string>(comparer);
 
         // Index types by name
@@ -81,7 +81,7 @@ public static class ReachabilityAnalyzer
         var adj = new Dictionary<string, List<string>>(comparer);
         foreach (var t in types)
         {
-            var neighbors = new List<string>();
+            List<string> neighbors = [];
             foreach (var r in t.ReferencedTypes)
             {
                 if (typesByName.ContainsKey(r) && !comparer.Equals(r, t.Name))
@@ -92,7 +92,7 @@ public static class ReachabilityAnalyzer
         }
 
         // --- Phase 1: Tarjan's SCC ---
-        var sccs = new List<List<string>>();
+        List<List<string>> sccs = [];
         var indices = new Dictionary<string, int>(comparer);
         var lowlinks = new Dictionary<string, int>(comparer);
         var onStack = new HashSet<string>(comparer);
@@ -154,7 +154,7 @@ public static class ReachabilityAnalyzer
                 operationTypes.Add(t.Name);
         }
 
-        var roots = new List<string>();
+        List<string> roots = [];
 
         // Explicit entry points are always roots
         foreach (var t in types)
@@ -291,7 +291,7 @@ public static class ReachabilityAnalyzer
             // All neighbors processed — equivalent to returning from recursive call
             if (lowlinks[v] == indices[v])
             {
-                var scc = new List<string>();
+                List<string> scc = [];
                 string w;
                 do
                 {

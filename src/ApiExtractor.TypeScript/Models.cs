@@ -665,7 +665,7 @@ public sealed record ParameterInfo
 internal static class TypeScriptModelHelpers
 {
     internal static string BuildSignature(IReadOnlyList<ParameterInfo>? parameters)
-        => parameters is null || parameters.Count == 0
+        => parameters is null || parameters.Count is 0
             ? ""
             : string.Join(", ",
                 parameters.Select(p =>

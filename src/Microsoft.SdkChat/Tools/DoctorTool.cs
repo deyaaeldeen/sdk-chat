@@ -378,7 +378,7 @@ public sealed partial class DoctorTool
     private static void PrintSecurityAdvisory(List<DependencyStatus> results)
     {
         var warnings = results.Where(r => r.Warning != null && r.Warning.StartsWith("Security:", StringComparison.Ordinal)).ToList();
-        if (warnings.Count == 0) return;
+        if (warnings.Count is 0) return;
 
         Console.WriteLine();
         Console.WriteLine("Security Advisory");

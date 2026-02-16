@@ -77,7 +77,7 @@ public partial class CSharpApiExtractor
         CancellationToken ct)
     {
         var syntaxTrees = compilation.SyntaxTrees.ToList();
-        if (syntaxTrees.Count == 0) return null;
+        if (syntaxTrees.Count is 0) return null;
 
         // Collect all defined type names (to exclude from dependencies)
         var definedTypes = new HashSet<string>(StringComparer.Ordinal);
@@ -140,7 +140,7 @@ public partial class CSharpApiExtractor
             }
         }
 
-        if (externalTypes.Count == 0) return null;
+        if (externalTypes.Count is 0) return null;
 
         // Group by assembly (package) name
         var byPackage = externalTypes

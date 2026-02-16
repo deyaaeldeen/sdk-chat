@@ -72,7 +72,7 @@ public static class ScriptUsageAnalyzerHelper
         ScriptInvocationConfig config,
         CancellationToken ct = default)
     {
-        var errors = new List<string>();
+        List<string> errors = [];
 
         var output = await InvokeScriptAsync(config, errors, ct).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(output))

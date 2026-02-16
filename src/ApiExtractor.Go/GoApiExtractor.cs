@@ -122,15 +122,19 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
 
     private static ApiIndex FinalizeIndex(ApiIndex index, CrossLanguageMap? crossLanguageMap, IReadOnlyList<ApiDiagnostic> upstreamDiagnostics)
     {
-        var withIds = EnsureIds(index);
-        var withCrossLanguage = crossLanguageMap is null ? withIds : ApplyCrossLanguageIds(withIds, crossLanguageMap);
-        var diagnostics = ApiDiagnosticsPostProcessor.Build(withCrossLanguage, upstreamDiagnostics);
-        return withCrossLanguage with { Diagnostics = diagnostics };
+        var finalized = FinalizeTree(index, crossLanguageMap);
+        var diagnostics = ApiDiagnosticsPostProcessor.Build(finalized, upstreamDiagnostics);
+        return finalized with { Diagnostics = diagnostics };
     }
 
-    private static ApiIndex EnsureIds(ApiIndex index)
+    /// <summary>
+    /// Single-pass tree finalization: assigns deterministic IDs and applies cross-language mapping
+    /// in one traversal instead of two separate cloning passes.
+    /// </summary>
+    private static ApiIndex FinalizeTree(ApiIndex index, CrossLanguageMap? map)
         => index with
         {
+            CrossLanguagePackageId = map?.PackageId,
             Packages = index.Packages.Select(package => package with
             {
                 Structs = package.Structs?.Select(structInfo =>
@@ -139,8 +143,17 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
                     return structInfo with
                     {
                         Id = typeId,
-                        Fields = structInfo.Fields?.Select(field => field with { Id = field.Id ?? BuildMemberId(typeId, field.Name) }).ToList(),
-                        Methods = structInfo.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
+                        CrossLanguageId = map is not null && map.Ids.TryGetValue(typeId, out var sXId) ? sXId : null,
+                        Fields = structInfo.Fields?.Select(field =>
+                        {
+                            var fieldId = field.Id ?? BuildMemberId(typeId, field.Name);
+                            return field with { Id = fieldId, CrossLanguageId = map is not null && map.Ids.TryGetValue(fieldId, out var fXId) ? fXId : null };
+                        }).ToList(),
+                        Methods = structInfo.Methods?.Select(method =>
+                        {
+                            var methodId = method.Id ?? BuildMemberId(typeId, method.Name);
+                            return method with { Id = methodId, CrossLanguageId = map is not null && map.Ids.TryGetValue(methodId, out var mXId) ? mXId : null };
+                        }).ToList(),
                     };
                 }).ToList(),
                 Interfaces = package.Interfaces?.Select(iface =>
@@ -149,69 +162,33 @@ public class GoApiExtractor : IApiExtractor<ApiIndex>
                     return iface with
                     {
                         Id = typeId,
-                        Methods = iface.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
+                        CrossLanguageId = map is not null && map.Ids.TryGetValue(typeId, out var iXId) ? iXId : null,
+                        Methods = iface.Methods?.Select(method =>
+                        {
+                            var methodId = method.Id ?? BuildMemberId(typeId, method.Name);
+                            return method with { Id = methodId, CrossLanguageId = map is not null && map.Ids.TryGetValue(methodId, out var mXId) ? mXId : null };
+                        }).ToList(),
                     };
                 }).ToList(),
-                Functions = package.Functions?.Select(function => function with
+                Functions = package.Functions?.Select(function =>
                 {
-                    Id = function.Id ?? BuildTypeId(index.Package, package.Name, function.Name),
+                    var funcId = function.Id ?? BuildTypeId(index.Package, package.Name, function.Name);
+                    return function with { Id = funcId, CrossLanguageId = map is not null && map.Ids.TryGetValue(funcId, out var fXId) ? fXId : null };
                 }).ToList(),
-                Types = package.Types?.Select(type => type with
+                Types = package.Types?.Select(type =>
                 {
-                    Id = type.Id ?? BuildTypeId(index.Package, package.Name, type.Name),
+                    var typeId = type.Id ?? BuildTypeId(index.Package, package.Name, type.Name);
+                    return type with { Id = typeId, CrossLanguageId = map is not null && map.Ids.TryGetValue(typeId, out var tXId) ? tXId : null };
                 }).ToList(),
-                Constants = package.Constants?.Select(constant => constant with
+                Constants = package.Constants?.Select(constant =>
                 {
-                    Id = constant.Id ?? BuildTypeId(index.Package, package.Name, constant.Name),
+                    var constId = constant.Id ?? BuildTypeId(index.Package, package.Name, constant.Name);
+                    return constant with { Id = constId, CrossLanguageId = map is not null && map.Ids.TryGetValue(constId, out var cXId) ? cXId : null };
                 }).ToList(),
-                Variables = package.Variables?.Select(variable => variable with
+                Variables = package.Variables?.Select(variable =>
                 {
-                    Id = variable.Id ?? BuildTypeId(index.Package, package.Name, variable.Name),
-                }).ToList(),
-            }).ToList(),
-        };
-
-    private static ApiIndex ApplyCrossLanguageIds(ApiIndex index, CrossLanguageMap map)
-        => index with
-        {
-            CrossLanguagePackageId = map.PackageId,
-            Packages = index.Packages.Select(package => package with
-            {
-                Structs = package.Structs?.Select(structInfo => structInfo with
-                {
-                    CrossLanguageId = structInfo.Id is not null && map.Ids.TryGetValue(structInfo.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
-                    Fields = structInfo.Fields?.Select(field => field with
-                    {
-                        CrossLanguageId = field.Id is not null && map.Ids.TryGetValue(field.Id, out var fieldCrossLanguageId) ? fieldCrossLanguageId : null,
-                    }).ToList(),
-                    Methods = structInfo.Methods?.Select(method => method with
-                    {
-                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
-                    }).ToList(),
-                }).ToList(),
-                Interfaces = package.Interfaces?.Select(iface => iface with
-                {
-                    CrossLanguageId = iface.Id is not null && map.Ids.TryGetValue(iface.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
-                    Methods = iface.Methods?.Select(method => method with
-                    {
-                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
-                    }).ToList(),
-                }).ToList(),
-                Functions = package.Functions?.Select(function => function with
-                {
-                    CrossLanguageId = function.Id is not null && map.Ids.TryGetValue(function.Id, out var functionCrossLanguageId) ? functionCrossLanguageId : null,
-                }).ToList(),
-                Types = package.Types?.Select(type => type with
-                {
-                    CrossLanguageId = type.Id is not null && map.Ids.TryGetValue(type.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
-                }).ToList(),
-                Constants = package.Constants?.Select(constant => constant with
-                {
-                    CrossLanguageId = constant.Id is not null && map.Ids.TryGetValue(constant.Id, out var constantCrossLanguageId) ? constantCrossLanguageId : null,
-                }).ToList(),
-                Variables = package.Variables?.Select(variable => variable with
-                {
-                    CrossLanguageId = variable.Id is not null && map.Ids.TryGetValue(variable.Id, out var variableCrossLanguageId) ? variableCrossLanguageId : null,
+                    var varId = variable.Id ?? BuildTypeId(index.Package, package.Name, variable.Name);
+                    return variable with { Id = varId, CrossLanguageId = map is not null && map.Ids.TryGetValue(varId, out var vXId) ? vXId : null };
                 }).ToList(),
             }).ToList(),
         };

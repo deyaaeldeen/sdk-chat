@@ -116,126 +116,69 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
 
     private static ApiIndex FinalizeIndex(ApiIndex index, CrossLanguageMap? crossLanguageMap, IReadOnlyList<ApiDiagnostic> upstreamDiagnostics)
     {
-        var withIds = EnsureIds(index);
-        var withCrossLanguage = crossLanguageMap is null ? withIds : ApplyCrossLanguageIds(withIds, crossLanguageMap);
-        var diagnostics = ApiDiagnosticsPostProcessor.Build(withCrossLanguage, upstreamDiagnostics);
-        return withCrossLanguage with { Diagnostics = diagnostics };
+        var finalized = FinalizeTree(index, crossLanguageMap);
+        var diagnostics = ApiDiagnosticsPostProcessor.Build(finalized, upstreamDiagnostics);
+        return finalized with { Diagnostics = diagnostics };
     }
 
-    private static ApiIndex EnsureIds(ApiIndex index)
+    /// <summary>
+    /// Single-pass tree finalization: assigns deterministic IDs and applies cross-language mapping
+    /// in one traversal instead of two separate cloning passes.
+    /// </summary>
+    private static ApiIndex FinalizeTree(ApiIndex index, CrossLanguageMap? map)
         => index with
         {
+            CrossLanguagePackageId = map?.PackageId,
             Packages = index.Packages.Select(package => package with
             {
-                Classes = package.Classes?.Select(cls =>
-                {
-                    var typeId = cls.Id ?? BuildTypeId(package.Name, cls.Name);
-                    return cls with
-                    {
-                        Id = typeId,
-                        Constructors = cls.Constructors?.Select(ctor => ctor with { Id = ctor.Id ?? BuildMemberId(typeId, ctor.Name) }).ToList(),
-                        Methods = cls.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
-                        Fields = cls.Fields?.Select(field => field with { Id = field.Id ?? BuildMemberId(typeId, field.Name) }).ToList(),
-                    };
-                }).ToList(),
-                Interfaces = package.Interfaces?.Select(iface =>
-                {
-                    var typeId = iface.Id ?? BuildTypeId(package.Name, iface.Name);
-                    return iface with
-                    {
-                        Id = typeId,
-                        Constructors = iface.Constructors?.Select(ctor => ctor with { Id = ctor.Id ?? BuildMemberId(typeId, ctor.Name) }).ToList(),
-                        Methods = iface.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
-                        Fields = iface.Fields?.Select(field => field with { Id = field.Id ?? BuildMemberId(typeId, field.Name) }).ToList(),
-                    };
-                }).ToList(),
-                Annotations = package.Annotations?.Select(annotation =>
-                {
-                    var typeId = annotation.Id ?? BuildTypeId(package.Name, annotation.Name);
-                    return annotation with
-                    {
-                        Id = typeId,
-                        Constructors = annotation.Constructors?.Select(ctor => ctor with { Id = ctor.Id ?? BuildMemberId(typeId, ctor.Name) }).ToList(),
-                        Methods = annotation.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
-                        Fields = annotation.Fields?.Select(field => field with { Id = field.Id ?? BuildMemberId(typeId, field.Name) }).ToList(),
-                    };
-                }).ToList(),
+                Classes = package.Classes?.Select(cls => FinalizeClassInfo(cls, package.Name, map)).ToList(),
+                Interfaces = package.Interfaces?.Select(iface => FinalizeClassInfo(iface, package.Name, map)).ToList(),
+                Annotations = package.Annotations?.Select(annotation => FinalizeClassInfo(annotation, package.Name, map)).ToList(),
                 Enums = package.Enums?.Select(en =>
                 {
-                    var typeId = en.Id ?? BuildTypeId(package.Name, en.Name);
+                    var enumId = en.Id ?? BuildTypeId(package.Name, en.Name);
                     return en with
                     {
-                        Id = typeId,
-                        Methods = en.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
+                        Id = enumId,
+                        CrossLanguageId = map is not null && map.Ids.TryGetValue(enumId, out var enumXId) ? enumXId : null,
+                        Methods = en.Methods?.Select(method =>
+                        {
+                            var methodId = method.Id ?? BuildMemberId(enumId, method.Name);
+                            return method with
+                            {
+                                Id = methodId,
+                                CrossLanguageId = map is not null && map.Ids.TryGetValue(methodId, out var methodXId) ? methodXId : null,
+                            };
+                        }).ToList(),
                     };
                 }).ToList(),
             }).ToList(),
         };
 
-    private static ApiIndex ApplyCrossLanguageIds(ApiIndex index, CrossLanguageMap map)
-        => index with
+    private static ClassInfo FinalizeClassInfo(ClassInfo cls, string packageName, CrossLanguageMap? map)
+    {
+        var typeId = cls.Id ?? BuildTypeId(packageName, cls.Name);
+        return cls with
         {
-            CrossLanguagePackageId = map.PackageId,
-            Packages = index.Packages.Select(package => package with
+            Id = typeId,
+            CrossLanguageId = map is not null && map.Ids.TryGetValue(typeId, out var clsXId) ? clsXId : null,
+            Constructors = cls.Constructors?.Select(ctor =>
             {
-                Classes = package.Classes?.Select(cls => cls with
-                {
-                    CrossLanguageId = cls.Id is not null && map.Ids.TryGetValue(cls.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
-                    Constructors = cls.Constructors?.Select(ctor => ctor with
-                    {
-                        CrossLanguageId = ctor.Id is not null && map.Ids.TryGetValue(ctor.Id, out var ctorCrossLanguageId) ? ctorCrossLanguageId : null,
-                    }).ToList(),
-                    Methods = cls.Methods?.Select(method => method with
-                    {
-                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
-                    }).ToList(),
-                    Fields = cls.Fields?.Select(field => field with
-                    {
-                        CrossLanguageId = field.Id is not null && map.Ids.TryGetValue(field.Id, out var fieldCrossLanguageId) ? fieldCrossLanguageId : null,
-                    }).ToList(),
-                }).ToList(),
-                Interfaces = package.Interfaces?.Select(iface => iface with
-                {
-                    CrossLanguageId = iface.Id is not null && map.Ids.TryGetValue(iface.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
-                    Constructors = iface.Constructors?.Select(ctor => ctor with
-                    {
-                        CrossLanguageId = ctor.Id is not null && map.Ids.TryGetValue(ctor.Id, out var ctorCrossLanguageId) ? ctorCrossLanguageId : null,
-                    }).ToList(),
-                    Methods = iface.Methods?.Select(method => method with
-                    {
-                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
-                    }).ToList(),
-                    Fields = iface.Fields?.Select(field => field with
-                    {
-                        CrossLanguageId = field.Id is not null && map.Ids.TryGetValue(field.Id, out var fieldCrossLanguageId) ? fieldCrossLanguageId : null,
-                    }).ToList(),
-                }).ToList(),
-                Annotations = package.Annotations?.Select(annotation => annotation with
-                {
-                    CrossLanguageId = annotation.Id is not null && map.Ids.TryGetValue(annotation.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
-                    Constructors = annotation.Constructors?.Select(ctor => ctor with
-                    {
-                        CrossLanguageId = ctor.Id is not null && map.Ids.TryGetValue(ctor.Id, out var ctorCrossLanguageId) ? ctorCrossLanguageId : null,
-                    }).ToList(),
-                    Methods = annotation.Methods?.Select(method => method with
-                    {
-                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
-                    }).ToList(),
-                    Fields = annotation.Fields?.Select(field => field with
-                    {
-                        CrossLanguageId = field.Id is not null && map.Ids.TryGetValue(field.Id, out var fieldCrossLanguageId) ? fieldCrossLanguageId : null,
-                    }).ToList(),
-                }).ToList(),
-                Enums = package.Enums?.Select(en => en with
-                {
-                    CrossLanguageId = en.Id is not null && map.Ids.TryGetValue(en.Id, out var enumCrossLanguageId) ? enumCrossLanguageId : null,
-                    Methods = en.Methods?.Select(method => method with
-                    {
-                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
-                    }).ToList(),
-                }).ToList(),
+                var ctorId = ctor.Id ?? BuildMemberId(typeId, ctor.Name);
+                return ctor with { Id = ctorId, CrossLanguageId = map is not null && map.Ids.TryGetValue(ctorId, out var ctorXId) ? ctorXId : null };
+            }).ToList(),
+            Methods = cls.Methods?.Select(method =>
+            {
+                var methodId = method.Id ?? BuildMemberId(typeId, method.Name);
+                return method with { Id = methodId, CrossLanguageId = map is not null && map.Ids.TryGetValue(methodId, out var methodXId) ? methodXId : null };
+            }).ToList(),
+            Fields = cls.Fields?.Select(field =>
+            {
+                var fieldId = field.Id ?? BuildMemberId(typeId, field.Name);
+                return field with { Id = fieldId, CrossLanguageId = map is not null && map.Ids.TryGetValue(fieldId, out var fieldXId) ? fieldXId : null };
             }).ToList(),
         };
+    }
 
     private static string BuildTypeId(string packageName, string typeName)
         => string.IsNullOrWhiteSpace(packageName) ? typeName : $"{packageName}.{typeName}";

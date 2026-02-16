@@ -210,7 +210,7 @@ public static class JavaFormatter
                 .Where(c => (pkg.Classes?.Contains(c) == true) || (pkg.Interfaces?.Contains(c) == true) || (pkg.Annotations?.Contains(c) == true))
                 .ToList();
 
-            if (pkgClasses.Count == 0 && (pkg.Enums?.Count ?? 0) == 0)
+            if (pkgClasses.Count is 0 && (pkg.Enums?.Count ?? 0) is 0)
                 continue;
 
             sb.AppendLine($"package {pkg.Name};");

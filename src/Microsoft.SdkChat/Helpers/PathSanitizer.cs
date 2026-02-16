@@ -43,7 +43,7 @@ public static class PathSanitizer
         var normalized = path.Replace('\\', '/');
         var parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-        if (parts.Length == 0) return $"Sample{expectedExtension}";
+        if (parts.Length is 0) return $"Sample{expectedExtension}";
 
         var sanitizedParts = new string[parts.Length];
         var validPartCount = 0;

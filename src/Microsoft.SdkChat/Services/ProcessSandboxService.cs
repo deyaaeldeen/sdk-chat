@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ namespace Microsoft.SdkChat.Services;
 /// </summary>
 public sealed class ProcessSandboxService
 {
+    private static readonly SearchValues<char> InvalidFileNameChars = SearchValues.Create(";|&$`\n\r");
     private readonly ILogger<ProcessSandboxService> _logger;
     private readonly TimeSpan _defaultTimeout;
     private const int MaxOutputChars = 10 * 1024 * 1024; // 10M char limit per stream
@@ -146,14 +148,10 @@ public sealed class ProcessSandboxService
     /// </summary>
     private static void ValidateFileName([NotNull] string? fileName)
     {
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            throw new ArgumentException("File name cannot be null or empty.", nameof(fileName));
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
 
         // Block obvious shell metacharacters in the executable name
-        var invalidChars = new[] { ';', '|', '&', '$', '`', '\n', '\r' };
-        if (fileName.IndexOfAny(invalidChars) >= 0)
+        if (fileName.AsSpan().IndexOfAny(InvalidFileNameChars) >= 0)
         {
             throw new ArgumentException($"File name contains invalid characters: {fileName}", nameof(fileName));
         }

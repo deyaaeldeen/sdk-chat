@@ -70,7 +70,7 @@ public partial class CSharpApiExtractor
     /// </summary>
     private static bool IsEntryPointNamespace(string ns, FrozenSet<string> entryPointNamespaces)
     {
-        if (entryPointNamespaces.Count == 0)
+        if (entryPointNamespaces.Count is 0)
         {
             return false;
         }

@@ -23,7 +23,7 @@ internal static class DotEnv
             foreach (var rawLine in File.ReadLines(filePath))
             {
                 var line = rawLine.Trim();
-                if (line.Length == 0 || line.StartsWith('#'))
+                if (line.Length is 0 || line.StartsWith('#'))
                 {
                     continue;
                 }
@@ -40,7 +40,7 @@ internal static class DotEnv
                 }
 
                 var key = line[..equalsIndex].Trim();
-                if (key.Length == 0)
+                if (key.Length is 0)
                 {
                     continue;
                 }

@@ -242,7 +242,7 @@ public static class GoFormatter
                 .Where(s => pkg.Structs?.Contains(s) ?? false)
                 .ToList();
 
-            if (pkgStructs.Count == 0 &&
+            if (pkgStructs.Count is 0 &&
                 (pkg.Functions?.Count ?? 0) == 0 &&
                 (pkg.Interfaces?.Count ?? 0) == 0)
                 continue;

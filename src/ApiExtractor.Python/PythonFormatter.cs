@@ -192,7 +192,7 @@ public static class PythonFormatter
                 .Where(c => module.Classes?.Contains(c) ?? false)
                 .ToList();
 
-            if (moduleClasses.Count == 0 && (module.Functions?.Count ?? 0) == 0)
+            if (moduleClasses.Count is 0 && (module.Functions?.Count ?? 0) is 0)
                 continue;
 
             sb.AppendLine($"# Module: {module.Name}");

@@ -541,116 +541,156 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         return name;
     }
 
-    private MemberInfo? ExtractMember(MemberDeclarationSyntax member) => member switch
+    private MemberInfo? ExtractMember(MemberDeclarationSyntax member)
     {
-        ConstructorDeclarationSyntax ctor => new MemberInfo
+        switch (member)
         {
-            Name = ctor.Identifier.Text,
-            Kind = "ctor",
-            Signature = $"({FormatParams(ctor.ParameterList)})",
-            Doc = GetXmlDoc(ctor),
-            Params = GetParameters(ctor.ParameterList),
-            IsDeprecated = GetDeprecationInfo(ctor.AttributeLists).IsDeprecated ? true : null,
-            DeprecatedMessage = GetDeprecationInfo(ctor.AttributeLists).DeprecatedMessage
-        },
-        MethodDeclarationSyntax m => new MemberInfo
-        {
-            Name = m.Identifier.Text,
-            Kind = "method",
-            Signature = $"{Simplify(m.ReturnType)} {m.Identifier.Text}{TypeParams(m)}({FormatParams(m.ParameterList)})",
-            Doc = GetXmlDoc(m),
-            IsStatic = m.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null,
-            IsAsync = IsAsyncMethod(m) ? true : null,
-            Params = GetParameters(m.ParameterList),
-            Results = GetResults(m.ReturnType),
-            IsDeprecated = GetDeprecationInfo(m.AttributeLists).IsDeprecated ? true : null,
-            DeprecatedMessage = GetDeprecationInfo(m.AttributeLists).DeprecatedMessage
-        },
-        PropertyDeclarationSyntax p => new MemberInfo
-        {
-            Name = p.Identifier.Text,
-            Kind = "property",
-            Signature = $"{Simplify(p.Type)} {p.Identifier.Text}{Accessors(p)}",
-            Doc = GetXmlDoc(p),
-            IsStatic = p.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null,
-            IsDeprecated = GetDeprecationInfo(p.AttributeLists).IsDeprecated ? true : null,
-            DeprecatedMessage = GetDeprecationInfo(p.AttributeLists).DeprecatedMessage
-        },
-        IndexerDeclarationSyntax idx => new MemberInfo
-        {
-            Name = "this[]",
-            Kind = "indexer",
-            Signature = $"{Simplify(idx.Type)} this[{FormatParams(idx.ParameterList)}]",
-            Doc = GetXmlDoc(idx),
-            Params = GetParameters(idx.ParameterList),
-            IsDeprecated = GetDeprecationInfo(idx.AttributeLists).IsDeprecated ? true : null,
-            DeprecatedMessage = GetDeprecationInfo(idx.AttributeLists).DeprecatedMessage
-        },
-        EventDeclarationSyntax evt => new MemberInfo
-        {
-            Name = evt.Identifier.Text,
-            Kind = "event",
-            Signature = $"event {Simplify(evt.Type)} {evt.Identifier.Text}",
-            Doc = GetXmlDoc(evt),
-            IsDeprecated = GetDeprecationInfo(evt.AttributeLists).IsDeprecated ? true : null,
-            DeprecatedMessage = GetDeprecationInfo(evt.AttributeLists).DeprecatedMessage
-        },
-        EventFieldDeclarationSyntax ef =>
-            ef.Declaration.Variables.FirstOrDefault() is { } ev ? new MemberInfo
+            case ConstructorDeclarationSyntax ctor:
             {
-                Name = ev.Identifier.Text,
-                Kind = "event",
-                Signature = $"event {Simplify(ef.Declaration.Type)} {ev.Identifier.Text}",
-                Doc = GetXmlDoc(ef),
-                IsDeprecated = GetDeprecationInfo(ef.AttributeLists).IsDeprecated ? true : null,
-                DeprecatedMessage = GetDeprecationInfo(ef.AttributeLists).DeprecatedMessage
-            } : null,
-        FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.ConstKeyword) =>
-            f.Declaration.Variables.FirstOrDefault() is { } v ? new MemberInfo
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(ctor.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = ctor.Identifier.Text,
+                    Kind = "ctor",
+                    Signature = $"({FormatParams(ctor.ParameterList)})",
+                    Doc = GetXmlDoc(ctor),
+                    Params = GetParameters(ctor.ParameterList),
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            case MethodDeclarationSyntax m:
             {
-                Name = v.Identifier.Text,
-                Kind = "const",
-                Signature = $"const {Simplify(f.Declaration.Type)} {v.Identifier.Text}" +
-                    (v.Initializer != null && v.Initializer.Value.ToString().Length < 30 ? $" = {v.Initializer.Value}" : ""),
-                Doc = GetXmlDoc(f)
-            } : null,
-        FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.StaticKeyword) && f.Modifiers.Any(SyntaxKind.ReadOnlyKeyword) =>
-            f.Declaration.Variables.FirstOrDefault() is { } sv ? new MemberInfo
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(m.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = m.Identifier.Text,
+                    Kind = "method",
+                    Signature = $"{Simplify(m.ReturnType)} {m.Identifier.Text}{TypeParams(m)}({FormatParams(m.ParameterList)})",
+                    Doc = GetXmlDoc(m),
+                    IsStatic = m.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null,
+                    IsAsync = IsAsyncMethod(m) ? true : null,
+                    Params = GetParameters(m.ParameterList),
+                    Results = GetResults(m.ReturnType),
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            case PropertyDeclarationSyntax p:
             {
-                Name = sv.Identifier.Text,
-                Kind = "field",
-                Signature = $"static readonly {Simplify(f.Declaration.Type)} {sv.Identifier.Text}",
-                Doc = GetXmlDoc(f),
-                IsStatic = true,
-                IsDeprecated = GetDeprecationInfo(f.AttributeLists).IsDeprecated ? true : null,
-                DeprecatedMessage = GetDeprecationInfo(f.AttributeLists).DeprecatedMessage
-            } : null,
-        OperatorDeclarationSyntax op => new MemberInfo
-        {
-            Name = $"operator {op.OperatorToken.Text}",
-            Kind = "operator",
-            Signature = $"static {Simplify(op.ReturnType)} operator {op.OperatorToken.Text}({FormatParams(op.ParameterList)})",
-            Doc = GetXmlDoc(op),
-            IsStatic = true,
-            Params = GetParameters(op.ParameterList),
-            Results = GetResults(op.ReturnType),
-            IsDeprecated = GetDeprecationInfo(op.AttributeLists).IsDeprecated ? true : null,
-            DeprecatedMessage = GetDeprecationInfo(op.AttributeLists).DeprecatedMessage
-        },
-        ConversionOperatorDeclarationSyntax conv => new MemberInfo
-        {
-            Name = $"{conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}",
-            Kind = "operator",
-            Signature = $"static {conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}({FormatParams(conv.ParameterList)})",
-            Doc = GetXmlDoc(conv),
-            IsStatic = true,
-            Params = GetParameters(conv.ParameterList),
-            Results = GetResults(conv.Type),
-            IsDeprecated = GetDeprecationInfo(conv.AttributeLists).IsDeprecated ? true : null,
-            DeprecatedMessage = GetDeprecationInfo(conv.AttributeLists).DeprecatedMessage
-        },
-        _ => null
-    };
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(p.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = p.Identifier.Text,
+                    Kind = "property",
+                    Signature = $"{Simplify(p.Type)} {p.Identifier.Text}{Accessors(p)}",
+                    Doc = GetXmlDoc(p),
+                    IsStatic = p.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null,
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            case IndexerDeclarationSyntax idx:
+            {
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(idx.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = "this[]",
+                    Kind = "indexer",
+                    Signature = $"{Simplify(idx.Type)} this[{FormatParams(idx.ParameterList)}]",
+                    Doc = GetXmlDoc(idx),
+                    Params = GetParameters(idx.ParameterList),
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            case EventDeclarationSyntax evt:
+            {
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(evt.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = evt.Identifier.Text,
+                    Kind = "event",
+                    Signature = $"event {Simplify(evt.Type)} {evt.Identifier.Text}",
+                    Doc = GetXmlDoc(evt),
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            case EventFieldDeclarationSyntax ef when ef.Declaration.Variables.FirstOrDefault() is { } ev:
+            {
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(ef.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = ev.Identifier.Text,
+                    Kind = "event",
+                    Signature = $"event {Simplify(ef.Declaration.Type)} {ev.Identifier.Text}",
+                    Doc = GetXmlDoc(ef),
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            case FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.ConstKeyword)
+                && f.Declaration.Variables.FirstOrDefault() is { } v:
+                return new MemberInfo
+                {
+                    Name = v.Identifier.Text,
+                    Kind = "const",
+                    Signature = $"const {Simplify(f.Declaration.Type)} {v.Identifier.Text}" +
+                        (v.Initializer != null && v.Initializer.Value.ToString().Length < 30 ? $" = {v.Initializer.Value}" : ""),
+                    Doc = GetXmlDoc(f)
+                };
+            case FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.StaticKeyword) && f.Modifiers.Any(SyntaxKind.ReadOnlyKeyword)
+                && f.Declaration.Variables.FirstOrDefault() is { } sv:
+            {
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(f.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = sv.Identifier.Text,
+                    Kind = "field",
+                    Signature = $"static readonly {Simplify(f.Declaration.Type)} {sv.Identifier.Text}",
+                    Doc = GetXmlDoc(f),
+                    IsStatic = true,
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            case OperatorDeclarationSyntax op:
+            {
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(op.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = $"operator {op.OperatorToken.Text}",
+                    Kind = "operator",
+                    Signature = $"static {Simplify(op.ReturnType)} operator {op.OperatorToken.Text}({FormatParams(op.ParameterList)})",
+                    Doc = GetXmlDoc(op),
+                    IsStatic = true,
+                    Params = GetParameters(op.ParameterList),
+                    Results = GetResults(op.ReturnType),
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            case ConversionOperatorDeclarationSyntax conv:
+            {
+                var (deprecated, deprecatedMsg) = GetDeprecationInfo(conv.AttributeLists);
+                return new MemberInfo
+                {
+                    Name = $"{conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}",
+                    Kind = "operator",
+                    Signature = $"static {conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}({FormatParams(conv.ParameterList)})",
+                    Doc = GetXmlDoc(conv),
+                    IsStatic = true,
+                    Params = GetParameters(conv.ParameterList),
+                    Results = GetResults(conv.Type),
+                    IsDeprecated = deprecated ? true : null,
+                    DeprecatedMessage = deprecatedMsg
+                };
+            }
+            default:
+                return null;
+        }
+    }
 
     private static string TypeParams(MethodDeclarationSyntax m) =>
         m.TypeParameterList != null

@@ -314,7 +314,7 @@ public class SamplesMcpTools(FileHelper fileHelper, IPackageInfoService packageI
     {
         const int OverheadReserve = 500;
         var budgetTracker = new PromptBudgetTracker(budget, OverheadReserve);
-        var parts = new List<string>();
+        List<string> parts = [];
 
         // Prefix
         var prefix = SampleGeneratorService.GetUserPromptPrefix(customPrompt, count, hasExistingSamples);

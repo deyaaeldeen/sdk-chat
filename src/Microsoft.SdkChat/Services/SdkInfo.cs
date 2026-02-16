@@ -537,7 +537,7 @@ public class SdkInfo
         // Step 1: Find ALL build markers in the SDK (recursive scan)
         var markers = FindAllBuildMarkers(root);
 
-        if (markers.Count == 0)
+        if (markers.Count is 0)
         {
             // No build markers found - return root with no language detected
             return (root, null, null, null, null);
@@ -566,7 +566,7 @@ public class SdkInfo
             }
         }
 
-        if (projects.Count == 0)
+        if (projects.Count is 0)
         {
             // Build markers found but no source files - return root with no language detected
             return (root, null, null, null, null);
@@ -863,7 +863,7 @@ public class SdkInfo
     private static IEnumerable<string> ExpandSourceFolderGlob(string root, string pattern)
     {
         var parts = pattern.Split('/', '\\');
-        if (parts.Length == 0) yield break;
+        if (parts.Length is 0) yield break;
 
         IEnumerable<string> currentDirs = [root];
 
@@ -962,7 +962,7 @@ public class SdkInfo
             var line = rawLine.Trim();
 
             // Skip empty lines and comments
-            if (line.Length == 0 || line[0] == '#')
+            if (line.Length is 0 || line[0] == '#')
                 continue;
 
             // Track section headers: [section.name] or [[array.of.tables]]
@@ -1225,7 +1225,7 @@ public class SdkInfo
             var line = rawLine.Trim();
 
             // Skip empty lines and comments (// single-line and /* block */)
-            if (line.Length == 0 || line[0] == '/' || line[0] == '*')
+            if (line.Length is 0 || line[0] == '/' || line[0] == '*')
                 continue;
 
             // If we have a pending srcDir line that didn't yield a quoted value,

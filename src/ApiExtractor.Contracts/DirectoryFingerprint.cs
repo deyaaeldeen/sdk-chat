@@ -32,11 +32,11 @@ public static class DirectoryFingerprint
             return "";
 
         var extensionSet = new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
-        var entries = new List<(string RelativePath, long Size, long Ticks)>();
+        List<(string RelativePath, long Size, long Ticks)> entries = [];
 
         CollectEntries(new DirectoryInfo(rootPath), rootPath, extensionSet, entries, isRoot: true);
 
-        if (entries.Count == 0)
+        if (entries.Count is 0)
             return "";
 
         // Sort for deterministic ordering

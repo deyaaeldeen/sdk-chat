@@ -408,7 +408,7 @@ public sealed class PackageInfoService : IPackageInfoService
         }
 
         var packages = FindMonorepoPackages(rootPath).ToArray();
-        if (packages.Length == 0)
+        if (packages.Length is 0)
         {
             return new CoverageBatchResult
             {
@@ -605,7 +605,7 @@ public sealed class PackageInfoService : IPackageInfoService
             searchRoots.Add(libsDir);
 
         // If none of the standard roots exist, search from the root itself
-        if (searchRoots.Count == 0)
+        if (searchRoots.Count is 0)
         {
             // Check if src/ contains multiple packages or is itself a package
             if (Directory.Exists(srcDir))
@@ -617,7 +617,7 @@ public sealed class PackageInfoService : IPackageInfoService
             }
 
             // Fall back to root path
-            if (searchRoots.Count == 0)
+            if (searchRoots.Count is 0)
                 searchRoots.Add(rootPath);
         }
 

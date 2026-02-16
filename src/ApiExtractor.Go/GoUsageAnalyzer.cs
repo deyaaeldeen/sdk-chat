@@ -141,7 +141,7 @@ public class GoUsageAnalyzer : IUsageAnalyzer<ApiIndex>
         }
 
         // Build type nodes: structs are root candidates, interfaces are not
-        var typeNodes = new List<ReachabilityAnalyzer.TypeNode>();
+        List<ReachabilityAnalyzer.TypeNode> typeNodes = [];
 
         foreach (var strct in allStructs)
         {

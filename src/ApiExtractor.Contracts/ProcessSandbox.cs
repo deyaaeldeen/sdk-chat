@@ -42,8 +42,7 @@ public static class ProcessSandbox
     /// <exception cref="DirectoryNotFoundException">Thrown if the resolved path does not exist.</exception>
     public static string ValidateRootPath([NotNull] string? rootPath)
     {
-        if (string.IsNullOrWhiteSpace(rootPath))
-            throw new ArgumentException("Root path cannot be null or empty.", nameof(rootPath));
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
 
         // Block null bytes - classic path injection vector
         if (rootPath.Contains('\0'))
@@ -206,10 +205,7 @@ public static class ProcessSandbox
     /// </summary>
     private static void ValidateFileName([NotNull] string? fileName)
     {
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            throw new ArgumentException("File name cannot be null or empty.", nameof(fileName));
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
 
         // Block obvious shell metacharacters in the executable name
         if (fileName.AsSpan().IndexOfAny(InvalidFileNameChars) >= 0)

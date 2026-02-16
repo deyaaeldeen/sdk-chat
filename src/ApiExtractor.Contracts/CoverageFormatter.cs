@@ -50,7 +50,7 @@ public static class CoverageFormatter
             .GroupBy(op => op.ClientType)
             .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
 
-        if (uncoveredByClient.Count == 0)
+        if (uncoveredByClient.Count is 0)
         {
             sb.AppendLine($"{commentPrefix} All operations are covered in existing samples.");
             return null;
