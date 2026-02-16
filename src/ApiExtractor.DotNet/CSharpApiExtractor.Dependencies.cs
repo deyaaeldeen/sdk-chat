@@ -348,31 +348,30 @@ public partial class CSharpApiExtractor
 
     /// <summary>
     /// Loads runtime metadata references (BCL assemblies). Cached for the process lifetime.
+    /// Uses the actual .NET shared framework directory (where typeof(object) lives)
+    /// rather than AppContext.BaseDirectory, which may not contain framework assemblies
+    /// in framework-dependent deployments.
     /// </summary>
     private static IReadOnlyList<MetadataReference> LoadRuntimeReferences()
     {
         List<MetadataReference> references = [];
-        var runtimeDir = AppContext.BaseDirectory;
-        if (!string.IsNullOrEmpty(runtimeDir))
-        {
-            var runtimeAssemblies = new[]
-            {
-                "System.Runtime.dll",
-                "System.Collections.dll",
-                "System.Linq.dll",
-                "System.Threading.Tasks.dll",
-                "System.IO.dll",
-                "netstandard.dll",
-            };
 
-            foreach (var asm in runtimeAssemblies)
+        // Resolve the shared framework directory from the runtime itself.
+        // typeof(object).Assembly.Location points to System.Private.CoreLib.dll
+        // in the shared framework directory, which contains all runtime assemblies
+        // including System.Text.Json, System.Memory, etc.
+        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
+        if (string.IsNullOrEmpty(runtimeDir) || !Directory.Exists(runtimeDir))
+        {
+            runtimeDir = AppContext.BaseDirectory;
+        }
+
+        if (!string.IsNullOrEmpty(runtimeDir) && Directory.Exists(runtimeDir))
+        {
+            foreach (var dll in Directory.EnumerateFiles(runtimeDir, "*.dll"))
             {
-                var path = Path.Combine(runtimeDir, asm);
-                if (File.Exists(path))
-                {
-                    try { references.Add(MetadataReference.CreateFromFile(path)); }
-                    catch (Exception ex) { Trace.TraceWarning("Failed to load runtime assembly '{0}': {1}", path, ex.Message); }
-                }
+                try { references.Add(MetadataReference.CreateFromFile(dll)); }
+                catch (Exception ex) { Trace.TraceWarning("Failed to load runtime assembly '{0}': {1}", dll, ex.Message); }
             }
         }
         return references;
@@ -380,10 +379,22 @@ public partial class CSharpApiExtractor
 
     /// <summary>
     /// Loads metadata references from cached runtime assemblies and project-specific NuGet packages.
+    /// Skips NuGet packages whose assemblies are already loaded from the runtime to avoid
+    /// version conflicts (e.g., System.Text.Json 9.x from NuGet vs 10.x from runtime).
     /// </summary>
     private static IReadOnlyList<MetadataReference> LoadMetadataReferences(string rootPath)
     {
         var references = new List<MetadataReference>(s_runtimeReferences.Value);
+
+        // Collect assembly file names already loaded from the runtime to skip duplicates
+        var loadedAssemblyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in s_runtimeReferences.Value)
+        {
+            if (r is PortableExecutableReference peRef && peRef.FilePath != null)
+            {
+                loadedAssemblyNames.Add(Path.GetFileNameWithoutExtension(peRef.FilePath));
+            }
+        }
 
         // Look for NuGet packages in common locations
         var nugetPackagesDir = FindNuGetPackagesDirectory(rootPath);
@@ -421,6 +432,11 @@ public partial class CSharpApiExtractor
                     {
                         foreach (var dll in Directory.GetFiles(libDir, "*.dll"))
                         {
+                            // Skip assemblies already loaded from the runtime to avoid version conflicts
+                            var assemblyName = Path.GetFileNameWithoutExtension(dll);
+                            if (loadedAssemblyNames.Contains(assemblyName))
+                                continue;
+
                             try { references.Add(MetadataReference.CreateFromFile(dll)); }
                             catch (Exception ex) { Trace.TraceWarning("Failed to load NuGet assembly '{0}': {1}", dll, ex.Message); }
                         }

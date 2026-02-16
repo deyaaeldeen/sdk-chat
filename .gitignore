@@ -4,6 +4,9 @@ obj/
 artifacts/
 dist/
 
+# Allow test fixture build outputs
+!tests/ApiExtractor.Tests/TestFixtures/**/dist/
+
 # IDE
 .vs/
 *.user
