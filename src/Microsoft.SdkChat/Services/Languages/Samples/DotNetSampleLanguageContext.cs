@@ -13,7 +13,7 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
 {
     private readonly CSharpUsageAnalyzer _usageAnalyzer = new();
     private readonly ExtractionCache<ApiIndex> _cache = new(
-        async (path, ct) => (ApiIndex?)await new CSharpApiExtractor().ExtractAsync(path, ct), [".cs"]);
+        async (path, ct) => (ApiIndex?)await new CSharpApiExtractor().ExtractAsync(path, ct: ct), [".cs"]);
 
     public DotNetSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 

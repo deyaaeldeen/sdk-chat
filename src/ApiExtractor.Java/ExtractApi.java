@@ -1237,6 +1237,7 @@ public class ExtractApi {
         String typeName = cid.getNameAsString();
         info.put("name", typeName);
         boolean isInterface = cid.isInterface();
+        addDeprecation(cid, info);
 
         // Register this type as defined
         typeCollector.addDefinedType(typeName);
@@ -1315,6 +1316,7 @@ public class ExtractApi {
         Map<String, Object> info = new LinkedHashMap<>();
         String enumName = ed.getNameAsString();
         info.put("name", enumName);
+        addDeprecation(ed, info);
 
         // Register this enum as a defined type
         typeCollector.addDefinedType(enumName);
@@ -1341,6 +1343,7 @@ public class ExtractApi {
         String typeName = rd.getNameAsString();
         info.put("name", typeName);
         info.put("kind", "record");
+        addDeprecation(rd, info);
 
         // Register this type as defined
         typeCollector.addDefinedType(typeName);
@@ -1405,6 +1408,7 @@ public class ExtractApi {
         String typeName = ad.getNameAsString();
         info.put("name", typeName);
         info.put("kind", "annotation");
+        addDeprecation(ad, info);
 
         // Register this type as defined
         typeCollector.addDefinedType(typeName);
@@ -1433,6 +1437,7 @@ public class ExtractApi {
     static Map<String, Object> extractMethod(CallableDeclaration<?> cd) {
         Map<String, Object> info = new LinkedHashMap<>();
         info.put("name", cd.getNameAsString());
+        addDeprecation(cd, info);
 
         List<String> mods = getModifiers(cd);
         if (!mods.isEmpty()) info.put("modifiers", mods);
@@ -1450,8 +1455,19 @@ public class ExtractApi {
         }
 
         // Collect parameter types via AST
+        List<Map<String, Object>> paramInfos = new ArrayList<>();
         for (var param : cd.getParameters()) {
             typeCollector.collectFromType(param.getType());
+            Map<String, Object> paramInfo = new LinkedHashMap<>();
+            paramInfo.put("name", param.getNameAsString());
+            paramInfo.put("type", param.getTypeAsString());
+            if (param.isVarArgs()) {
+                paramInfo.put("varargs", true);
+            }
+            paramInfos.add(paramInfo);
+        }
+        if (!paramInfos.isEmpty()) {
+            info.put("params", paramInfos);
         }
 
         String sig = cd.getParameters().stream()
@@ -1483,6 +1499,7 @@ public class ExtractApi {
     static Map<String, Object> extractField(FieldDeclaration fd, VariableDeclarator vd) {
         Map<String, Object> info = new LinkedHashMap<>();
         info.put("name", vd.getNameAsString());
+        addDeprecation(fd, info);
 
         com.github.javaparser.ast.type.Type fieldType = vd.getType();
         info.put("type", fieldType.toString());
@@ -1530,6 +1547,12 @@ public class ExtractApi {
             if (firstLine.length() > 120) firstLine = firstLine.substring(0, 117) + "...";
             return firstLine.isEmpty() ? null : firstLine;
         });
+    }
+
+    static void addDeprecation(NodeWithAnnotations<?> node, Map<String, Object> info) {
+        if (node.isAnnotationPresent("Deprecated")) {
+            info.put("deprecated", true);
+        }
     }
 
     static String detectPackageName(Path root) throws Exception {

@@ -26,7 +26,8 @@ public class SamplePromptBuilder
     /// </summary>
     public static string BuildSystemPrompt(SampleLanguageContext context, string sdkName) =>
         $"Generate runnable SDK samples for the '{sdkName}' SDK. " +
-        $"{context.GetInstructions()}";
+        $"{context.GetInstructions()} " +
+        "Do NOT use deprecated APIs. If a requested scenario only has a deprecated API path, call that out and suggest the replacement.";
 
     /// <summary>
     /// Gets the prefix part of the user prompt (before the file context).

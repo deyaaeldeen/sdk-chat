@@ -13,7 +13,7 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
 {
     private readonly PythonUsageAnalyzer _usageAnalyzer = new();
     private readonly ExtractionCache<ApiIndex> _cache = new(
-        async (path, ct) => (ApiIndex?)await new PythonApiExtractor().ExtractAsync(path, ct), [".py"]);
+        async (path, ct) => (ApiIndex?)await new PythonApiExtractor().ExtractAsync(path, ct: ct), [".py"]);
 
     public PythonSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 

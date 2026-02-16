@@ -27,11 +27,13 @@ public class ApiEntityCommand : Command
             var language = new Option<string?>("--language") { Description = "Override language detection" };
             var json = new Option<bool>("--json") { Description = "Output structured JSON (default: human-readable code stubs)" };
             var output = new Option<string?>("--output", "-o") { Description = "Write to file instead of stdout" };
+            var crossLanguageMetadata = new Option<string?>("--cross-language-metadata") { Description = "Path to cross-language metadata mapping JSON" };
 
             Add(pathArg);
             Add(language);
             Add(json);
             Add(output);
+            Add(crossLanguageMetadata);
 
             this.SetAction(async (ctx, ct) =>
             {
@@ -40,6 +42,7 @@ public class ApiEntityCommand : Command
                     ctx.GetValue(pathArg)!,
                     ctx.GetValue(language),
                     ctx.GetValue(json),
+                    ctx.GetValue(crossLanguageMetadata),
                     ct);
 
                 if (!result.Success)
@@ -60,11 +63,11 @@ public class ApiEntityCommand : Command
                     Console.WriteLine(result.ApiSurface);
                 }
 
-                if (result.Warnings?.Length > 0)
+                if (result.Diagnostics?.Length > 0)
                 {
-                    foreach (var warning in result.Warnings)
+                    foreach (var diagnostic in result.Diagnostics)
                     {
-                        ConsoleUx.Info($"Warning: {warning}");
+                        ConsoleUx.Info($"{diagnostic.Level}: {diagnostic.Id} {diagnostic.Text}");
                     }
                 }
 

@@ -23,9 +23,36 @@ public static class GoFormatter
     {
         var sb = new StringBuilder();
 
-        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        var deprecatedOperations = index.GetAllStructs()
+            .SelectMany(s => (s.Methods ?? [])
+                .Where(m => m.IsDeprecated == true)
+                .Select(m => (Client: s.Name, Method: m.Name)))
+            .ToHashSet();
+
+        var deprecatedUncovered = coverage.UncoveredOperations
+            .Where(op => deprecatedOperations.Contains((op.ClientType, op.Operation)))
+            .ToList();
+
+        var filteredCoverage = coverage with
+        {
+            UncoveredOperations = coverage.UncoveredOperations
+                .Where(op => !deprecatedOperations.Contains((op.ClientType, op.Operation)))
+                .ToList(),
+        };
+
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, filteredCoverage);
         if (uncoveredByClient is null)
             return sb.ToString();
+
+        if (deprecatedUncovered.Count > 0)
+        {
+            sb.AppendLine("// Deprecated API (intentionally excluded from uncovered generation targets):");
+            foreach (var op in deprecatedUncovered.OrderBy(o => o.ClientType).ThenBy(o => o.Operation))
+            {
+                sb.AppendLine($"//   {op.ClientType}.{op.Operation}");
+            }
+            sb.AppendLine();
+        }
 
         var allStructs = index.GetAllStructs().ToList();
         var structsWithUncovered = allStructs.Where(s => uncoveredByClient.ContainsKey(s.Name)).ToList();
@@ -148,6 +175,8 @@ public static class GoFormatter
     private static string FormatInterfaceToString(IfaceApi iface)
     {
         var sb = new StringBuilder();
+        if (iface.IsDeprecated == true)
+            sb.AppendLine($"// Deprecated: {iface.DeprecatedMessage ?? "deprecated"}");
         if (!string.IsNullOrEmpty(iface.Doc))
             sb.AppendLine($"// {iface.Doc}");
         sb.AppendLine($"type {iface.Name} interface {{");
@@ -374,6 +403,8 @@ public static class GoFormatter
                 foreach (var t in dep.Types ?? [])
                 {
                     if (sb.Length >= maxLength) break;
+                    if (t.IsDeprecated == true)
+                        sb.AppendLine($"// Deprecated: {t.DeprecatedMessage ?? "deprecated"}");
                     if (!string.IsNullOrEmpty(t.Doc))
                         sb.AppendLine($"// {t.Doc}");
                     sb.AppendLine($"type {t.Name} = {t.Type}");
@@ -395,6 +426,8 @@ public static class GoFormatter
 
     private static void FormatStruct(StringBuilder sb, StructApi s)
     {
+        if (s.IsDeprecated == true)
+            sb.AppendLine($"// Deprecated: {s.DeprecatedMessage ?? "deprecated"}");
         if (!string.IsNullOrEmpty(s.Doc))
             sb.AppendLine($"// {s.Doc}");
         var typeParams = s.TypeParams?.Count > 0 ? $"[{string.Join(", ", s.TypeParams)}]" : "";
@@ -408,6 +441,8 @@ public static class GoFormatter
 
         foreach (var f in s.Fields ?? [])
         {
+            if (f.IsDeprecated == true)
+                sb.AppendLine($"    // Deprecated: {f.DeprecatedMessage ?? "deprecated"}");
             var tag = !string.IsNullOrEmpty(f.Tag) ? $" {f.Tag}" : "";
             sb.AppendLine($"    {f.Name} {f.Type}{tag}");
         }
@@ -416,6 +451,8 @@ public static class GoFormatter
         // Methods
         foreach (var m in s.Methods ?? [])
         {
+            if (m.IsDeprecated == true)
+                sb.AppendLine($"// Deprecated: {m.DeprecatedMessage ?? "deprecated"}");
             var ret = !string.IsNullOrEmpty(m.Ret) ? $" {m.Ret}" : "";
             var funcTypeParams = m.TypeParams?.Count > 0 ? $"[{string.Join(", ", m.TypeParams)}]" : "";
             if (!string.IsNullOrEmpty(m.Receiver))

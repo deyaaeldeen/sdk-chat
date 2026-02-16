@@ -51,7 +51,7 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     public string ToStubs(ApiIndex index) => JavaFormatter.Format(index);
 
     /// <inheritdoc />
-    async Task<ExtractorResult<ApiIndex>> IApiExtractor<ApiIndex>.ExtractAsync(string rootPath, CancellationToken ct)
+    async Task<ExtractorResult<ApiIndex>> IApiExtractor<ApiIndex>.ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         if (!IsAvailable())
             return ExtractorResult<ApiIndex>.CreateFailure(UnavailableReason ?? "JBang not available");
@@ -59,11 +59,11 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
         try
         {
-            var (result, warnings) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
+            var (result, diagnostics) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
             if (result is not null)
             {
                 ExtractorTelemetry.RecordResult(activity, true, result.Packages.Count);
-                return ExtractorResult<ApiIndex>.CreateSuccess(result, warnings);
+                return ExtractorResult<ApiIndex>.CreateSuccess(result, diagnostics);
             }
             ExtractorTelemetry.RecordResult(activity, false, error: "No API surface extracted");
             return ExtractorResult<ApiIndex>.CreateFailure("No API surface extracted");
@@ -79,35 +79,182 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// Extract API from a Java package directory.
     /// Prefers pre-compiled binary from build, falls back to JBang runtime.
     /// </summary>
-    public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+    public Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+        => ExtractAsync(rootPath, null, ct);
+
+    public async Task<ApiIndex> ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
     {
-        var (index, _) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
+        var (index, _) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
         return index ?? throw new InvalidOperationException("Java extraction returned no API surface.");
     }
 
     /// <summary>
     /// Shared extraction logic that returns both the API index and any stderr warnings.
     /// </summary>
-    private async Task<(ApiIndex? Index, IReadOnlyList<string> Warnings)> ExtractCoreAsync(string rootPath, CancellationToken ct)
+    private async Task<(ApiIndex? Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         var result = await RunExtractorAsync("--json", rootPath, ct).ConfigureAwait(false);
-        var warnings = ParseStderrWarnings(result.StandardError);
+        var diagnostics = ParseStderrDiagnostics(result.StandardError);
 
         if (string.IsNullOrWhiteSpace(result.StandardOutput))
-            return (null, warnings);
+            return (null, diagnostics);
 
         if (result.OutputTruncated)
             throw new InvalidOperationException(
                 "Java extractor output was truncated (exceeded output size limit). " +
                 "The target package may be too large for extraction.");
 
-        return (JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex), warnings);
+        var index = JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+        if (index is null)
+        {
+            return (null, diagnostics);
+        }
+
+        var finalized = FinalizeIndex(index, crossLanguageMap, diagnostics);
+        return (finalized, finalized.Diagnostics);
     }
 
-    private static IReadOnlyList<string> ParseStderrWarnings(string? stderr)
+    private static ApiIndex FinalizeIndex(ApiIndex index, CrossLanguageMap? crossLanguageMap, IReadOnlyList<ApiDiagnostic> upstreamDiagnostics)
+    {
+        var withIds = EnsureIds(index);
+        var withCrossLanguage = crossLanguageMap is null ? withIds : ApplyCrossLanguageIds(withIds, crossLanguageMap);
+        var diagnostics = ApiDiagnosticsPostProcessor.Build(withCrossLanguage, upstreamDiagnostics);
+        return withCrossLanguage with { Diagnostics = diagnostics };
+    }
+
+    private static ApiIndex EnsureIds(ApiIndex index)
+        => index with
+        {
+            Packages = index.Packages.Select(package => package with
+            {
+                Classes = package.Classes?.Select(cls =>
+                {
+                    var typeId = cls.Id ?? BuildTypeId(package.Name, cls.Name);
+                    return cls with
+                    {
+                        Id = typeId,
+                        Constructors = cls.Constructors?.Select(ctor => ctor with { Id = ctor.Id ?? BuildMemberId(typeId, ctor.Name) }).ToList(),
+                        Methods = cls.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
+                        Fields = cls.Fields?.Select(field => field with { Id = field.Id ?? BuildMemberId(typeId, field.Name) }).ToList(),
+                    };
+                }).ToList(),
+                Interfaces = package.Interfaces?.Select(iface =>
+                {
+                    var typeId = iface.Id ?? BuildTypeId(package.Name, iface.Name);
+                    return iface with
+                    {
+                        Id = typeId,
+                        Constructors = iface.Constructors?.Select(ctor => ctor with { Id = ctor.Id ?? BuildMemberId(typeId, ctor.Name) }).ToList(),
+                        Methods = iface.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
+                        Fields = iface.Fields?.Select(field => field with { Id = field.Id ?? BuildMemberId(typeId, field.Name) }).ToList(),
+                    };
+                }).ToList(),
+                Annotations = package.Annotations?.Select(annotation =>
+                {
+                    var typeId = annotation.Id ?? BuildTypeId(package.Name, annotation.Name);
+                    return annotation with
+                    {
+                        Id = typeId,
+                        Constructors = annotation.Constructors?.Select(ctor => ctor with { Id = ctor.Id ?? BuildMemberId(typeId, ctor.Name) }).ToList(),
+                        Methods = annotation.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
+                        Fields = annotation.Fields?.Select(field => field with { Id = field.Id ?? BuildMemberId(typeId, field.Name) }).ToList(),
+                    };
+                }).ToList(),
+                Enums = package.Enums?.Select(en =>
+                {
+                    var typeId = en.Id ?? BuildTypeId(package.Name, en.Name);
+                    return en with
+                    {
+                        Id = typeId,
+                        Methods = en.Methods?.Select(method => method with { Id = method.Id ?? BuildMemberId(typeId, method.Name) }).ToList(),
+                    };
+                }).ToList(),
+            }).ToList(),
+        };
+
+    private static ApiIndex ApplyCrossLanguageIds(ApiIndex index, CrossLanguageMap map)
+        => index with
+        {
+            CrossLanguagePackageId = map.PackageId,
+            Packages = index.Packages.Select(package => package with
+            {
+                Classes = package.Classes?.Select(cls => cls with
+                {
+                    CrossLanguageId = cls.Id is not null && map.Ids.TryGetValue(cls.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                    Constructors = cls.Constructors?.Select(ctor => ctor with
+                    {
+                        CrossLanguageId = ctor.Id is not null && map.Ids.TryGetValue(ctor.Id, out var ctorCrossLanguageId) ? ctorCrossLanguageId : null,
+                    }).ToList(),
+                    Methods = cls.Methods?.Select(method => method with
+                    {
+                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
+                    }).ToList(),
+                    Fields = cls.Fields?.Select(field => field with
+                    {
+                        CrossLanguageId = field.Id is not null && map.Ids.TryGetValue(field.Id, out var fieldCrossLanguageId) ? fieldCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+                Interfaces = package.Interfaces?.Select(iface => iface with
+                {
+                    CrossLanguageId = iface.Id is not null && map.Ids.TryGetValue(iface.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                    Constructors = iface.Constructors?.Select(ctor => ctor with
+                    {
+                        CrossLanguageId = ctor.Id is not null && map.Ids.TryGetValue(ctor.Id, out var ctorCrossLanguageId) ? ctorCrossLanguageId : null,
+                    }).ToList(),
+                    Methods = iface.Methods?.Select(method => method with
+                    {
+                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
+                    }).ToList(),
+                    Fields = iface.Fields?.Select(field => field with
+                    {
+                        CrossLanguageId = field.Id is not null && map.Ids.TryGetValue(field.Id, out var fieldCrossLanguageId) ? fieldCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+                Annotations = package.Annotations?.Select(annotation => annotation with
+                {
+                    CrossLanguageId = annotation.Id is not null && map.Ids.TryGetValue(annotation.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                    Constructors = annotation.Constructors?.Select(ctor => ctor with
+                    {
+                        CrossLanguageId = ctor.Id is not null && map.Ids.TryGetValue(ctor.Id, out var ctorCrossLanguageId) ? ctorCrossLanguageId : null,
+                    }).ToList(),
+                    Methods = annotation.Methods?.Select(method => method with
+                    {
+                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
+                    }).ToList(),
+                    Fields = annotation.Fields?.Select(field => field with
+                    {
+                        CrossLanguageId = field.Id is not null && map.Ids.TryGetValue(field.Id, out var fieldCrossLanguageId) ? fieldCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+                Enums = package.Enums?.Select(en => en with
+                {
+                    CrossLanguageId = en.Id is not null && map.Ids.TryGetValue(en.Id, out var enumCrossLanguageId) ? enumCrossLanguageId : null,
+                    Methods = en.Methods?.Select(method => method with
+                    {
+                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+            }).ToList(),
+        };
+
+    private static string BuildTypeId(string packageName, string typeName)
+        => string.IsNullOrWhiteSpace(packageName) ? typeName : $"{packageName}.{typeName}";
+
+    private static string BuildMemberId(string typeId, string memberName)
+        => $"{typeId}.{memberName}";
+
+    private static IReadOnlyList<ApiDiagnostic> ParseStderrDiagnostics(string? stderr)
         => string.IsNullOrWhiteSpace(stderr)
             ? []
-            : stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            : stderr
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(text => new ApiDiagnostic
+                {
+                    Id = "SDKWARN",
+                    Text = text,
+                    Level = DiagnosticLevel.Warning,
+                })
+                .ToList();
 
     /// <summary>
     /// Extract and format as Java stub syntax.

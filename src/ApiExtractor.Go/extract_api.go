@@ -51,6 +51,8 @@ type DependencyInfo struct {
 type StructApi struct {
 	Name           string     `json:"name"`
 	Doc            string     `json:"doc,omitempty"`
+	IsDeprecated   bool       `json:"deprecated,omitempty"`
+	DeprecatedMsg  string     `json:"deprecatedMsg,omitempty"`
 	TypeParams     []string   `json:"typeParams,omitempty"`
 	Embeds         []string   `json:"embeds,omitempty"`
 	Fields         []FieldApi `json:"fields,omitempty"`
@@ -62,6 +64,8 @@ type StructApi struct {
 type IfaceApi struct {
 	Name           string    `json:"name"`
 	Doc            string    `json:"doc,omitempty"`
+	IsDeprecated   bool      `json:"deprecated,omitempty"`
+	DeprecatedMsg  string    `json:"deprecatedMsg,omitempty"`
 	Embeds         []string  `json:"embeds,omitempty"`
 	Methods        []FuncApi `json:"methods,omitempty"`
 	EntryPoint     bool      `json:"entryPoint,omitempty"`
@@ -73,38 +77,61 @@ type FuncApi struct {
 	EntryPoint     bool     `json:"entryPoint,omitempty"`
 	ReExportedFrom string   `json:"reExportedFrom,omitempty"`
 	TypeParams     []string `json:"typeParams,omitempty"`
+	Params         []ParameterInfo `json:"params,omitempty"`
+	Results        []ResultInfo `json:"results,omitempty"`
 	Sig            string   `json:"sig"`
 	Ret            string   `json:"ret,omitempty"`
 	Doc            string   `json:"doc,omitempty"`
 	IsMethod       bool     `json:"method,omitempty"`
 	Receiver       string   `json:"recv,omitempty"`
+	IsDeprecated   bool     `json:"deprecated,omitempty"`
+	DeprecatedMsg  string   `json:"deprecatedMsg,omitempty"`
+}
+
+type ParameterInfo struct {
+	Name       string `json:"name,omitempty"`
+	Type       string `json:"type"`
+	IsVariadic bool   `json:"variadic,omitempty"`
+}
+
+type ResultInfo struct {
+	Name string `json:"name,omitempty"`
+	Type string `json:"type"`
 }
 
 type FieldApi struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Tag  string `json:"tag,omitempty"`
-	Doc  string `json:"doc,omitempty"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Tag           string `json:"tag,omitempty"`
+	Doc           string `json:"doc,omitempty"`
+	IsDeprecated  bool   `json:"deprecated,omitempty"`
+	DeprecatedMsg string `json:"deprecatedMsg,omitempty"`
 }
 
 type TypeApi struct {
 	Name           string `json:"name"`
 	Type           string `json:"type"`
 	Doc            string `json:"doc,omitempty"`
+	IsDeprecated   bool   `json:"deprecated,omitempty"`
+	DeprecatedMsg  string `json:"deprecatedMsg,omitempty"`
 	ReExportedFrom string `json:"reExportedFrom,omitempty"`
 }
 
 type ConstApi struct {
-	Name  string `json:"name"`
-	Type  string `json:"type,omitempty"`
-	Value string `json:"value,omitempty"`
-	Doc   string `json:"doc,omitempty"`
+	Name          string `json:"name"`
+	Type          string `json:"type,omitempty"`
+	Value         string `json:"value,omitempty"`
+	Doc           string `json:"doc,omitempty"`
+	IsDeprecated  bool   `json:"deprecated,omitempty"`
+	DeprecatedMsg string `json:"deprecatedMsg,omitempty"`
 }
 
 type VarApi struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Doc  string `json:"doc,omitempty"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Doc           string `json:"doc,omitempty"`
+	IsDeprecated  bool   `json:"deprecated,omitempty"`
+	DeprecatedMsg string `json:"deprecatedMsg,omitempty"`
 }
 
 // =============================================================================
@@ -1488,6 +1515,10 @@ func extractPkg(ctx *extractionContext, pkg *doc.Package, fset *token.FileSet) *
 						Doc:  firstLine(c.Doc),
 						Type: t.Name, // Type from the associated type
 					}
+					if isDeprecated, deprecatedMsg := deprecationFromDoc(cv.Doc); isDeprecated {
+						cv.IsDeprecated = true
+						cv.DeprecatedMsg = deprecatedMsg
+					}
 					if vs.Type != nil {
 						cv.Type = formatExpr(vs.Type)
 					}
@@ -1519,11 +1550,16 @@ func extractPkg(ctx *extractionContext, pkg *doc.Package, fset *token.FileSet) *
 				// Type alias - collect type reference and register as defined
 				ctx.typeCollector.AddDefinedType(t.Name)
 				ctx.typeCollector.CollectFromExpr(ts.Type)
-				api.Types = append(api.Types, TypeApi{
+				typeApi := TypeApi{
 					Name: t.Name,
 					Type: formatExpr(ts.Type),
 					Doc:  firstLine(t.Doc),
-				})
+				}
+				if isDeprecated, deprecatedMsg := deprecationFromDoc(typeApi.Doc); isDeprecated {
+					typeApi.IsDeprecated = true
+					typeApi.DeprecatedMsg = deprecatedMsg
+				}
+				api.Types = append(api.Types, typeApi)
 			}
 		}
 	}
@@ -1551,6 +1587,10 @@ func extractPkg(ctx *extractionContext, pkg *doc.Package, fset *token.FileSet) *
 					Name: name.Name,
 					Doc:  firstLine(c.Doc),
 				}
+				if isDeprecated, deprecatedMsg := deprecationFromDoc(cv.Doc); isDeprecated {
+					cv.IsDeprecated = true
+					cv.DeprecatedMsg = deprecatedMsg
+				}
 				if vs.Type != nil {
 					cv.Type = formatExpr(vs.Type)
 				}
@@ -1577,6 +1617,10 @@ func extractPkg(ctx *extractionContext, pkg *doc.Package, fset *token.FileSet) *
 					Name: name.Name,
 					Doc:  firstLine(v.Doc),
 				}
+				if isDeprecated, deprecatedMsg := deprecationFromDoc(vv.Doc); isDeprecated {
+					vv.IsDeprecated = true
+					vv.DeprecatedMsg = deprecatedMsg
+				}
 				if vs.Type != nil {
 					vv.Type = formatExpr(vs.Type)
 				}
@@ -1592,6 +1636,10 @@ func extractStruct(ctx *extractionContext, t *doc.Type, st *ast.StructType) Stru
 	s := StructApi{
 		Name: t.Name,
 		Doc:  firstLine(t.Doc),
+	}
+	if isDeprecated, deprecatedMsg := deprecationFromDoc(s.Doc); isDeprecated {
+		s.IsDeprecated = true
+		s.DeprecatedMsg = deprecatedMsg
 	}
 
 	// Register as defined type
@@ -1614,6 +1662,10 @@ func extractStruct(ctx *extractionContext, t *doc.Type, st *ast.StructType) Stru
 			f := FieldApi{
 				Name: name.Name,
 				Type: formatExpr(field.Type),
+			}
+			if isDeprecated, deprecatedMsg := deprecationFromDoc(firstLine(field.Doc.Text())); isDeprecated {
+				f.IsDeprecated = true
+				f.DeprecatedMsg = deprecatedMsg
 			}
 			if field.Tag != nil {
 				f.Tag = field.Tag.Value
@@ -1648,6 +1700,10 @@ func extractInterface(ctx *extractionContext, t *doc.Type, it *ast.InterfaceType
 		Name: t.Name,
 		Doc:  firstLine(t.Doc),
 	}
+	if isDeprecated, deprecatedMsg := deprecationFromDoc(i.Doc); isDeprecated {
+		i.IsDeprecated = true
+		i.DeprecatedMsg = deprecatedMsg
+	}
 
 	// Register as defined type
 	ctx.typeCollector.AddDefinedType(t.Name)
@@ -1673,6 +1729,8 @@ func extractInterface(ctx *extractionContext, t *doc.Type, it *ast.InterfaceType
 
 			i.Methods = append(i.Methods, FuncApi{
 				Name: name.Name,
+				Params: extractParamInfos(ft.Params),
+				Results: extractResultInfos(ft.Results),
 				Sig:  formatParams(ft.Params),
 				Ret:  formatResults(ft.Results),
 			})
@@ -1689,10 +1747,16 @@ func extractFunc(ctx *extractionContext, decl *ast.FuncDecl, docStr string) Func
 
 	f := FuncApi{
 		Name:       decl.Name.Name,
+		Params:     extractParamInfos(decl.Type.Params),
+		Results:    extractResultInfos(decl.Type.Results),
 		Sig:        formatParams(decl.Type.Params),
 		Ret:        formatResults(decl.Type.Results),
 		Doc:        firstLine(docStr),
 		TypeParams: extractTypeParams(decl.Type.TypeParams),
+	}
+	if isDeprecated, deprecatedMsg := deprecationFromDoc(f.Doc); isDeprecated {
+		f.IsDeprecated = true
+		f.DeprecatedMsg = deprecatedMsg
 	}
 
 	if decl.Recv != nil && len(decl.Recv.List) > 0 {
@@ -1722,6 +1786,46 @@ func extractTypeParams(tpl *ast.FieldList) []string {
 		}
 	}
 	return params
+}
+
+func extractParamInfos(fl *ast.FieldList) []ParameterInfo {
+	if fl == nil || len(fl.List) == 0 {
+		return nil
+	}
+	params := []ParameterInfo{}
+	for _, field := range fl.List {
+		typeStr := formatExpr(field.Type)
+		isVariadic := false
+		if _, ok := field.Type.(*ast.Ellipsis); ok {
+			isVariadic = true
+		}
+		if len(field.Names) == 0 {
+			params = append(params, ParameterInfo{Type: typeStr, IsVariadic: isVariadic})
+			continue
+		}
+		for _, name := range field.Names {
+			params = append(params, ParameterInfo{Name: name.Name, Type: typeStr, IsVariadic: isVariadic})
+		}
+	}
+	return params
+}
+
+func extractResultInfos(fl *ast.FieldList) []ResultInfo {
+	if fl == nil || len(fl.List) == 0 {
+		return nil
+	}
+	results := []ResultInfo{}
+	for _, field := range fl.List {
+		typeStr := formatExpr(field.Type)
+		if len(field.Names) == 0 {
+			results = append(results, ResultInfo{Type: typeStr})
+			continue
+		}
+		for _, name := range field.Names {
+			results = append(results, ResultInfo{Name: name.Name, Type: typeStr})
+		}
+	}
+	return results
 }
 
 func formatParams(fl *ast.FieldList) string {
@@ -1805,6 +1909,18 @@ func firstLine(s string) string {
 		line = line[:117] + "..."
 	}
 	return line
+}
+
+func deprecationFromDoc(doc string) (bool, string) {
+	if doc == "" {
+		return false, ""
+	}
+	trimmed := strings.TrimSpace(doc)
+	if strings.HasPrefix(trimmed, "Deprecated:") {
+		message := strings.TrimSpace(strings.TrimPrefix(trimmed, "Deprecated:"))
+		return true, message
+	}
+	return false, ""
 }
 
 func isExported(name string) bool {

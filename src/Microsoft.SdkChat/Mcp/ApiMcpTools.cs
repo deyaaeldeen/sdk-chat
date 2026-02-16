@@ -29,6 +29,7 @@ public class ApiMcpTools
         [Description("Absolute path to SDK root directory.")] string packagePath,
         [Description("Force language instead of auto-detection. Values: dotnet, python, java, javascript, typescript, go.")] string? language = null,
         [Description("Output format: 'stubs' (default) for readable signatures, 'json' for structured data.")] string? format = null,
+        [Description("Optional path to cross-language metadata JSON file.")] string? crossLanguageMetadata = null,
         CancellationToken cancellationToken = default)
     {
         using var activity = SdkChatTelemetry.StartMcpTool("extract_api");
@@ -36,7 +37,7 @@ public class ApiMcpTools
         try
         {
             var asJson = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase);
-            var result = await _service.ExtractPublicApiAsync(packagePath, language, asJson, cancellationToken).ConfigureAwait(false);
+            var result = await _service.ExtractPublicApiAsync(packagePath, language, asJson, crossLanguageMetadata, cancellationToken).ConfigureAwait(false);
 
             if (!result.Success)
             {

@@ -26,9 +26,36 @@ public static class CSharpFormatter
     {
         var sb = new StringBuilder();
 
-        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        var deprecatedOperations = index.GetAllTypes()
+            .SelectMany(t => (t.Members ?? [])
+                .Where(m => m.Kind == "method" && m.IsDeprecated == true)
+                .Select(m => (Client: t.Name, Method: m.Name)))
+            .ToHashSet();
+
+        var deprecatedUncovered = coverage.UncoveredOperations
+            .Where(op => deprecatedOperations.Contains((op.ClientType, op.Operation)))
+            .ToList();
+
+        var filteredCoverage = coverage with
+        {
+            UncoveredOperations = coverage.UncoveredOperations
+                .Where(op => !deprecatedOperations.Contains((op.ClientType, op.Operation)))
+                .ToList(),
+        };
+
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, filteredCoverage);
         if (uncoveredByClient is null)
             return sb.ToString();
+
+        if (deprecatedUncovered.Count > 0)
+        {
+            sb.AppendLine("// Deprecated API (intentionally excluded from uncovered generation targets):");
+            foreach (var op in deprecatedUncovered.OrderBy(o => o.ClientType).ThenBy(o => o.Operation))
+            {
+                sb.AppendLine($"//   {op.ClientType}.{op.Operation}");
+            }
+            sb.AppendLine();
+        }
 
         // Format only types that have uncovered operations
         var allTypes = index.GetAllTypes().ToList();
@@ -261,6 +288,12 @@ public static class CSharpFormatter
 
     private static void FormatType(StringBuilder sb, TypeInfo type, string indent)
     {
+        if (type.IsDeprecated == true)
+        {
+            var message = string.IsNullOrWhiteSpace(type.DeprecatedMessage) ? "" : $"(\"{type.DeprecatedMessage}\")";
+            sb.AppendLine($"{indent}[Obsolete{message}]");
+        }
+
         // XML doc
         if (!string.IsNullOrEmpty(type.Doc))
         {
@@ -351,6 +384,12 @@ public static class CSharpFormatter
 
     private static void FormatMember(StringBuilder sb, MemberInfo member, string indent)
     {
+        if (member.IsDeprecated == true)
+        {
+            var message = string.IsNullOrWhiteSpace(member.DeprecatedMessage) ? "" : $"(\"{member.DeprecatedMessage}\")";
+            sb.AppendLine($"{indent}[Obsolete{message}]");
+        }
+
         // XML doc
         if (!string.IsNullOrEmpty(member.Doc))
             sb.AppendLine($"{indent}/// <summary>{EscapeXml(member.Doc)}</summary>");

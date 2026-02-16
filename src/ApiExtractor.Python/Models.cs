@@ -12,8 +12,11 @@ public sealed record ApiIndex(
     string Package,
     IReadOnlyList<ModuleInfo> Modules,
     IReadOnlyList<DependencyInfo>? Dependencies = null,
-    string? Version = null) : IApiIndex
+    string? Version = null,
+    string? CrossLanguagePackageId = null,
+    IReadOnlyList<ApiDiagnostic>? Diagnostics = null) : IApiIndex
 {
+    IReadOnlyList<ApiDiagnostic> IApiIndex.Diagnostics => Diagnostics ?? [];
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
         Modules.SelectMany(m => m.Classes ?? []);
@@ -27,6 +30,30 @@ public sealed record ApiIndex(
         : JsonSerializer.Serialize(this, ApiIndexContext.Default.ApiIndex);
 
     public string ToStubs() => PythonFormatter.Format(this);
+
+    public IEnumerable<DiagnosticTypeInfo> GetDiagnosticTypes() =>
+        Modules.SelectMany(m => (m.Classes ?? []).Select(c => new DiagnosticTypeInfo
+        {
+            Name = c.Name,
+            Id = c.Id,
+            Doc = c.Doc,
+            EntryPoint = c.EntryPoint == true,
+            IsDeprecated = c.IsDeprecated == true,
+            Callables = (c.Methods ?? []).Select(method => new DiagnosticCallableInfo
+            {
+                Name = method.Name,
+                Id = method.Id,
+                ParameterTypes = (method.Params ?? []).Where(p => p.Type is not null).Select(p => p.Type!).ToList(),
+            }).ToList(),
+        }));
+
+    public IEnumerable<DiagnosticCallableInfo> GetTopLevelCallables() =>
+        Modules.SelectMany(m => (m.Functions ?? []).Select(f => new DiagnosticCallableInfo
+        {
+            Name = f.Name,
+            Id = f.Id,
+            ParameterTypes = (f.Params ?? []).Where(p => p.Type is not null).Select(p => p.Type!).ToList(),
+        }));
 }
 
 /// <summary>Information about types from a dependency package.</summary>
@@ -59,6 +86,14 @@ public sealed record ClassInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
     /// <summary>External package this type is re-exported from.</summary>
@@ -73,6 +108,14 @@ public sealed record ClassInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     [JsonPropertyName("methods")]
     public IReadOnlyList<MethodInfo>? Methods { get; init; }
@@ -162,21 +205,123 @@ public sealed record ClassInfo
     }
 }
 
-public record MethodInfo(
-    string Name,
-    string Signature,
-    string? Doc,
-    bool? IsAsync,
-    bool? IsClassMethod,
-    bool? IsStaticMethod,
-    [property: JsonPropertyName("ret")] string? Ret = null);
+public sealed record MethodInfo
+{
+    public MethodInfo()
+    {
+    }
 
-public record PropertyInfo(string Name, string? Type, string? Doc);
+    public MethodInfo(string Name, string Signature, string? Doc, bool? IsAsync, bool? IsClassMethod, bool? IsStaticMethod, string? Ret = null)
+    {
+        this.Name = Name;
+        this.Signature = Signature;
+        this.Doc = Doc;
+        this.IsAsync = IsAsync;
+        this.IsClassMethod = IsClassMethod;
+        this.IsStaticMethod = IsStaticMethod;
+        this.Ret = Ret;
+    }
+
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
+    [JsonPropertyName("sig")]
+    public string Signature
+    {
+        get => _signature ?? PythonModelHelpers.BuildSignature(Params);
+        init => _signature = value;
+    }
+
+    [JsonIgnore]
+    private string? _signature;
+
+    [JsonPropertyName("params")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ParameterInfo>? Params { get; init; }
+
+    [JsonPropertyName("doc")]
+    public string? Doc { get; init; }
+
+    [JsonPropertyName("async")]
+    public bool? IsAsync { get; init; }
+
+    [JsonPropertyName("classmethod")]
+    public bool? IsClassMethod { get; init; }
+
+    [JsonPropertyName("staticmethod")]
+    public bool? IsStaticMethod { get; init; }
+
+    [JsonPropertyName("ret")]
+    public string? Ret { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+}
+
+public sealed record PropertyInfo
+{
+    public PropertyInfo()
+    {
+    }
+
+    public PropertyInfo(string Name, string? Type, string? Doc)
+    {
+        this.Name = Name;
+        this.Type = Type;
+        this.Doc = Doc;
+    }
+
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("doc")]
+    public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+}
 
 public sealed record FunctionInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
+
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
 
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
@@ -186,7 +331,18 @@ public sealed record FunctionInfo
     public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("sig")]
-    public string Signature { get; init; } = "";
+    public string Signature
+    {
+        get => _signature ?? PythonModelHelpers.BuildSignature(Params);
+        init => _signature = value;
+    }
+
+    [JsonIgnore]
+    private string? _signature;
+
+    [JsonPropertyName("params")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ParameterInfo>? Params { get; init; }
 
     [JsonPropertyName("ret")]
     public string? Ret { get; init; }
@@ -196,6 +352,52 @@ public sealed record FunctionInfo
 
     [JsonPropertyName("async")]
     public bool? IsAsync { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+}
+
+public sealed record ParameterInfo
+{
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("type")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("default")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Default { get; init; }
+
+    [JsonPropertyName("kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Kind { get; init; }
+}
+
+internal static class PythonModelHelpers
+{
+    internal static string BuildSignature(IReadOnlyList<ParameterInfo>? parameters)
+        => parameters is null || parameters.Count == 0
+            ? ""
+            : string.Join(", ",
+                parameters.Select(p =>
+                {
+                    var prefix = p.Kind switch
+                    {
+                        "var_positional" => "*",
+                        "var_keyword" => "**",
+                        _ => ""
+                    };
+                    var type = !string.IsNullOrWhiteSpace(p.Type) ? $": {p.Type}" : "";
+                    var def = p.Default is not null ? $" = {p.Default}" : "";
+                    return $"{prefix}{p.Name}{type}{def}";
+                }));
 }
 
 [JsonSourceGenerationOptions(

@@ -1705,7 +1705,7 @@ public class SmartTruncationTests
         var s = new Go.StructApi
         {
             Name = "SimpleError",
-            Methods = [new Go.FuncApi { Name = "Error", Sig = null, Ret = "string" }]
+            Methods = [new Go.FuncApi { Name = "Error", Sig = null!, Ret = "string" }]
         };
         Assert.True(s.IsErrorType);
     }

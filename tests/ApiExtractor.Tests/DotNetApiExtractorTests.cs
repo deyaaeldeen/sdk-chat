@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using ApiExtractor.DotNet;
+using System.Text.Json;
 using Xunit;
 
 namespace ApiExtractor.Tests;
@@ -142,6 +143,110 @@ public class DotNetApiExtractorTests
             .Where(m => m.Kind == "method")
             .ToList();
         Assert.Contains(allMethods, m => m.IsAsync == true);
+    }
+
+    [Fact]
+    public async Task Extract_PopulatesResults_ForNonVoidMethods()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+
+        var nonVoidMethods = api.Namespaces
+            .SelectMany(n => n.Types)
+            .SelectMany(t => t.Members ?? [])
+            .Where(m => m.Kind == "method")
+            .Where(m => !m.Signature.StartsWith("void ", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.NotEmpty(nonVoidMethods);
+        Assert.All(nonVoidMethods, m =>
+        {
+            Assert.NotNull(m.Results);
+            Assert.NotEmpty(m.Results!);
+            Assert.All(m.Results!, r => Assert.False(string.IsNullOrWhiteSpace(r.Type)));
+        });
+    }
+
+    [Fact]
+    public async Task ToJson_EmitsResults_ForNonVoidMethods_AndOmitsForVoidMethods()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+
+        var allMethods = api.Namespaces
+            .SelectMany(n => n.Types)
+            .SelectMany(t => t.Members ?? [])
+            .Where(m => m.Kind == "method")
+            .ToList();
+
+        var nonVoidMethod = allMethods.First(m => !m.Signature.StartsWith("void ", StringComparison.Ordinal));
+        var voidMethod = allMethods.FirstOrDefault(m => m.Signature.StartsWith("void ", StringComparison.Ordinal));
+
+        var json = api.ToJson();
+        using var doc = JsonDocument.Parse(json);
+
+        JsonElement? nonVoidMethodJson = null;
+        JsonElement? voidMethodJson = null;
+
+        foreach (var ns in doc.RootElement.GetProperty("namespaces").EnumerateArray())
+        {
+            foreach (var type in ns.GetProperty("types").EnumerateArray())
+            {
+                if (!type.TryGetProperty("members", out var members))
+                    continue;
+
+                foreach (var member in members.EnumerateArray())
+                {
+                    if (member.GetProperty("name").GetString() == nonVoidMethod.Name &&
+                        member.GetProperty("sig").GetString() == nonVoidMethod.Signature)
+                    {
+                        nonVoidMethodJson = member;
+                    }
+
+                    if (voidMethod is not null &&
+                        member.GetProperty("name").GetString() == voidMethod.Name &&
+                        member.GetProperty("sig").GetString() == voidMethod.Signature)
+                    {
+                        voidMethodJson = member;
+                    }
+                }
+            }
+        }
+
+        Assert.True(nonVoidMethodJson.HasValue);
+        Assert.True(nonVoidMethodJson.Value.TryGetProperty("results", out var results));
+        Assert.Equal(JsonValueKind.Array, results.ValueKind);
+        Assert.NotEqual(0, results.GetArrayLength());
+
+        if (voidMethod is not null)
+        {
+            Assert.True(voidMethodJson.HasValue);
+            Assert.False(voidMethodJson.Value.TryGetProperty("results", out _));
+        }
+    }
+
+    [Fact]
+    public async Task Extract_DelegateInvokeResults_MatchReturnType()
+    {
+        var api = await _extractor.ExtractAsync(TestFixturesPath);
+
+        var widgetChanged = api.Namespaces
+            .SelectMany(n => n.Types)
+            .FirstOrDefault(t => t.Name == "WidgetChangedHandler");
+
+        Assert.NotNull(widgetChanged);
+
+        var invoke = widgetChanged.Members?.FirstOrDefault(m => m.Name == "Invoke");
+        Assert.NotNull(invoke);
+
+        if (invoke.Signature.StartsWith("void ", StringComparison.Ordinal))
+        {
+            Assert.Null(invoke.Results);
+        }
+        else
+        {
+            Assert.NotNull(invoke.Results);
+            Assert.NotEmpty(invoke.Results!);
+            Assert.All(invoke.Results!, r => Assert.False(string.IsNullOrWhiteSpace(r.Type)));
+        }
     }
 
     [Fact]

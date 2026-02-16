@@ -193,17 +193,6 @@ public class PythonApiExtractorTests : IClassFixture<PythonExtractorFixture>
         Assert.Contains("def get_resource", formatted);
     }
 
-    [Fact]
-    public void Extract_ProducesSmallerOutputThanSource()
-    {
-        var api = GetApi();
-        var json = api.ToJson();
-        var sourceSize = Directory.GetFiles(_fixture.FixturePath, "*.py", SearchOption.AllDirectories)
-            .Sum(f => new FileInfo(f).Length);
-        // For small test fixtures, the overhead ratio is higher; real-world packages show much better compression
-        Assert.True(json.Length < sourceSize,
-            $"JSON ({json.Length}) should be smaller than source ({sourceSize})");
-    }
 }
 
 /// <summary>

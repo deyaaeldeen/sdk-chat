@@ -32,10 +32,13 @@ import * as path from "path";
 export interface MethodInfo {
     name: string;
     sig: string;
+    params?: ParameterInfo[];
     ret?: string;
     doc?: string;
     async?: boolean;
     static?: boolean;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface PropertyInfo {
@@ -44,10 +47,23 @@ export interface PropertyInfo {
     readonly?: boolean;
     optional?: boolean;
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface ConstructorInfo {
     sig: string;
+    params?: ParameterInfo[];
+    deprecated?: boolean;
+    deprecatedMsg?: string;
+}
+
+export interface ParameterInfo {
+    name: string;
+    type: string;
+    default?: string;
+    optional?: boolean;
+    rest?: boolean;
 }
 
 export interface ClassInfo {
@@ -59,6 +75,8 @@ export interface ClassInfo {
     implements?: string[];
     typeParams?: string;
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
     constructors?: ConstructorInfo[];
     methods?: MethodInfo[];
     properties?: PropertyInfo[];
@@ -72,6 +90,8 @@ export interface InterfaceInfo {
     extends?: string[];
     typeParams?: string;
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
     methods?: MethodInfo[];
     properties?: PropertyInfo[];
 }
@@ -81,6 +101,8 @@ export interface EnumInfo {
     reExportedFrom?: string;  // External package this is re-exported from
     doc?: string;
     values: string[];
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface TypeAliasInfo {
@@ -88,6 +110,8 @@ export interface TypeAliasInfo {
     type: string;
     reExportedFrom?: string;  // External package this is re-exported from
     doc?: string;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface FunctionInfo {
@@ -96,9 +120,12 @@ export interface FunctionInfo {
     exportPath?: string;  // The subpath to import from (e.g., "." or "./client")
     reExportedFrom?: string;  // External package this is re-exported from
     sig: string;
+    params?: ParameterInfo[];
     ret?: string;
     doc?: string;
     async?: boolean;
+    deprecated?: boolean;
+    deprecatedMsg?: string;
 }
 
 export interface ModuleInfo {
@@ -608,7 +635,44 @@ function formatParameter(p: ParameterDeclaration): string {
     return sig;
 }
 
+function extractParameterInfo(p: ParameterDeclaration): ParameterInfo {
+    const typeNodeText = p.getTypeNode()?.getText();
+    const inferredTypeText = p.getType().getText();
+    const type = simplifyType(typeNodeText || inferredTypeText || "any");
+
+    const info: ParameterInfo = {
+        name: p.getName(),
+        type,
+    };
+
+    if (p.getInitializer()) info.default = p.getInitializer()!.getText();
+    if (p.isOptional()) info.optional = true;
+    if (p.isRestParameter()) info.rest = true;
+
+    return info;
+}
+
+function getDeprecatedInfo(node: Node | JSDocableNode): { deprecated?: boolean; deprecatedMsg?: string } {
+    if (!("getJsDocs" in node)) return {};
+    const jsDocs = node.getJsDocs();
+    if (!jsDocs?.length) return {};
+
+    for (const jsDoc of jsDocs) {
+        for (const tag of jsDoc.getTags()) {
+            if (tag.getTagName() !== "deprecated") continue;
+            const comment = tag.getCommentText();
+            return {
+                deprecated: true,
+                deprecatedMsg: typeof comment === "string" && comment.trim().length > 0 ? comment.trim() : undefined,
+            };
+        }
+    }
+
+    return {};
+}
+
 function extractMethod(method: MethodDeclaration): MethodInfo {
+    const paramInfos = method.getParameters().map(extractParameterInfo);
     const params = method.getParameters().map(formatParameter).join(", ");
     const returnType = method.getReturnType();
     const ret = returnType?.getText();
@@ -629,6 +693,8 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
         sig: params,
     };
 
+    if (paramInfos.length) result.params = paramInfos;
+
     if (ret && ret !== "void") result.ret = simplifyType(ret);
 
     const doc = getDocString(method);
@@ -636,6 +702,10 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
 
     if (method.isAsync()) result.async = true;
     if (method.isStatic()) result.static = true;
+
+    const deprecated = getDeprecatedInfo(method);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
     return result;
 }
@@ -658,13 +728,26 @@ function extractProperty(prop: PropertyDeclaration): PropertyInfo {
     const doc = getDocString(prop);
     if (doc) result.doc = doc;
 
+    const deprecated = getDeprecatedInfo(prop);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
+
     return result;
 }
 
 function extractConstructor(ctor: ConstructorDeclaration): ConstructorInfo {
-    return {
+    const paramInfos = ctor.getParameters().map(extractParameterInfo);
+    const result: ConstructorInfo = {
         sig: ctor.getParameters().map(formatParameter).join(", "),
     };
+
+    if (paramInfos.length) result.params = paramInfos;
+
+    const deprecated = getDeprecatedInfo(ctor);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
+
+    return result;
 }
 
 function extractClass(cls: ClassDeclaration): ClassInfo {
@@ -672,6 +755,10 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
     if (!name) throw new Error("Class must have a name");
 
     const result: ClassInfo = { name };
+
+    const deprecated = getDeprecatedInfo(cls);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
     // Base class - collect type reference
     const ext = cls.getExtends();
@@ -730,6 +817,7 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
 function extractInterfaceMethod(method: Node): MethodInfo | undefined {
     if (!Node.isMethodSignature(method)) return undefined;
 
+    const paramInfos = method.getParameters().map(extractParameterInfo);
     const params = method.getParameters().map(formatParameter).join(", ");
     const returnType = method.getReturnType();
     const ret = returnType?.getText();
@@ -745,10 +833,16 @@ function extractInterfaceMethod(method: Node): MethodInfo | undefined {
         sig: params,
     };
 
+    if (paramInfos.length) result.params = paramInfos;
+
     if (ret && ret !== "void") result.ret = simplifyType(ret);
 
     const doc = getDocString(method);
     if (doc) result.doc = doc;
+
+    const deprecated = getDeprecatedInfo(method);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
     return result;
 }
@@ -759,6 +853,7 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
     const typeNode = prop.getTypeNode();
     if (!typeNode || !Node.isFunctionTypeNode(typeNode)) return undefined;
 
+    const paramInfos = typeNode.getParameters().map(extractParameterInfo);
     const params = typeNode.getParameters().map(formatParameter).join(", ");
     const returnType = typeNode.getReturnType();
     const ret = returnType?.getText();
@@ -774,10 +869,16 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
         sig: params,
     };
 
+    if (paramInfos.length) result.params = paramInfos;
+
     if (ret && ret !== "void") result.ret = simplifyType(ret);
 
     const doc = getDocString(prop);
     if (doc) result.doc = doc;
+
+    const deprecated = getDeprecatedInfo(prop);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
     return result;
 }
@@ -806,6 +907,10 @@ function extractInterfaceProperty(prop: Node): PropertyInfo | undefined {
     const doc = getDocString(prop);
     if (doc) result.doc = doc;
 
+    const deprecated = getDeprecatedInfo(prop);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
+
     return result;
 }
 
@@ -824,6 +929,10 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
 
     const doc = getDocString(iface);
     if (doc) result.doc = doc;
+
+    const deprecated = getDeprecatedInfo(iface);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
     // Methods
     const methods: MethodInfo[] = [];
@@ -854,11 +963,17 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
 }
 
 function extractEnum(en: EnumDeclaration): EnumInfo {
-    return {
+    const result: EnumInfo = {
         name: en.getName(),
         doc: getDocString(en),
         values: en.getMembers().map((m) => m.getName()),
     };
+
+    const deprecated = getDeprecatedInfo(en);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
+
+    return result;
 }
 
 function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
@@ -867,17 +982,24 @@ function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
     // Collect type reference for dependency tracking
     typeCollector.collectFromType(type);
 
-    return {
+    const result: TypeAliasInfo = {
         name: alias.getName(),
         type: simplifyType(type.getText()),
         doc: getDocString(alias),
     };
+
+    const deprecated = getDeprecatedInfo(alias);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
+
+    return result;
 }
 
 function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     const name = fn.getName();
     if (!name) return undefined;
 
+    const paramInfos = fn.getParameters().map(extractParameterInfo);
     const params = fn.getParameters().map(formatParameter).join(", ");
     const returnType = fn.getReturnType();
     const ret = returnType?.getText();
@@ -893,12 +1015,18 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
         sig: params,
     };
 
+    if (paramInfos.length) result.params = paramInfos;
+
     if (ret && ret !== "void") result.ret = simplifyType(ret);
 
     const doc = getDocString(fn);
     if (doc) result.doc = doc;
 
     if (fn.isAsync()) result.async = true;
+
+    const deprecated = getDeprecatedInfo(fn);
+    if (deprecated.deprecated) result.deprecated = true;
+    if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
     return result;
 }

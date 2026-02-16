@@ -51,12 +51,12 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
     public string ToStubs(ApiIndex index) => CSharpFormatter.Format(index);
 
     /// <inheritdoc />
-    async Task<ExtractorResult<ApiIndex>> IApiExtractor<ApiIndex>.ExtractAsync(string rootPath, CancellationToken ct)
+    async Task<ExtractorResult<ApiIndex>> IApiExtractor<ApiIndex>.ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         try
         {
-            var result = await ExtractAsync(rootPath, ct).ConfigureAwait(false);
-            return ExtractorResult<ApiIndex>.CreateSuccess(result);
+            var result = await ExtractAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+            return ExtractorResult<ApiIndex>.CreateSuccess(result, result.Diagnostics);
         }
         catch (Exception ex)
         {
@@ -64,7 +64,10 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         }
     }
 
-    public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+    public Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+        => ExtractAsync(rootPath, null, ct);
+
+    public async Task<ApiIndex> ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var files = Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories)
@@ -133,7 +136,14 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Resolve transitive dependencies using the same compilation
         var dependencies = ResolveTransitiveDependencies(compilation, namespaces, ct);
 
-        return new ApiIndex { Package = packageName, Namespaces = namespaces, Dependencies = dependencies };
+        var apiIndex = new ApiIndex { Package = packageName, Namespaces = namespaces, Dependencies = dependencies };
+        if (crossLanguageMap is not null)
+        {
+            apiIndex = ApplyCrossLanguageIds(apiIndex, crossLanguageMap);
+        }
+
+        var diagnostics = ApiDiagnosticsPostProcessor.Build(apiIndex);
+        return apiIndex with { Diagnostics = diagnostics };
     }
 
     // Transitive dependency resolution logic is in CSharpApiExtractor.Dependencies.cs
@@ -157,6 +167,8 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         private volatile List<string>? _values;
         public volatile bool IsEntryPoint;
         public volatile bool IsError;
+        public volatile bool IsDeprecated;
+        public volatile string? DeprecatedMessage;
         public ConcurrentBag<string> RawBaseTypes { get; } = [];
 
         public void AddInterface(string iface) => Interfaces.TryAdd(iface, 0);
@@ -200,6 +212,7 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         public TypeInfo ToTypeInfo() => new()
         {
             Name = Name,
+            Id = BuildTypeId(Namespace, Name),
             Kind = Kind,
             Base = Base,
             Interfaces = !Interfaces.IsEmpty ? Interfaces.Keys.OrderBy(i => i).ToList() : null,
@@ -207,7 +220,9 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Members = !Members.IsEmpty ? Members.Values.ToList() : null,
             Values = _values,
             EntryPoint = IsEntryPoint ? true : null,
-            IsError = IsError ? true : null
+            IsError = IsError ? true : null,
+            IsDeprecated = IsDeprecated ? true : null,
+            DeprecatedMessage = DeprecatedMessage
         };
     }
 
@@ -275,6 +290,12 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
         // Take first doc - thread-safe
         merged.SetDocIfNull(GetXmlDoc(type));
+        var (typeDeprecated, typeDeprecatedMessage) = GetDeprecationInfo(type.AttributeLists);
+        if (typeDeprecated)
+        {
+            merged.IsDeprecated = true;
+            merged.DeprecatedMessage ??= typeDeprecatedMessage;
+        }
 
         if (type is EnumDeclarationSyntax e)
         {
@@ -291,13 +312,17 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 {
                     foreach (var v in f.Declaration.Variables)
                     {
+                        var (memberDeprecated, memberDeprecatedMessage) = GetDeprecationInfo(f.AttributeLists);
                         var constInfo = new MemberInfo
                         {
                             Name = v.Identifier.Text,
                             Kind = "const",
                             Signature = $"const {Simplify(f.Declaration.Type)} {v.Identifier.Text}" +
                                 (v.Initializer != null && v.Initializer.Value.ToString().Length < 30 ? $" = {v.Initializer.Value}" : ""),
-                            Doc = GetXmlDoc(f)
+                            Doc = GetXmlDoc(f),
+                            Id = BuildMemberId(ns, name, v.Identifier.Text),
+                            IsDeprecated = memberDeprecated ? true : null,
+                            DeprecatedMessage = memberDeprecatedMessage
                         };
                         merged.Members.TryAdd(constInfo.Signature, constInfo);
                     }
@@ -306,7 +331,7 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
 
                 var info = ExtractMember(member);
                 if (info != null)
-                    merged.Members.TryAdd(info.Signature, info);
+                    merged.Members.TryAdd(info.Signature, info with { Id = BuildMemberId(ns, name, info.Name) });
             }
         }
     }
@@ -333,6 +358,12 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         }
 
         merged.SetDocIfNull(GetXmlDoc(del));
+        var (delegateDeprecated, delegateDeprecatedMessage) = GetDeprecationInfo(del.AttributeLists);
+        if (delegateDeprecated)
+        {
+            merged.IsDeprecated = true;
+            merged.DeprecatedMessage ??= delegateDeprecatedMessage;
+        }
 
         var signature = $"{Simplify(del.ReturnType)} {del.Identifier.Text}({FormatParams(del.ParameterList)})";
         merged.Members.TryAdd(signature, new MemberInfo
@@ -340,7 +371,10 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Name = "Invoke",
             Kind = "method",
             Signature = signature,
-            Doc = GetXmlDoc(del)
+            Doc = GetXmlDoc(del),
+            Params = GetParameters(del.ParameterList),
+            Results = GetResults(del.ReturnType),
+            Id = BuildMemberId(ns, name, "Invoke")
         });
     }
 
@@ -514,7 +548,10 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Name = ctor.Identifier.Text,
             Kind = "ctor",
             Signature = $"({FormatParams(ctor.ParameterList)})",
-            Doc = GetXmlDoc(ctor)
+            Doc = GetXmlDoc(ctor),
+            Params = GetParameters(ctor.ParameterList),
+            IsDeprecated = GetDeprecationInfo(ctor.AttributeLists).IsDeprecated ? true : null,
+            DeprecatedMessage = GetDeprecationInfo(ctor.AttributeLists).DeprecatedMessage
         },
         MethodDeclarationSyntax m => new MemberInfo
         {
@@ -523,7 +560,11 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Signature = $"{Simplify(m.ReturnType)} {m.Identifier.Text}{TypeParams(m)}({FormatParams(m.ParameterList)})",
             Doc = GetXmlDoc(m),
             IsStatic = m.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null,
-            IsAsync = IsAsyncMethod(m) ? true : null
+            IsAsync = IsAsyncMethod(m) ? true : null,
+            Params = GetParameters(m.ParameterList),
+            Results = GetResults(m.ReturnType),
+            IsDeprecated = GetDeprecationInfo(m.AttributeLists).IsDeprecated ? true : null,
+            DeprecatedMessage = GetDeprecationInfo(m.AttributeLists).DeprecatedMessage
         },
         PropertyDeclarationSyntax p => new MemberInfo
         {
@@ -531,21 +572,28 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Kind = "property",
             Signature = $"{Simplify(p.Type)} {p.Identifier.Text}{Accessors(p)}",
             Doc = GetXmlDoc(p),
-            IsStatic = p.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null
+            IsStatic = p.Modifiers.Any(SyntaxKind.StaticKeyword) ? true : null,
+            IsDeprecated = GetDeprecationInfo(p.AttributeLists).IsDeprecated ? true : null,
+            DeprecatedMessage = GetDeprecationInfo(p.AttributeLists).DeprecatedMessage
         },
         IndexerDeclarationSyntax idx => new MemberInfo
         {
             Name = "this[]",
             Kind = "indexer",
             Signature = $"{Simplify(idx.Type)} this[{FormatParams(idx.ParameterList)}]",
-            Doc = GetXmlDoc(idx)
+            Doc = GetXmlDoc(idx),
+            Params = GetParameters(idx.ParameterList),
+            IsDeprecated = GetDeprecationInfo(idx.AttributeLists).IsDeprecated ? true : null,
+            DeprecatedMessage = GetDeprecationInfo(idx.AttributeLists).DeprecatedMessage
         },
         EventDeclarationSyntax evt => new MemberInfo
         {
             Name = evt.Identifier.Text,
             Kind = "event",
             Signature = $"event {Simplify(evt.Type)} {evt.Identifier.Text}",
-            Doc = GetXmlDoc(evt)
+            Doc = GetXmlDoc(evt),
+            IsDeprecated = GetDeprecationInfo(evt.AttributeLists).IsDeprecated ? true : null,
+            DeprecatedMessage = GetDeprecationInfo(evt.AttributeLists).DeprecatedMessage
         },
         EventFieldDeclarationSyntax ef =>
             ef.Declaration.Variables.FirstOrDefault() is { } ev ? new MemberInfo
@@ -553,7 +601,9 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 Name = ev.Identifier.Text,
                 Kind = "event",
                 Signature = $"event {Simplify(ef.Declaration.Type)} {ev.Identifier.Text}",
-                Doc = GetXmlDoc(ef)
+                Doc = GetXmlDoc(ef),
+                IsDeprecated = GetDeprecationInfo(ef.AttributeLists).IsDeprecated ? true : null,
+                DeprecatedMessage = GetDeprecationInfo(ef.AttributeLists).DeprecatedMessage
             } : null,
         FieldDeclarationSyntax f when f.Modifiers.Any(SyntaxKind.ConstKeyword) =>
             f.Declaration.Variables.FirstOrDefault() is { } v ? new MemberInfo
@@ -571,7 +621,9 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
                 Kind = "field",
                 Signature = $"static readonly {Simplify(f.Declaration.Type)} {sv.Identifier.Text}",
                 Doc = GetXmlDoc(f),
-                IsStatic = true
+                IsStatic = true,
+                IsDeprecated = GetDeprecationInfo(f.AttributeLists).IsDeprecated ? true : null,
+                DeprecatedMessage = GetDeprecationInfo(f.AttributeLists).DeprecatedMessage
             } : null,
         OperatorDeclarationSyntax op => new MemberInfo
         {
@@ -579,7 +631,11 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Kind = "operator",
             Signature = $"static {Simplify(op.ReturnType)} operator {op.OperatorToken.Text}({FormatParams(op.ParameterList)})",
             Doc = GetXmlDoc(op),
-            IsStatic = true
+            IsStatic = true,
+            Params = GetParameters(op.ParameterList),
+            Results = GetResults(op.ReturnType),
+            IsDeprecated = GetDeprecationInfo(op.AttributeLists).IsDeprecated ? true : null,
+            DeprecatedMessage = GetDeprecationInfo(op.AttributeLists).DeprecatedMessage
         },
         ConversionOperatorDeclarationSyntax conv => new MemberInfo
         {
@@ -587,7 +643,11 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             Kind = "operator",
             Signature = $"static {conv.ImplicitOrExplicitKeyword.Text} operator {Simplify(conv.Type)}({FormatParams(conv.ParameterList)})",
             Doc = GetXmlDoc(conv),
-            IsStatic = true
+            IsStatic = true,
+            Params = GetParameters(conv.ParameterList),
+            Results = GetResults(conv.Type),
+            IsDeprecated = GetDeprecationInfo(conv.AttributeLists).IsDeprecated ? true : null,
+            DeprecatedMessage = GetDeprecationInfo(conv.AttributeLists).DeprecatedMessage
         },
         _ => null
     };
@@ -656,6 +716,90 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         var def = p.Default is not null ? $" = {(p.Default.Value.ToString().Length < 20 ? p.Default.Value.ToString() : "...")}" : "";
         return string.IsNullOrEmpty(mods) ? $"{type} {name}{def}" : $"{mods} {type} {name}{def}";
     }
+
+    private static IReadOnlyList<ParameterInfo>? GetParameters(ParameterListSyntax? parameterList)
+        => parameterList is null ? null : parameterList.Parameters.Select(ToParameterInfo).ToList();
+
+    private static IReadOnlyList<ParameterInfo>? GetParameters(BracketedParameterListSyntax? parameterList)
+        => parameterList is null ? null : parameterList.Parameters.Select(ToParameterInfo).ToList();
+
+    private static ParameterInfo ToParameterInfo(ParameterSyntax parameter)
+        => new()
+        {
+            Name = parameter.Identifier.Text,
+            Type = Simplify(parameter.Type),
+            Default = parameter.Default?.Value.ToString(),
+            Modifier = parameter.Modifiers.Count > 0 ? string.Join(" ", parameter.Modifiers.Select(m => m.Text)) : null,
+        };
+
+    private static IReadOnlyList<ResultInfo>? GetResults(TypeSyntax? returnType)
+    {
+        if (returnType is null)
+            return null;
+
+        if (returnType is PredefinedTypeSyntax predefined && predefined.Keyword.IsKind(SyntaxKind.VoidKeyword))
+            return null;
+
+        if (returnType is TupleTypeSyntax tuple)
+        {
+            return tuple.Elements
+                .Select(e => new ResultInfo
+                {
+                    Name = string.IsNullOrWhiteSpace(e.Identifier.Text) ? null : e.Identifier.Text,
+                    Type = Simplify(e.Type),
+                })
+                .ToList();
+        }
+
+        return
+        [
+            new ResultInfo
+            {
+                Type = Simplify(returnType),
+            },
+        ];
+    }
+
+    private static (bool IsDeprecated, string? DeprecatedMessage) GetDeprecationInfo(SyntaxList<AttributeListSyntax> attributes)
+    {
+        foreach (var attribute in attributes.SelectMany(a => a.Attributes))
+        {
+            var attributeName = attribute.Name.ToString();
+            if (!attributeName.EndsWith("Obsolete", StringComparison.Ordinal) &&
+                !attributeName.EndsWith("ObsoleteAttribute", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var message = attribute.ArgumentList?.Arguments.FirstOrDefault()?.ToString()?.Trim('"');
+            return (true, string.IsNullOrWhiteSpace(message) ? null : message);
+        }
+
+        return (false, null);
+    }
+
+    private static string BuildTypeId(string namespaceName, string typeName)
+        => string.IsNullOrWhiteSpace(namespaceName) ? typeName : $"{namespaceName}.{typeName}";
+
+    private static string BuildMemberId(string namespaceName, string typeName, string memberName)
+        => $"{BuildTypeId(namespaceName, typeName)}.{memberName}";
+
+    private static ApiIndex ApplyCrossLanguageIds(ApiIndex index, CrossLanguageMap map)
+        => index with
+        {
+            CrossLanguagePackageId = map.PackageId,
+            Namespaces = index.Namespaces.Select(ns => ns with
+            {
+                Types = ns.Types.Select(type => type with
+                {
+                    CrossLanguageId = type.Id is not null && map.Ids.TryGetValue(type.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                    Members = type.Members?.Select(member => member with
+                    {
+                        CrossLanguageId = member.Id is not null && map.Ids.TryGetValue(member.Id, out var memberCrossLanguageId) ? memberCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+            }).ToList(),
+        };
 
     /// <summary>
     /// Simplifies a type syntax by stripping well-known System namespace qualifiers.

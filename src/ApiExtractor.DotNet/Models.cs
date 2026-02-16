@@ -19,6 +19,10 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("version")]
     public string? Version { get; init; }
 
+    [JsonPropertyName("crossLanguagePackageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguagePackageId { get; init; }
+
     [JsonPropertyName("namespaces")]
     public IReadOnlyList<NamespaceInfo> Namespaces { get; init; } = [];
 
@@ -26,6 +30,9 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("dependencies")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
+
+    [JsonPropertyName("diagnostics")]
+    public IReadOnlyList<ApiDiagnostic> Diagnostics { get; init; } = [];
 
     public string ToJson(bool pretty = false) => pretty
         ? JsonSerializer.Serialize(this, JsonContext.Indented.ApiIndex)
@@ -45,6 +52,27 @@ public sealed record ApiIndex : IApiIndex
     public IEnumerable<TypeInfo> GetClientTypes() =>
         GetAllTypes().Where(t => t.IsClientType);
 
+    private static readonly HashSet<string> OperationKinds = new(StringComparer.OrdinalIgnoreCase) { "method", "ctor", "operator" };
+
+    public IEnumerable<DiagnosticTypeInfo> GetDiagnosticTypes() =>
+        GetAllTypes().Select(t => new DiagnosticTypeInfo
+        {
+            Name = t.Name,
+            Id = t.Id,
+            Doc = t.Doc,
+            EntryPoint = t.EntryPoint == true,
+            IsDeprecated = t.IsDeprecated == true,
+            Callables = (t.Members ?? [])
+                .Where(m => m.Kind is not null && OperationKinds.Contains(m.Kind))
+                .Select(m => new DiagnosticCallableInfo
+                {
+                    Name = m.Name,
+                    Id = m.Id,
+                    ParameterTypes = (m.Params ?? []).Select(p => p.Type).ToList(),
+                }).ToList(),
+        });
+
+    public IEnumerable<DiagnosticCallableInfo> GetTopLevelCallables() => [];
 }
 
 /// <summary>Information about types from a dependency package/assembly.</summary>
@@ -79,6 +107,14 @@ public record TypeInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("kind")]
     public string Kind { get; init; } = ""; // class, interface, struct, enum, record, delegate
 
@@ -101,6 +137,14 @@ public record TypeInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     [JsonPropertyName("members")]
     public IReadOnlyList<MemberInfo>? Members { get; init; }
@@ -197,11 +241,27 @@ public record MemberInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("kind")]
     public string Kind { get; init; } = ""; // ctor, method, property, field, event, indexer
 
     [JsonPropertyName("sig")]
     public string Signature { get; init; } = ""; // Compressed signature
+
+    [JsonPropertyName("params")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ParameterInfo>? Params { get; init; }
+
+    [JsonPropertyName("results")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ResultInfo>? Results { get; init; }
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
@@ -211,6 +271,41 @@ public record MemberInfo
 
     [JsonPropertyName("async")]
     public bool? IsAsync { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+}
+
+public sealed record ParameterInfo
+{
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("type")]
+    public required string Type { get; init; }
+
+    [JsonPropertyName("default")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Default { get; init; }
+
+    [JsonPropertyName("modifier")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Modifier { get; init; }
+}
+
+public sealed record ResultInfo
+{
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; init; }
+
+    [JsonPropertyName("type")]
+    public required string Type { get; init; }
 }
 
 [JsonSerializable(typeof(ApiIndex))]

@@ -43,7 +43,7 @@ public interface IPackageInfoService
     /// <param name="asJson">If true, returns JSON format; otherwise returns language stubs.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>API extraction result with the public API surface.</returns>
-    Task<ApiExtractionResult> ExtractPublicApiAsync(string packagePath, string? language = null, bool asJson = false, CancellationToken ct = default);
+    Task<ApiExtractionResult> ExtractPublicApiAsync(string packagePath, string? language = null, bool asJson = false, string? crossLanguageMetadataPath = null, CancellationToken ct = default);
 
     /// <summary>
     /// Analyzes API coverage in existing samples or tests.
@@ -116,6 +116,7 @@ public sealed class PackageInfoService : IPackageInfoService
         string packagePath,
         string? language = null,
         bool asJson = false,
+        string? crossLanguageMetadataPath = null,
         CancellationToken ct = default)
     {
         var sdkInfo = await SdkInfo.ScanAsync(packagePath, ct).ConfigureAwait(false);
@@ -158,7 +159,11 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
 
-        var result = await extractor.ExtractAsyncCore(sdkInfo.SourceFolder, ct).ConfigureAwait(false);
+        var crossLanguageMap = string.IsNullOrWhiteSpace(crossLanguageMetadataPath)
+            ? null
+            : CrossLanguageMetadata.Load(crossLanguageMetadataPath);
+
+        var result = await extractor.ExtractAsyncCore(sdkInfo.SourceFolder, crossLanguageMap, ct).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -182,7 +187,7 @@ public sealed class PackageInfoService : IPackageInfoService
             Package = apiIndex.Package,
             ApiSurface = asJson ? apiIndex.ToJson(pretty: true) : apiIndex.ToStubs(),
             Format = asJson ? "json" : "stubs",
-            Warnings = result.Warnings.ToArray()
+            Diagnostics = result.Diagnostics.ToArray()
         };
     }
 
@@ -244,7 +249,7 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
 
-        var extractResult = await extractor.ExtractAsyncCore(sdkInfo.SourceFolder, ct).ConfigureAwait(false);
+        var extractResult = await extractor.ExtractAsyncCore(sdkInfo.SourceFolder, null, ct).ConfigureAwait(false);
         if (!extractResult.IsSuccess)
         {
             var failure = (ExtractorResult.Failure)extractResult;
@@ -260,7 +265,11 @@ public sealed class PackageInfoService : IPackageInfoService
 
         // Analyze usage with the already-extracted API surface
         var usage = await analyzer.AnalyzeAsyncCore(effectiveSamplesPath, apiIndex, ct).ConfigureAwait(false);
-        var totalOperations = usage.CoveredOperations.Count + usage.UncoveredOperations.Count;
+        var deprecatedOps = GetDeprecatedOperations(apiIndex);
+        var uncoveredFiltered = usage.UncoveredOperations
+            .Where(o => !deprecatedOps.Contains((o.ClientType, o.Operation)))
+            .ToList();
+        var totalOperations = usage.CoveredOperations.Count + uncoveredFiltered.Count;
 
         var covered = usage.CoveredOperations
             .Select(o => new CoveredOperationInfo
@@ -272,7 +281,7 @@ public sealed class PackageInfoService : IPackageInfoService
             })
             .ToList();
 
-        var uncovered = usage.UncoveredOperations
+        var uncovered = uncoveredFiltered
             .Select(o => new UncoveredOperationInfo
             {
                 ClientType = o.ClientType,
@@ -296,6 +305,66 @@ public sealed class PackageInfoService : IPackageInfoService
             CoveredOperations = covered.ToArray(),
             UncoveredOperations = uncovered.ToArray()
         };
+    }
+
+    private static HashSet<(string ClientType, string Operation)> GetDeprecatedOperations(IApiIndex apiIndex)
+    {
+        HashSet<(string ClientType, string Operation)> result = [];
+
+        switch (apiIndex)
+        {
+            case ApiExtractor.DotNet.ApiIndex dotNetIndex:
+                foreach (var type in dotNetIndex.GetAllTypes())
+                {
+                    foreach (var member in type.Members?.Where(m => m.Kind == "method" && m.IsDeprecated == true) ?? [])
+                    {
+                        result.Add((type.Name, member.Name));
+                    }
+                }
+                break;
+
+            case ApiExtractor.TypeScript.ApiIndex typeScriptIndex:
+                foreach (var cls in typeScriptIndex.Modules.SelectMany(m => m.Classes ?? []))
+                {
+                    foreach (var method in cls.Methods?.Where(m => m.IsDeprecated == true) ?? [])
+                    {
+                        result.Add((cls.Name, method.Name));
+                    }
+                }
+                break;
+
+            case ApiExtractor.Python.ApiIndex pythonIndex:
+                foreach (var cls in pythonIndex.GetAllClasses())
+                {
+                    foreach (var method in cls.Methods?.Where(m => m.IsDeprecated == true) ?? [])
+                    {
+                        result.Add((cls.Name, method.Name));
+                    }
+                }
+                break;
+
+            case ApiExtractor.Java.ApiIndex javaIndex:
+                foreach (var type in javaIndex.GetAllTypes())
+                {
+                    foreach (var method in type.Methods?.Where(m => m.IsDeprecated == true) ?? [])
+                    {
+                        result.Add((type.Name, method.Name));
+                    }
+                }
+                break;
+
+            case ApiExtractor.Go.ApiIndex goIndex:
+                foreach (var st in goIndex.GetAllStructs())
+                {
+                    foreach (var method in st.Methods?.Where(m => m.IsDeprecated == true) ?? [])
+                    {
+                        result.Add((st.Name, method.Name));
+                    }
+                }
+                break;
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -740,7 +809,7 @@ public sealed record ApiExtractionResult
     public string? Package { get; init; }
     public string? ApiSurface { get; init; }
     public string? Format { get; init; }
-    public string[]? Warnings { get; init; }
+    public ApiDiagnostic[]? Diagnostics { get; init; }
 }
 
 /// <summary>Result of coverage analysis.</summary>
@@ -824,6 +893,7 @@ public sealed record UncoveredOperationInfo
 [JsonSerializable(typeof(CoverageBatchItem))]
 [JsonSerializable(typeof(CoveredOperationInfo[]))]
 [JsonSerializable(typeof(UncoveredOperationInfo[]))]
+[JsonSerializable(typeof(ApiDiagnostic[]))]
 public sealed partial class PackageInfoJsonContext : JsonSerializerContext
 {
 }

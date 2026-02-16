@@ -23,9 +23,36 @@ public static class JavaFormatter
     {
         var sb = new StringBuilder();
 
-        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        var deprecatedOperations = index.GetAllTypes()
+            .SelectMany(c => (c.Methods ?? [])
+                .Where(m => m.IsDeprecated == true)
+                .Select(m => (Client: c.Name, Method: m.Name)))
+            .ToHashSet();
+
+        var deprecatedUncovered = coverage.UncoveredOperations
+            .Where(op => deprecatedOperations.Contains((op.ClientType, op.Operation)))
+            .ToList();
+
+        var filteredCoverage = coverage with
+        {
+            UncoveredOperations = coverage.UncoveredOperations
+                .Where(op => !deprecatedOperations.Contains((op.ClientType, op.Operation)))
+                .ToList(),
+        };
+
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, filteredCoverage);
         if (uncoveredByClient is null)
             return sb.ToString();
+
+        if (deprecatedUncovered.Count > 0)
+        {
+            sb.AppendLine("// Deprecated API (intentionally excluded from uncovered generation targets):");
+            foreach (var op in deprecatedUncovered.OrderBy(o => o.ClientType).ThenBy(o => o.Operation))
+            {
+                sb.AppendLine($"//   {op.ClientType}.{op.Operation}");
+            }
+            sb.AppendLine();
+        }
 
         var allClasses = index.GetAllTypes().ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
@@ -279,6 +306,8 @@ public static class JavaFormatter
 
     private static void FormatType(StringBuilder sb, ClassInfo type, string keyword)
     {
+        if (type.IsDeprecated == true)
+            sb.AppendLine("@Deprecated");
         if (!string.IsNullOrEmpty(type.Doc))
             sb.AppendLine($"/** {type.Doc} */");
 
@@ -294,6 +323,8 @@ public static class JavaFormatter
         {
             foreach (var f in type.Fields)
             {
+                if (f.IsDeprecated == true)
+                    sb.AppendLine("    @Deprecated");
                 var fm = f.Modifiers is not null ? string.Join(" ", f.Modifiers) + " " : "";
                 var val = !string.IsNullOrEmpty(f.Value) ? $" = {f.Value}" : "";
                 sb.AppendLine($"    {fm}{f.Type} {f.Name}{val};");
@@ -322,6 +353,8 @@ public static class JavaFormatter
     {
         foreach (var e in enums)
         {
+            if (e.IsDeprecated == true)
+                sb.AppendLine("@Deprecated");
             if (!string.IsNullOrEmpty(e.Doc))
                 sb.AppendLine($"/** {e.Doc} */");
 
@@ -343,6 +376,8 @@ public static class JavaFormatter
 
     private static void FormatMethod(StringBuilder sb, string name, MethodInfo m, bool isCtor)
     {
+        if (m.IsDeprecated == true)
+            sb.AppendLine("    @Deprecated");
         if (!string.IsNullOrEmpty(m.Doc))
             sb.AppendLine($"    /** {m.Doc} */");
 

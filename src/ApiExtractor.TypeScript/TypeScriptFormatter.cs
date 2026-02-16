@@ -34,9 +34,37 @@ public static class TypeScriptFormatter
     {
         var sb = new StringBuilder();
 
-        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage);
+        var deprecatedOperations = index.Modules
+            .SelectMany(m => (m.Classes ?? [])
+                .SelectMany(c => (c.Methods ?? [])
+                    .Where(method => method.IsDeprecated == true)
+                    .Select(method => (Client: c.Name, Method: method.Name))))
+            .ToHashSet();
+
+        var deprecatedUncovered = coverage.UncoveredOperations
+            .Where(op => deprecatedOperations.Contains((op.ClientType, op.Operation)))
+            .ToList();
+
+        var filteredCoverage = coverage with
+        {
+            UncoveredOperations = coverage.UncoveredOperations
+                .Where(op => !deprecatedOperations.Contains((op.ClientType, op.Operation)))
+                .ToList(),
+        };
+
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, filteredCoverage);
         if (uncoveredByClient is null)
             return sb.ToString();
+
+        if (deprecatedUncovered.Count > 0)
+        {
+            sb.AppendLine("// Deprecated API (intentionally excluded from uncovered generation targets):");
+            foreach (var op in deprecatedUncovered.OrderBy(o => o.ClientType).ThenBy(o => o.Operation))
+            {
+                sb.AppendLine($"//   {op.ClientType}.{op.Operation}");
+            }
+            sb.AppendLine();
+        }
 
         var allClasses = index.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var classesWithUncovered = allClasses.Where(c => uncoveredByClient.ContainsKey(c.Name)).ToList();
@@ -501,6 +529,8 @@ public static class TypeScriptFormatter
     private static string FormatClass(ClassInfo cls, bool exportKeyword = true)
     {
         var sb = new StringBuilder();
+        if (cls.IsDeprecated == true)
+            sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(cls.DeprecatedMessage) ? "" : $" {cls.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(cls.Doc))
             sb.AppendLine($"/** {cls.Doc} */");
         var ext = !string.IsNullOrEmpty(cls.Extends) ? $" extends {cls.Extends}" : "";
@@ -511,6 +541,8 @@ public static class TypeScriptFormatter
 
         foreach (var prop in cls.Properties ?? [])
         {
+            if (prop.IsDeprecated == true)
+                sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(prop.DeprecatedMessage) ? "" : $" {prop.DeprecatedMessage}")} */");
             var opt = prop.Optional == true ? "?" : "";
             var ro = prop.Readonly == true ? "readonly " : "";
             sb.AppendLine($"    {ro}{prop.Name}{opt}: {prop.Type};");
@@ -518,11 +550,15 @@ public static class TypeScriptFormatter
 
         foreach (var ctor in cls.Constructors ?? [])
         {
+            if (ctor.IsDeprecated == true)
+                sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(ctor.DeprecatedMessage) ? "" : $" {ctor.DeprecatedMessage}")} */");
             sb.AppendLine($"    constructor({ctor.Sig});");
         }
 
         foreach (var m in cls.Methods ?? [])
         {
+            if (m.IsDeprecated == true)
+                sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(m.DeprecatedMessage) ? "" : $" {m.DeprecatedMessage}")} */");
             var async = m.Async == true ? "async " : "";
             var stat = m.Static == true ? "static " : "";
             var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : "";
@@ -542,6 +578,8 @@ public static class TypeScriptFormatter
     private static string FormatInterface(InterfaceInfo iface, bool exportKeyword = true)
     {
         var sb = new StringBuilder();
+        if (iface.IsDeprecated == true)
+            sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(iface.DeprecatedMessage) ? "" : $" {iface.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(iface.Doc))
             sb.AppendLine($"/** {iface.Doc} */");
         var ext = iface.Extends?.Count > 0 ? $" extends {string.Join(", ", iface.Extends)}" : "";
@@ -551,6 +589,8 @@ public static class TypeScriptFormatter
 
         foreach (var prop in iface.Properties ?? [])
         {
+            if (prop.IsDeprecated == true)
+                sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(prop.DeprecatedMessage) ? "" : $" {prop.DeprecatedMessage}")} */");
             var opt = prop.Optional == true ? "?" : "";
             var ro = prop.Readonly == true ? "readonly " : "";
             sb.AppendLine($"    {ro}{prop.Name}{opt}: {prop.Type};");
@@ -558,6 +598,8 @@ public static class TypeScriptFormatter
 
         foreach (var m in iface.Methods ?? [])
         {
+            if (m.IsDeprecated == true)
+                sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(m.DeprecatedMessage) ? "" : $" {m.DeprecatedMessage}")} */");
             var async = m.Async == true ? "async " : "";
             var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : "";
             sb.AppendLine($"    {async}{m.Name}({m.Sig}){ret};");
@@ -571,6 +613,8 @@ public static class TypeScriptFormatter
     private static string FormatEnum(EnumInfo e, bool exportKeyword = true)
     {
         var sb = new StringBuilder();
+        if (e.IsDeprecated == true)
+            sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(e.DeprecatedMessage) ? "" : $" {e.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(e.Doc))
             sb.AppendLine($"/** {e.Doc} */");
         var export = exportKeyword ? "export " : "";
@@ -585,6 +629,8 @@ public static class TypeScriptFormatter
     private static string FormatTypeAlias(TypeAliasInfo t, bool exportKeyword = true)
     {
         var sb = new StringBuilder();
+        if (t.IsDeprecated == true)
+            sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(t.DeprecatedMessage) ? "" : $" {t.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(t.Doc))
             sb.AppendLine($"/** {t.Doc} */");
         var export = exportKeyword ? "export " : "";
@@ -596,6 +642,8 @@ public static class TypeScriptFormatter
     private static string FormatFunction(FunctionInfo fn)
     {
         var sb = new StringBuilder();
+        if (fn.IsDeprecated == true)
+            sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(fn.DeprecatedMessage) ? "" : $" {fn.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(fn.Doc))
             sb.AppendLine($"/** {fn.Doc} */");
         var async = fn.Async == true ? "async " : "";

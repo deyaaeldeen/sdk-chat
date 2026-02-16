@@ -16,6 +16,10 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("version")]
     public string? Version { get; init; }
 
+    [JsonPropertyName("crossLanguagePackageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguagePackageId { get; init; }
+
     [JsonPropertyName("modules")]
     public IReadOnlyList<ModuleInfo> Modules { get; init; } = [];
 
@@ -23,6 +27,9 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("dependencies")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
+
+    [JsonPropertyName("diagnostics")]
+    public IReadOnlyList<ApiDiagnostic> Diagnostics { get; init; } = [];
 
     /// <summary>Gets all classes in the API.</summary>
     public IEnumerable<ClassInfo> GetAllClasses() =>
@@ -37,6 +44,83 @@ public sealed record ApiIndex : IApiIndex
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => TypeScriptFormatter.Format(this);
+
+    public IEnumerable<DiagnosticTypeInfo> GetDiagnosticTypes()
+    {
+        foreach (var m in Modules)
+        {
+            foreach (var c in m.Classes ?? [])
+            {
+                yield return new DiagnosticTypeInfo
+                {
+                    Name = c.Name,
+                    Id = c.Id,
+                    Doc = c.Doc,
+                    EntryPoint = c.EntryPoint == true,
+                    IsDeprecated = c.IsDeprecated == true,
+                    Callables = (c.Methods ?? []).Select(method => new DiagnosticCallableInfo
+                    {
+                        Name = method.Name,
+                        Id = method.Id,
+                        ParameterTypes = (method.Params ?? []).Select(p => p.Type).ToList(),
+                    }).Concat((c.Constructors ?? []).Select(ctor => new DiagnosticCallableInfo
+                    {
+                        Name = c.Name,
+                        Id = ctor.Id,
+                        ParameterTypes = (ctor.Params ?? []).Select(p => p.Type).ToList(),
+                    })).ToList(),
+                };
+            }
+
+            foreach (var i in m.Interfaces ?? [])
+            {
+                yield return new DiagnosticTypeInfo
+                {
+                    Name = i.Name,
+                    Id = i.Id,
+                    Doc = i.Doc,
+                    EntryPoint = i.EntryPoint == true,
+                    IsDeprecated = i.IsDeprecated == true,
+                    Callables = (i.Methods ?? []).Select(method => new DiagnosticCallableInfo
+                    {
+                        Name = method.Name,
+                        Id = method.Id,
+                        ParameterTypes = (method.Params ?? []).Select(p => p.Type).ToList(),
+                    }).ToList(),
+                };
+            }
+
+            foreach (var e in m.Enums ?? [])
+            {
+                yield return new DiagnosticTypeInfo
+                {
+                    Name = e.Name,
+                    Id = e.Id,
+                    Doc = e.Doc,
+                    IsDeprecated = e.IsDeprecated == true,
+                };
+            }
+
+            foreach (var t in m.Types ?? [])
+            {
+                yield return new DiagnosticTypeInfo
+                {
+                    Name = t.Name,
+                    Id = t.Id,
+                    Doc = t.Doc,
+                    IsDeprecated = t.IsDeprecated == true,
+                };
+            }
+        }
+    }
+
+    public IEnumerable<DiagnosticCallableInfo> GetTopLevelCallables() =>
+        Modules.SelectMany(m => (m.Functions ?? []).Select(f => new DiagnosticCallableInfo
+        {
+            Name = f.Name,
+            Id = f.Id,
+            ParameterTypes = (f.Params ?? []).Select(p => p.Type).ToList(),
+        }));
 }
 
 /// <summary>Information about types from a dependency package.</summary>
@@ -100,6 +184,14 @@ public sealed record ClassInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
 
@@ -122,6 +214,14 @@ public sealed record ClassInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     [JsonPropertyName("constructors")]
     public IReadOnlyList<ConstructorInfo>? Constructors { get; init; }
@@ -222,6 +322,14 @@ public sealed record InterfaceInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
 
@@ -241,6 +349,14 @@ public sealed record InterfaceInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     [JsonPropertyName("methods")]
     public IReadOnlyList<MethodInfo>? Methods { get; init; }
@@ -283,11 +399,27 @@ public sealed record EnumInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
+
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
     /// <summary>External package this type is re-exported from.</summary>
     [JsonPropertyName("reExportedFrom")]
     public string? ReExportedFrom { get; init; }
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     [JsonPropertyName("values")]
     public IReadOnlyList<string>? Values { get; init; }
@@ -299,6 +431,14 @@ public sealed record TypeAliasInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("type")]
     public string Type { get; init; } = "";
 
@@ -308,6 +448,14 @@ public sealed record TypeAliasInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     /// <summary>Gets type names referenced in this type alias definition.</summary>
     public void CollectReferencedTypes(HashSet<string> allTypeNames, HashSet<string> result)
@@ -324,6 +472,14 @@ public sealed record FunctionInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("entryPoint")]
     public bool? EntryPoint { get; init; }
 
@@ -336,7 +492,18 @@ public sealed record FunctionInfo
     public string? ReExportedFrom { get; init; }
 
     [JsonPropertyName("sig")]
-    public string Sig { get; init; } = "";
+    public string Sig
+    {
+        get => _sig ?? TypeScriptModelHelpers.BuildSignature(Params);
+        init => _sig = value;
+    }
+
+    [JsonIgnore]
+    private string? _sig;
+
+    [JsonPropertyName("params")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ParameterInfo>? Params { get; init; }
 
     [JsonPropertyName("ret")]
     public string? Ret { get; init; }
@@ -346,6 +513,14 @@ public sealed record FunctionInfo
 
     [JsonPropertyName("async")]
     public bool? Async { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 /// <summary>A method declaration.</summary>
@@ -354,8 +529,27 @@ public sealed record MethodInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("sig")]
-    public string Sig { get; init; } = "";
+    public string Sig
+    {
+        get => _sig ?? TypeScriptModelHelpers.BuildSignature(Params);
+        init => _sig = value;
+    }
+
+    [JsonIgnore]
+    private string? _sig;
+
+    [JsonPropertyName("params")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ParameterInfo>? Params { get; init; }
 
     [JsonPropertyName("ret")]
     public string? Ret { get; init; }
@@ -368,6 +562,14 @@ public sealed record MethodInfo
 
     [JsonPropertyName("static")]
     public bool? Static { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 /// <summary>A property declaration.</summary>
@@ -375,6 +577,14 @@ public sealed record PropertyInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
+
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
 
     [JsonPropertyName("type")]
     public string Type { get; init; } = "";
@@ -387,13 +597,84 @@ public sealed record PropertyInfo
 
     [JsonPropertyName("optional")]
     public bool? Optional { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 /// <summary>A constructor declaration.</summary>
 public sealed record ConstructorInfo
 {
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("sig")]
-    public string Sig { get; init; } = "";
+    public string Sig
+    {
+        get => _sig ?? TypeScriptModelHelpers.BuildSignature(Params);
+        init => _sig = value;
+    }
+
+    [JsonIgnore]
+    private string? _sig;
+
+    [JsonPropertyName("params")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ParameterInfo>? Params { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+}
+
+public sealed record ParameterInfo
+{
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("type")]
+    public required string Type { get; init; }
+
+    [JsonPropertyName("default")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Default { get; init; }
+
+    [JsonPropertyName("optional")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsOptional { get; init; }
+
+    [JsonPropertyName("rest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsRest { get; init; }
+}
+
+internal static class TypeScriptModelHelpers
+{
+    internal static string BuildSignature(IReadOnlyList<ParameterInfo>? parameters)
+        => parameters is null || parameters.Count == 0
+            ? ""
+            : string.Join(", ",
+                parameters.Select(p =>
+                {
+                    var rest = p.IsRest == true ? "..." : "";
+                    var optional = p.IsOptional == true ? "?" : "";
+                    var def = p.Default is not null ? $" = {p.Default}" : "";
+                    return $"{rest}{p.Name}{optional}: {p.Type}{def}";
+                }));
 }
 
 [JsonSourceGenerationOptions(

@@ -27,6 +27,8 @@ public class ExtractionCacheTests : IDisposable
     {
         public string ToJson(bool pretty = false) => $"{{\"package\":\"{Package}\"}}";
         public string ToStubs() => $"package {Package}";
+        public IEnumerable<DiagnosticTypeInfo> GetDiagnosticTypes() => [];
+        public IEnumerable<DiagnosticCallableInfo> GetTopLevelCallables() => [];
     }
 
     [Fact]

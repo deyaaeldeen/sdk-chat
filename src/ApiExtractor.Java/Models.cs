@@ -16,6 +16,10 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("version")]
     public string? Version { get; init; }
 
+    [JsonPropertyName("crossLanguagePackageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguagePackageId { get; init; }
+
     [JsonPropertyName("packages")]
     public IReadOnlyList<PackageInfo> Packages { get; init; } = [];
 
@@ -23,6 +27,9 @@ public sealed record ApiIndex : IApiIndex
     [JsonPropertyName("dependencies")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
+
+    [JsonPropertyName("diagnostics")]
+    public IReadOnlyList<ApiDiagnostic> Diagnostics { get; init; } = [];
 
     /// <summary>Gets all types (classes + interfaces + annotations) in the API.</summary>
     public IEnumerable<ClassInfo> GetAllTypes() =>
@@ -37,6 +44,50 @@ public sealed record ApiIndex : IApiIndex
         : JsonSerializer.Serialize(this, SourceGenerationContext.Default.ApiIndex);
 
     public string ToStubs() => JavaFormatter.Format(this);
+
+    public IEnumerable<DiagnosticTypeInfo> GetDiagnosticTypes()
+    {
+        foreach (var pkg in Packages)
+        {
+            foreach (var c in (pkg.Classes ?? []).Concat(pkg.Interfaces ?? []).Concat(pkg.Annotations ?? []))
+            {
+                yield return new DiagnosticTypeInfo
+                {
+                    Name = c.Name,
+                    Id = c.Id,
+                    Doc = c.Doc,
+                    EntryPoint = c.EntryPoint == true,
+                    IsDeprecated = c.IsDeprecated == true,
+                    Callables = (c.Methods ?? []).Concat(c.Constructors ?? [])
+                        .Select(m => new DiagnosticCallableInfo
+                        {
+                            Name = m.Name ?? c.Name,
+                            Id = m.Id,
+                            ParameterTypes = (m.Params ?? []).Select(p => p.Type).ToList(),
+                        }).ToList(),
+                };
+            }
+
+            foreach (var e in pkg.Enums ?? [])
+            {
+                yield return new DiagnosticTypeInfo
+                {
+                    Name = e.Name,
+                    Id = e.Id,
+                    Doc = e.Doc,
+                    IsDeprecated = e.IsDeprecated == true,
+                    Callables = (e.Methods ?? []).Select(m => new DiagnosticCallableInfo
+                    {
+                        Name = m.Name ?? e.Name,
+                        Id = m.Id,
+                        ParameterTypes = (m.Params ?? []).Select(p => p.Type).ToList(),
+                    }).ToList(),
+                };
+            }
+        }
+    }
+
+    public IEnumerable<DiagnosticCallableInfo> GetTopLevelCallables() => [];
 }
 
 /// <summary>Information about types from a dependency package.</summary>
@@ -93,6 +144,14 @@ public sealed record ClassInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     /// <summary>The kind of type: "class", "record", or "annotation". Null for classes/interfaces.</summary>
     [JsonPropertyName("kind")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -113,6 +172,14 @@ public sealed record ClassInfo
 
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 
     [JsonPropertyName("modifiers")]
     public IReadOnlyList<string>? Modifiers { get; init; }
@@ -238,6 +305,14 @@ public sealed record EnumInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("doc")]
     public string? Doc { get; init; }
 
@@ -246,6 +321,14 @@ public sealed record EnumInfo
 
     [JsonPropertyName("methods")]
     public IReadOnlyList<MethodInfo>? Methods { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 /// <summary>A method or constructor.</summary>
@@ -254,8 +337,27 @@ public sealed record MethodInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
+
     [JsonPropertyName("sig")]
-    public string Sig { get; init; } = "";
+    public string Sig
+    {
+        get => _sig ?? JavaModelHelpers.BuildSignature(Params);
+        init => _sig = value;
+    }
+
+    [JsonIgnore]
+    private string? _sig;
+
+    [JsonPropertyName("params")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ParameterInfo>? Params { get; init; }
 
     [JsonPropertyName("ret")]
     public string? Ret { get; init; }
@@ -271,6 +373,14 @@ public sealed record MethodInfo
 
     [JsonPropertyName("throws")]
     public IReadOnlyList<string>? Throws { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
 }
 
 /// <summary>A field or constant.</summary>
@@ -278,6 +388,14 @@ public sealed record FieldInfo
 {
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
+
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("crossLanguageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CrossLanguageId { get; init; }
 
     [JsonPropertyName("type")]
     public string Type { get; init; } = "";
@@ -290,6 +408,35 @@ public sealed record FieldInfo
 
     [JsonPropertyName("value")]
     public string? Value { get; init; }
+
+    [JsonPropertyName("deprecated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsDeprecated { get; init; }
+
+    [JsonPropertyName("deprecatedMsg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeprecatedMessage { get; init; }
+}
+
+public sealed record ParameterInfo
+{
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("type")]
+    public required string Type { get; init; }
+
+    [JsonPropertyName("varargs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsVarArgs { get; init; }
+}
+
+internal static class JavaModelHelpers
+{
+    internal static string BuildSignature(IReadOnlyList<ParameterInfo>? parameters)
+        => parameters is null || parameters.Count == 0
+            ? ""
+            : string.Join(", ", parameters.Select(p => $"{p.Type}{(p.IsVarArgs == true ? "..." : "")} {p.Name}"));
 }
 
 [JsonSourceGenerationOptions(

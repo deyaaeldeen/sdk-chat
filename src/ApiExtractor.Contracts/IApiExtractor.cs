@@ -7,7 +7,7 @@ namespace ApiExtractor.Contracts;
 /// Common interface for all API index types.
 /// Enables polymorphic handling of different language extractors.
 /// </summary>
-public interface IApiIndex
+public interface IApiIndex : IDiagnosticsSource
 {
     /// <summary>Gets the package name.</summary>
     string Package { get; }
@@ -17,6 +17,16 @@ public interface IApiIndex
 
     /// <summary>Formats the API index as human-readable language-native stubs.</summary>
     string ToStubs();
+
+    /// <summary>
+    /// Canonical cross-language package identifier, when available.
+    /// </summary>
+    string? CrossLanguagePackageId => null;
+
+    /// <summary>
+    /// Structured diagnostics emitted during extraction and post-processing.
+    /// </summary>
+    IReadOnlyList<ApiDiagnostic> Diagnostics => [];
 
     /// <summary>
     /// Strips language-specific generic/type-parameter suffixes from a type name to produce
@@ -49,7 +59,7 @@ public interface IApiExtractor
     /// <summary>
     /// Extracts the public API surface and returns a common result.
     /// </summary>
-    Task<ExtractorResult> ExtractAsyncCore(string rootPath, CancellationToken ct = default);
+    Task<ExtractorResult> ExtractAsyncCore(string rootPath, CrossLanguageMap? crossLanguageMap = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -62,7 +72,7 @@ public interface IApiExtractor<TIndex> : IApiExtractor where TIndex : class, IAp
     /// <summary>
     /// Extracts the public API surface from the specified directory.
     /// </summary>
-    Task<ExtractorResult<TIndex>> ExtractAsync(string rootPath, CancellationToken ct = default);
+    Task<ExtractorResult<TIndex>> ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap = null, CancellationToken ct = default);
 
     /// <summary>
     /// Formats the API index as JSON.
@@ -77,9 +87,9 @@ public interface IApiExtractor<TIndex> : IApiExtractor where TIndex : class, IAp
     /// <summary>
     /// Default implementation for non-generic extraction.
     /// </summary>
-    async Task<ExtractorResult> IApiExtractor.ExtractAsyncCore(string rootPath, CancellationToken ct)
+    async Task<ExtractorResult> IApiExtractor.ExtractAsyncCore(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
-        var result = await ExtractAsync(rootPath, ct).ConfigureAwait(false);
+        var result = await ExtractAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
         return result.ToBase();
     }
 }
@@ -94,8 +104,8 @@ public abstract record ExtractorResult
     /// <summary>True if extraction succeeded.</summary>
     public abstract bool IsSuccess { get; }
 
-    /// <summary>Non-fatal warnings encountered during extraction.</summary>
-    public IReadOnlyList<string> Warnings { get; init; } = [];
+    /// <summary>Structured diagnostics encountered during extraction.</summary>
+    public IReadOnlyList<ApiDiagnostic> Diagnostics { get; init; } = [];
 
     /// <summary>Gets the API index or throws if failed.</summary>
     public abstract IApiIndex GetValueOrThrow();
@@ -126,8 +136,8 @@ public abstract record ExtractorResult<T> where T : class, IApiIndex
     /// <summary>True if extraction succeeded.</summary>
     public abstract bool IsSuccess { get; }
 
-    /// <summary>Non-fatal warnings encountered during extraction.</summary>
-    public IReadOnlyList<string> Warnings { get; init; } = [];
+    /// <summary>Structured diagnostics encountered during extraction.</summary>
+    public IReadOnlyList<ApiDiagnostic> Diagnostics { get; init; } = [];
 
     /// <summary>Gets the value or throws if failed.</summary>
     public abstract T GetValueOrThrow();
@@ -140,7 +150,7 @@ public abstract record ExtractorResult<T> where T : class, IApiIndex
     {
         public override bool IsSuccess => true;
         public override T GetValueOrThrow() => Value;
-        public override ExtractorResult ToBase() => new ExtractorResult.Success(Value) { Warnings = Warnings };
+        public override ExtractorResult ToBase() => new ExtractorResult.Success(Value) { Diagnostics = Diagnostics };
     }
 
     /// <summary>Failed extraction result.</summary>
@@ -148,12 +158,12 @@ public abstract record ExtractorResult<T> where T : class, IApiIndex
     {
         public override bool IsSuccess => false;
         public override T GetValueOrThrow() => throw new InvalidOperationException(Error);
-        public override ExtractorResult ToBase() => new ExtractorResult.Failure(Error) { Warnings = Warnings };
+        public override ExtractorResult ToBase() => new ExtractorResult.Failure(Error) { Diagnostics = Diagnostics };
     }
 
     /// <summary>Creates a successful result.</summary>
-    public static ExtractorResult<T> CreateSuccess(T value, IReadOnlyList<string>? warnings = null)
-        => new Success(value) { Warnings = warnings ?? [] };
+    public static ExtractorResult<T> CreateSuccess(T value, IReadOnlyList<ApiDiagnostic>? diagnostics = null)
+        => new Success(value) { Diagnostics = diagnostics ?? [] };
 
     /// <summary>Creates a failure result.</summary>
     public static ExtractorResult<T> CreateFailure(string error)

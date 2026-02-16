@@ -57,15 +57,15 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
     public string ToStubs(ApiIndex index) => PythonFormatter.Format(index);
 
     /// <inheritdoc />
-    async Task<ExtractorResult<ApiIndex>> IApiExtractor<ApiIndex>.ExtractAsync(string rootPath, CancellationToken ct)
+    async Task<ExtractorResult<ApiIndex>> IApiExtractor<ApiIndex>.ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         if (!IsAvailable())
             return ExtractorResult<ApiIndex>.CreateFailure(UnavailableReason ?? "Python not available");
 
         try
         {
-            var (index, warnings) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
-            return ExtractorResult<ApiIndex>.CreateSuccess(index, warnings);
+            var (index, diagnostics) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+            return ExtractorResult<ApiIndex>.CreateSuccess(index, diagnostics);
         }
         catch (Exception ex)
         {
@@ -73,16 +73,19 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         }
     }
 
-    public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+    public Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+        => ExtractAsync(rootPath, null, ct);
+
+    public async Task<ApiIndex> ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
     {
-        var (index, _) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
+        var (index, _) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
         return index;
     }
 
     /// <summary>
     /// Shared extraction logic that returns both the API index and any stderr warnings.
     /// </summary>
-    private async Task<(ApiIndex Index, IReadOnlyList<string> Warnings)> ExtractCoreAsync(string rootPath, CancellationToken ct)
+    private async Task<(ApiIndex Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
@@ -149,14 +152,132 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
         var apiIndex = ConvertToApiIndex(raw);
         ExtractorTelemetry.RecordResult(activity, true, apiIndex.Modules.Count);
-        var warnings = ParseStderrWarnings(result.StandardError);
-        return (apiIndex, warnings);
+        var stderrDiagnostics = ParseStderrDiagnostics(result.StandardError);
+        var finalized = FinalizeIndex(apiIndex, crossLanguageMap, stderrDiagnostics);
+        return (finalized, finalized.Diagnostics ?? []);
     }
 
-    private static IReadOnlyList<string> ParseStderrWarnings(string? stderr)
+    private static ApiIndex FinalizeIndex(ApiIndex index, CrossLanguageMap? crossLanguageMap, IReadOnlyList<ApiDiagnostic> upstreamDiagnostics)
+    {
+        var withIds = EnsureIds(index);
+        var withCrossLanguage = crossLanguageMap is null ? withIds : ApplyCrossLanguageIds(withIds, crossLanguageMap);
+        var diagnostics = ApiDiagnosticsPostProcessor.Build(withCrossLanguage, upstreamDiagnostics);
+        return withCrossLanguage with { Diagnostics = diagnostics };
+    }
+
+    private static ApiIndex EnsureIds(ApiIndex index)
+        => index with
+        {
+            Modules = index.Modules.Select(module => module with
+            {
+                Classes = module.Classes?.Select(cls =>
+                {
+                    var typeId = cls.Id ?? BuildTypeId(module.Name, cls.Name);
+                    return cls with
+                    {
+                        Id = typeId,
+                        Methods = cls.Methods?.Select(method => method with
+                        {
+                            Id = method.Id ?? BuildMemberId(typeId, method.Name),
+                        }).ToList(),
+                        Properties = cls.Properties?.Select(property => property with
+                        {
+                            Id = property.Id ?? BuildMemberId(typeId, property.Name),
+                        }).ToList(),
+                    };
+                }).ToList(),
+                Functions = module.Functions?.Select(function => function with
+                {
+                    Id = function.Id ?? BuildTypeId(module.Name, function.Name),
+                }).ToList(),
+            }).ToList(),
+            Dependencies = index.Dependencies?.Select(dependency => dependency with
+            {
+                Classes = dependency.Classes?.Select(cls =>
+                {
+                    var typeId = cls.Id ?? BuildTypeId(dependency.Package, cls.Name);
+                    return cls with
+                    {
+                        Id = typeId,
+                        Methods = cls.Methods?.Select(method => method with
+                        {
+                            Id = method.Id ?? BuildMemberId(typeId, method.Name),
+                        }).ToList(),
+                        Properties = cls.Properties?.Select(property => property with
+                        {
+                            Id = property.Id ?? BuildMemberId(typeId, property.Name),
+                        }).ToList(),
+                    };
+                }).ToList(),
+                Functions = dependency.Functions?.Select(function => function with
+                {
+                    Id = function.Id ?? BuildTypeId(dependency.Package, function.Name),
+                }).ToList(),
+            }).ToList(),
+        };
+
+    private static ApiIndex ApplyCrossLanguageIds(ApiIndex index, CrossLanguageMap map)
+        => index with
+        {
+            CrossLanguagePackageId = map.PackageId,
+            Modules = index.Modules.Select(module => module with
+            {
+                Classes = module.Classes?.Select(cls => cls with
+                {
+                    CrossLanguageId = cls.Id is not null && map.Ids.TryGetValue(cls.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                    Methods = cls.Methods?.Select(method => method with
+                    {
+                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
+                    }).ToList(),
+                    Properties = cls.Properties?.Select(property => property with
+                    {
+                        CrossLanguageId = property.Id is not null && map.Ids.TryGetValue(property.Id, out var propertyCrossLanguageId) ? propertyCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+                Functions = module.Functions?.Select(function => function with
+                {
+                    CrossLanguageId = function.Id is not null && map.Ids.TryGetValue(function.Id, out var functionCrossLanguageId) ? functionCrossLanguageId : null,
+                }).ToList(),
+            }).ToList(),
+            Dependencies = index.Dependencies?.Select(dependency => dependency with
+            {
+                Classes = dependency.Classes?.Select(cls => cls with
+                {
+                    CrossLanguageId = cls.Id is not null && map.Ids.TryGetValue(cls.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                    Methods = cls.Methods?.Select(method => method with
+                    {
+                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
+                    }).ToList(),
+                    Properties = cls.Properties?.Select(property => property with
+                    {
+                        CrossLanguageId = property.Id is not null && map.Ids.TryGetValue(property.Id, out var propertyCrossLanguageId) ? propertyCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+                Functions = dependency.Functions?.Select(function => function with
+                {
+                    CrossLanguageId = function.Id is not null && map.Ids.TryGetValue(function.Id, out var functionCrossLanguageId) ? functionCrossLanguageId : null,
+                }).ToList(),
+            }).ToList(),
+        };
+
+    private static string BuildTypeId(string? moduleName, string typeName)
+        => string.IsNullOrWhiteSpace(moduleName) ? typeName : $"{moduleName}.{typeName}";
+
+    private static string BuildMemberId(string typeId, string memberName)
+        => $"{typeId}.{memberName}";
+
+    private static IReadOnlyList<ApiDiagnostic> ParseStderrDiagnostics(string? stderr)
         => string.IsNullOrWhiteSpace(stderr)
             ? []
-            : stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            : stderr
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(text => new ApiDiagnostic
+                {
+                    Id = "SDKWARN",
+                    Text = text,
+                    Level = DiagnosticLevel.Warning,
+                })
+                .ToList();
 
     private static string GetScriptPath()
     {
@@ -171,6 +292,15 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
 
     private static ApiIndex ConvertToApiIndex(RawPythonApiIndex raw)
     {
+        static IReadOnlyList<ParameterInfo>? MapParameters(IReadOnlyList<RawPythonParameter>? parameters)
+            => parameters?.Select(p => new ParameterInfo
+            {
+                Name = p.Name ?? "",
+                Type = p.Type,
+                Default = p.Default,
+                Kind = p.Kind,
+            }).ToList();
+
         var modules = raw.Modules?.Select(m => new ModuleInfo(
             m.Name ?? "",
             m.Classes?.Select(c => new ClassInfo
@@ -180,16 +310,29 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 ReExportedFrom = c.ReExportedFrom,
                 Base = c.Base,
                 Doc = c.Doc,
-                Methods = c.Methods?.Select(mt => new MethodInfo(
-                    mt.Name ?? "",
-                    mt.Sig ?? "",
-                    mt.Doc,
-                    mt.Async,
-                    mt.Classmethod,
-                    mt.Staticmethod,
-                    mt.Ret
-                )).ToList(),
-                Properties = c.Properties?.Select(p => new PropertyInfo(p.Name ?? "", p.Type, p.Doc)).ToList()
+                IsDeprecated = c.Deprecated,
+                DeprecatedMessage = c.DeprecatedMsg,
+                Methods = c.Methods?.Select(mt => new MethodInfo
+                {
+                    Name = mt.Name ?? "",
+                    Signature = mt.Sig ?? "",
+                    Params = MapParameters(mt.Params),
+                    Doc = mt.Doc,
+                    IsAsync = mt.Async,
+                    IsClassMethod = mt.Classmethod,
+                    IsStaticMethod = mt.Staticmethod,
+                    Ret = mt.Ret,
+                    IsDeprecated = mt.Deprecated,
+                    DeprecatedMessage = mt.DeprecatedMsg,
+                }).ToList(),
+                Properties = c.Properties?.Select(p => new PropertyInfo
+                {
+                    Name = p.Name ?? "",
+                    Type = p.Type,
+                    Doc = p.Doc,
+                    IsDeprecated = p.Deprecated,
+                    DeprecatedMessage = p.DeprecatedMsg,
+                }).ToList()
             }).ToList(),
             m.Functions?.Select(f => new FunctionInfo
             {
@@ -197,9 +340,12 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 EntryPoint = f.EntryPoint,
                 ReExportedFrom = f.ReExportedFrom,
                 Signature = f.Sig ?? "",
+                Params = MapParameters(f.Params),
                 Doc = f.Doc,
                 Ret = f.Ret,
-                IsAsync = f.Async
+                IsAsync = f.Async,
+                IsDeprecated = f.Deprecated,
+                DeprecatedMessage = f.DeprecatedMsg,
             }).ToList()
         )).ToList() ?? [];
 
@@ -211,24 +357,40 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
                 Name = c.Name ?? "",
                 Base = c.Base,
                 Doc = c.Doc,
-                Methods = c.Methods?.Select(mt => new MethodInfo(
-                    mt.Name ?? "",
-                    mt.Sig ?? "",
-                    mt.Doc,
-                    mt.Async,
-                    mt.Classmethod,
-                    mt.Staticmethod,
-                    mt.Ret
-                )).ToList(),
-                Properties = c.Properties?.Select(p => new PropertyInfo(p.Name ?? "", p.Type, p.Doc)).ToList()
+                IsDeprecated = c.Deprecated,
+                DeprecatedMessage = c.DeprecatedMsg,
+                Methods = c.Methods?.Select(mt => new MethodInfo
+                {
+                    Name = mt.Name ?? "",
+                    Signature = mt.Sig ?? "",
+                    Params = MapParameters(mt.Params),
+                    Doc = mt.Doc,
+                    IsAsync = mt.Async,
+                    IsClassMethod = mt.Classmethod,
+                    IsStaticMethod = mt.Staticmethod,
+                    Ret = mt.Ret,
+                    IsDeprecated = mt.Deprecated,
+                    DeprecatedMessage = mt.DeprecatedMsg,
+                }).ToList(),
+                Properties = c.Properties?.Select(p => new PropertyInfo
+                {
+                    Name = p.Name ?? "",
+                    Type = p.Type,
+                    Doc = p.Doc,
+                    IsDeprecated = p.Deprecated,
+                    DeprecatedMessage = p.DeprecatedMsg,
+                }).ToList()
             }).ToList(),
             Functions = d.Functions?.Select(f => new FunctionInfo
             {
                 Name = f.Name ?? "",
                 Signature = f.Sig ?? "",
+                Params = MapParameters(f.Params),
                 Doc = f.Doc,
                 Ret = f.Ret,
-                IsAsync = f.Async
+                IsAsync = f.Async,
+                IsDeprecated = f.Deprecated,
+                DeprecatedMessage = f.DeprecatedMsg,
             }).ToList()
         }).ToList();
 

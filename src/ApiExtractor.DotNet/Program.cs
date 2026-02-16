@@ -19,7 +19,7 @@ if (!Directory.Exists(options.Path))
 }
 
 var extractor = new CSharpApiExtractor();
-var result = await ((IApiExtractor<ApiIndex>)extractor).ExtractAsync(options.Path, CancellationToken.None);
+var result = await ((IApiExtractor<ApiIndex>)extractor).ExtractAsync(options.Path, ct: CancellationToken.None);
 
 if (result is ExtractorResult<ApiIndex>.Failure failure)
 {

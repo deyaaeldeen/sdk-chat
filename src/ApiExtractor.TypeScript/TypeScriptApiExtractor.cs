@@ -53,7 +53,7 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     public string ToStubs(ApiIndex index) => TypeScriptFormatter.Format(index);
 
     /// <inheritdoc />
-    async Task<ExtractorResult<ApiIndex>> IApiExtractor<ApiIndex>.ExtractAsync(string rootPath, CancellationToken ct)
+    async Task<ExtractorResult<ApiIndex>> IApiExtractor<ApiIndex>.ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         if (!IsAvailable())
             return ExtractorResult<ApiIndex>.CreateFailure(UnavailableReason ?? "Node.js not available");
@@ -61,11 +61,11 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
         using var activity = ExtractorTelemetry.StartExtraction(Language, rootPath);
         try
         {
-            var (result, warnings) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
+            var (result, diagnostics) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
             if (result is not null)
             {
                 ExtractorTelemetry.RecordResult(activity, true, result.Modules.Count);
-                return ExtractorResult<ApiIndex>.CreateSuccess(result, warnings);
+                return ExtractorResult<ApiIndex>.CreateSuccess(result, diagnostics);
             }
             ExtractorTelemetry.RecordResult(activity, false, error: "No API surface extracted");
             return ExtractorResult<ApiIndex>.CreateFailure("No API surface extracted");
@@ -81,35 +81,172 @@ public class TypeScriptApiExtractor : IApiExtractor<ApiIndex>
     /// Extract API from a TypeScript package directory.
     /// Prefers pre-compiled binary from build, falls back to Node.js runtime.
     /// </summary>
-    public async Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+    public Task<ApiIndex> ExtractAsync(string rootPath, CancellationToken ct = default)
+        => ExtractAsync(rootPath, null, ct);
+
+    public async Task<ApiIndex> ExtractAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
     {
-        var (index, _) = await ExtractCoreAsync(rootPath, ct).ConfigureAwait(false);
+        var (index, _) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
         return index ?? throw new InvalidOperationException("TypeScript extraction returned no API surface.");
     }
 
     /// <summary>
     /// Shared extraction logic that returns both the API index and any stderr warnings.
     /// </summary>
-    private async Task<(ApiIndex? Index, IReadOnlyList<string> Warnings)> ExtractCoreAsync(string rootPath, CancellationToken ct)
+    private async Task<(ApiIndex? Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         var result = await RunExtractorAsync("--json", rootPath, ct).ConfigureAwait(false);
-        var warnings = ParseStderrWarnings(result.StandardError);
+        var diagnostics = ParseStderrDiagnostics(result.StandardError);
 
         if (string.IsNullOrWhiteSpace(result.StandardOutput))
-            return (null, warnings);
+            return (null, diagnostics);
 
         if (result.OutputTruncated)
             throw new InvalidOperationException(
                 "TypeScript extractor output was truncated (exceeded output size limit). " +
                 "The target package may be too large for extraction.");
 
-        return (JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex), warnings);
+        var index = JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+        if (index is null)
+        {
+            return (null, diagnostics);
+        }
+
+        var finalized = FinalizeIndex(index, crossLanguageMap, diagnostics);
+        return (finalized, finalized.Diagnostics);
     }
 
-    private static IReadOnlyList<string> ParseStderrWarnings(string? stderr)
+    private static ApiIndex FinalizeIndex(ApiIndex index, CrossLanguageMap? crossLanguageMap, IReadOnlyList<ApiDiagnostic> upstreamDiagnostics)
+    {
+        var withIds = EnsureIds(index);
+        var withCrossLanguage = crossLanguageMap is null ? withIds : ApplyCrossLanguageIds(withIds, crossLanguageMap);
+        var diagnostics = ApiDiagnosticsPostProcessor.Build(withCrossLanguage, upstreamDiagnostics);
+        return withCrossLanguage with { Diagnostics = diagnostics };
+    }
+
+    private static ApiIndex EnsureIds(ApiIndex index)
+        => index with
+        {
+            Modules = index.Modules.Select(module => module with
+            {
+                Classes = module.Classes?.Select(cls =>
+                {
+                    var typeId = cls.Id ?? BuildTypeId(index.Package, cls.Name);
+                    return cls with
+                    {
+                        Id = typeId,
+                        Constructors = cls.Constructors?.Select(ctor => ctor with
+                        {
+                            Id = ctor.Id ?? BuildMemberId(typeId, "constructor"),
+                        }).ToList(),
+                        Methods = cls.Methods?.Select(method => method with
+                        {
+                            Id = method.Id ?? BuildMemberId(typeId, method.Name),
+                        }).ToList(),
+                        Properties = cls.Properties?.Select(property => property with
+                        {
+                            Id = property.Id ?? BuildMemberId(typeId, property.Name),
+                        }).ToList(),
+                    };
+                }).ToList(),
+                Interfaces = module.Interfaces?.Select(iface =>
+                {
+                    var typeId = iface.Id ?? BuildTypeId(index.Package, iface.Name);
+                    return iface with
+                    {
+                        Id = typeId,
+                        Methods = iface.Methods?.Select(method => method with
+                        {
+                            Id = method.Id ?? BuildMemberId(typeId, method.Name),
+                        }).ToList(),
+                        Properties = iface.Properties?.Select(property => property with
+                        {
+                            Id = property.Id ?? BuildMemberId(typeId, property.Name),
+                        }).ToList(),
+                    };
+                }).ToList(),
+                Enums = module.Enums?.Select(en => en with
+                {
+                    Id = en.Id ?? BuildTypeId(index.Package, en.Name),
+                }).ToList(),
+                Types = module.Types?.Select(type => type with
+                {
+                    Id = type.Id ?? BuildTypeId(index.Package, type.Name),
+                }).ToList(),
+                Functions = module.Functions?.Select(function => function with
+                {
+                    Id = function.Id ?? BuildTypeId(index.Package, function.Name),
+                }).ToList(),
+            }).ToList(),
+        };
+
+    private static ApiIndex ApplyCrossLanguageIds(ApiIndex index, CrossLanguageMap map)
+        => index with
+        {
+            CrossLanguagePackageId = map.PackageId,
+            Modules = index.Modules.Select(module => module with
+            {
+                Classes = module.Classes?.Select(cls => cls with
+                {
+                    CrossLanguageId = cls.Id is not null && map.Ids.TryGetValue(cls.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                    Constructors = cls.Constructors?.Select(ctor => ctor with
+                    {
+                        CrossLanguageId = ctor.Id is not null && map.Ids.TryGetValue(ctor.Id, out var ctorCrossLanguageId) ? ctorCrossLanguageId : null,
+                    }).ToList(),
+                    Methods = cls.Methods?.Select(method => method with
+                    {
+                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
+                    }).ToList(),
+                    Properties = cls.Properties?.Select(property => property with
+                    {
+                        CrossLanguageId = property.Id is not null && map.Ids.TryGetValue(property.Id, out var propertyCrossLanguageId) ? propertyCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+                Interfaces = module.Interfaces?.Select(iface => iface with
+                {
+                    CrossLanguageId = iface.Id is not null && map.Ids.TryGetValue(iface.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                    Methods = iface.Methods?.Select(method => method with
+                    {
+                        CrossLanguageId = method.Id is not null && map.Ids.TryGetValue(method.Id, out var methodCrossLanguageId) ? methodCrossLanguageId : null,
+                    }).ToList(),
+                    Properties = iface.Properties?.Select(property => property with
+                    {
+                        CrossLanguageId = property.Id is not null && map.Ids.TryGetValue(property.Id, out var propertyCrossLanguageId) ? propertyCrossLanguageId : null,
+                    }).ToList(),
+                }).ToList(),
+                Enums = module.Enums?.Select(en => en with
+                {
+                    CrossLanguageId = en.Id is not null && map.Ids.TryGetValue(en.Id, out var enumCrossLanguageId) ? enumCrossLanguageId : null,
+                }).ToList(),
+                Types = module.Types?.Select(type => type with
+                {
+                    CrossLanguageId = type.Id is not null && map.Ids.TryGetValue(type.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
+                }).ToList(),
+                Functions = module.Functions?.Select(function => function with
+                {
+                    CrossLanguageId = function.Id is not null && map.Ids.TryGetValue(function.Id, out var functionCrossLanguageId) ? functionCrossLanguageId : null,
+                }).ToList(),
+            }).ToList(),
+        };
+
+    private static string BuildTypeId(string packageName, string typeName)
+        => string.IsNullOrWhiteSpace(packageName) ? typeName : $"{packageName}.{typeName}";
+
+    private static string BuildMemberId(string typeId, string memberName)
+        => $"{typeId}.{memberName}";
+
+    private static IReadOnlyList<ApiDiagnostic> ParseStderrDiagnostics(string? stderr)
         => string.IsNullOrWhiteSpace(stderr)
             ? []
-            : stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            : stderr
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(text => new ApiDiagnostic
+                {
+                    Id = "SDKWARN",
+                    Text = text,
+                    Level = DiagnosticLevel.Warning,
+                })
+                .ToList();
 
     /// <summary>
     /// Extract and format as TypeScript stub syntax.

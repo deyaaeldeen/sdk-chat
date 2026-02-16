@@ -26,7 +26,7 @@ if (!extractor.IsAvailable())
     return 1;
 }
 
-var result = await ((IApiExtractor<ApiIndex>)extractor).ExtractAsync(options.Path, CancellationToken.None);
+var result = await ((IApiExtractor<ApiIndex>)extractor).ExtractAsync(options.Path, ct: CancellationToken.None);
 
 if (result is ExtractorResult<ApiIndex>.Failure failure)
 {

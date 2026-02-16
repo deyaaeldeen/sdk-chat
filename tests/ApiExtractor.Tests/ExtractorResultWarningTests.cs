@@ -8,66 +8,73 @@ using Xunit;
 namespace ApiExtractor.Tests;
 
 /// <summary>
-/// Tests for ExtractorResult warning propagation in IApiExtractor implementations.
-/// Validates that stderr output from external extractors is surfaced as warnings.
+/// Tests for ExtractorResult diagnostic propagation in IApiExtractor implementations.
+/// Validates that stderr output from external extractors is surfaced as structured diagnostics.
 /// </summary>
 public class ExtractorResultWarningTests
 {
     [Fact]
-    public void CreateSuccess_WithWarnings_PreservesWarningList()
+    public void CreateSuccess_WithDiagnostics_PreservesDiagnosticsList()
     {
         var index = new ApiIndex { Package = "test" };
-        var warnings = new List<string> { "deprecation warning: foo", "info: bar" };
-        var result = ExtractorResult<ApiIndex>.CreateSuccess(index, warnings);
+        var diagnostics = new List<ApiDiagnostic>
+        {
+            new() { Id = "SDKWARN", Text = "deprecation warning: foo", Level = DiagnosticLevel.Warning },
+            new() { Id = "SDKINFO", Text = "info: bar", Level = DiagnosticLevel.Info },
+        };
+        var result = ExtractorResult<ApiIndex>.CreateSuccess(index, diagnostics);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(index, result.GetValueOrThrow());
-        Assert.Equal(2, result.Warnings.Count);
-        Assert.Contains("deprecation warning: foo", result.Warnings);
-        Assert.Contains("info: bar", result.Warnings);
+        Assert.Equal(2, result.Diagnostics.Count);
+        Assert.Contains(result.Diagnostics, d => d.Text == "deprecation warning: foo");
+        Assert.Contains(result.Diagnostics, d => d.Text == "info: bar");
     }
 
     [Fact]
-    public void CreateSuccess_WithNullWarnings_DefaultsToEmpty()
+    public void CreateSuccess_WithNullDiagnostics_DefaultsToEmpty()
     {
         var index = new ApiIndex { Package = "test" };
         var result = ExtractorResult<ApiIndex>.CreateSuccess(index, null);
 
         Assert.True(result.IsSuccess);
-        Assert.Empty(result.Warnings);
+        Assert.Empty(result.Diagnostics);
     }
 
     [Fact]
-    public void CreateSuccess_WithoutWarnings_DefaultsToEmpty()
+    public void CreateSuccess_WithoutDiagnostics_DefaultsToEmpty()
     {
         var index = new ApiIndex { Package = "test" };
         var result = ExtractorResult<ApiIndex>.CreateSuccess(index);
 
         Assert.True(result.IsSuccess);
-        Assert.Empty(result.Warnings);
+        Assert.Empty(result.Diagnostics);
     }
 
     [Fact]
-    public void CreateFailure_HasNoWarningsByDefault()
+    public void CreateFailure_HasNoDiagnosticsByDefault()
     {
         var result = ExtractorResult<ApiIndex>.CreateFailure("error");
 
         Assert.False(result.IsSuccess);
-        Assert.Empty(result.Warnings);
+        Assert.Empty(result.Diagnostics);
     }
 
     [Fact]
-    public void ToBase_PreservesWarnings()
+    public void ToBase_PreservesDiagnostics()
     {
         var index = new ApiIndex { Package = "test" };
-        var warnings = new List<string> { "warning 1" };
-        var result = ExtractorResult<ApiIndex>.CreateSuccess(index, warnings);
+        var diagnostics = new List<ApiDiagnostic>
+        {
+            new() { Id = "SDKWARN", Text = "warning 1", Level = DiagnosticLevel.Warning },
+        };
+        var result = ExtractorResult<ApiIndex>.CreateSuccess(index, diagnostics);
 
         var baseResult = result.ToBase();
 
         Assert.True(baseResult.IsSuccess);
-        Assert.Single(baseResult.Warnings);
-        Assert.Equal("warning 1", baseResult.Warnings[0]);
+        Assert.Single(baseResult.Diagnostics);
+        Assert.Equal("warning 1", baseResult.Diagnostics[0].Text);
     }
 
     [Fact]

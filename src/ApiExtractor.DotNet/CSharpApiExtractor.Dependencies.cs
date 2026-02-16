@@ -26,7 +26,7 @@ public partial class CSharpApiExtractor
     private static volatile IReadOnlyList<MetadataReference>? s_cachedMetadataReferences;
 
     /// <summary>
-    /// Returns the metadata references loaded during the last <see cref="ExtractAsync"/> call,
+    /// Returns the metadata references loaded during the last <see cref="ExtractAsync(string, CrossLanguageMap?, CancellationToken)"/> call,
     /// or <c>null</c> if extraction has not run yet. Includes runtime assemblies and NuGet
     /// package DLLs, giving the usage analyzer full type resolution for SDK types.
     /// </summary>
@@ -292,8 +292,8 @@ public partial class CSharpApiExtractor
         if (definedTypes.Contains(typeName) || definedTypes.Contains(fullName)) return;
 
         // Add to external types — prefer resolved types over error type entries
-        if (!externalTypes.ContainsKey(typeName) ||
-            externalTypes[typeName].Item1.TypeKind == TypeKind.Error)
+        if (!externalTypes.TryGetValue(typeName, out var existing) ||
+            existing.Item1.TypeKind == TypeKind.Error)
         {
             externalTypes[typeName] = (typeSymbol, assemblyName);
         }
@@ -356,17 +356,27 @@ public partial class CSharpApiExtractor
     {
         List<MetadataReference> references = [];
 
-        // Resolve the shared framework directory from the runtime itself.
-        // typeof(object).Assembly.Location points to System.Private.CoreLib.dll
-        // in the shared framework directory, which contains all runtime assemblies
-        // including System.Text.Json, System.Memory, etc.
-        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
-        if (string.IsNullOrEmpty(runtimeDir) || !Directory.Exists(runtimeDir))
+        // Use TPA (trusted platform assemblies) to reliably resolve runtime assemblies.
+        // This works in both regular and single-file deployments where Assembly.Location
+        // may be empty.
+        var tpa = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (!string.IsNullOrWhiteSpace(tpa))
         {
-            runtimeDir = AppContext.BaseDirectory;
+            foreach (var dll in tpa.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!dll.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                try { references.Add(MetadataReference.CreateFromFile(dll)); }
+                catch (Exception ex) { Trace.TraceWarning("Failed to load runtime assembly '{0}': {1}", dll, ex.Message); }
+            }
+
+            if (references.Count > 0)
+                return references;
         }
 
-        if (!string.IsNullOrEmpty(runtimeDir) && Directory.Exists(runtimeDir))
+        var runtimeDir = AppContext.BaseDirectory;
+        if (Directory.Exists(runtimeDir))
         {
             foreach (var dll in Directory.EnumerateFiles(runtimeDir, "*.dll"))
             {

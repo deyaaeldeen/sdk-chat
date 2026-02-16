@@ -23,9 +23,37 @@ public static class PythonFormatter
     {
         var sb = new StringBuilder();
 
-        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, coverage, "#");
+        var deprecatedOperations = index.Modules
+            .SelectMany(m => (m.Classes ?? [])
+                .SelectMany(c => (c.Methods ?? [])
+                    .Where(method => method.IsDeprecated == true)
+                    .Select(method => (Client: c.Name, Method: method.Name))))
+            .ToHashSet();
+
+        var deprecatedUncovered = coverage.UncoveredOperations
+            .Where(op => deprecatedOperations.Contains((op.ClientType, op.Operation)))
+            .ToList();
+
+        var filteredCoverage = coverage with
+        {
+            UncoveredOperations = coverage.UncoveredOperations
+                .Where(op => !deprecatedOperations.Contains((op.ClientType, op.Operation)))
+                .ToList(),
+        };
+
+        var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, filteredCoverage, "#");
         if (uncoveredByClient is null)
             return sb.ToString();
+
+        if (deprecatedUncovered.Count > 0)
+        {
+            sb.AppendLine("# Deprecated API (intentionally excluded from uncovered generation targets):");
+            foreach (var op in deprecatedUncovered.OrderBy(o => o.ClientType).ThenBy(o => o.Operation))
+            {
+                sb.AppendLine($"#   {op.ClientType}.{op.Operation}");
+            }
+            sb.AppendLine();
+        }
 
         var allClasses = index.GetAllClasses().ToList();
         var allTypeNames = allClasses.Select(c => c.Name).ToHashSet();
@@ -259,6 +287,8 @@ public static class PythonFormatter
 
     private static void FormatClass(StringBuilder sb, ClassInfo cls)
     {
+        if (cls.IsDeprecated == true)
+            sb.AppendLine($"# @deprecated: {cls.DeprecatedMessage ?? "deprecated"}");
         var baseClass = !string.IsNullOrEmpty(cls.Base) ? $"({cls.Base})" : "";
         sb.AppendLine($"class {cls.Name}{baseClass}:");
 
@@ -270,6 +300,8 @@ public static class PythonFormatter
         // Properties
         foreach (var prop in cls.Properties ?? [])
         {
+            if (prop.IsDeprecated == true)
+                sb.AppendLine($"    # @deprecated: {prop.DeprecatedMessage ?? "deprecated"}");
             if (!string.IsNullOrEmpty(prop.Doc))
                 sb.AppendLine($"    # {prop.Doc}");
 
@@ -293,6 +325,8 @@ public static class PythonFormatter
 
     private static void FormatMethod(StringBuilder sb, MethodInfo method, string indent)
     {
+        if (method.IsDeprecated == true)
+            sb.AppendLine($"{indent}# @deprecated: {method.DeprecatedMessage ?? "deprecated"}");
         List<string> decorators = [];
         if (method.IsClassMethod == true) decorators.Add("@classmethod");
         if (method.IsStaticMethod == true) decorators.Add("@staticmethod");
@@ -310,6 +344,8 @@ public static class PythonFormatter
 
     private static void FormatFunction(StringBuilder sb, FunctionInfo func, string indent)
     {
+        if (func.IsDeprecated == true)
+            sb.AppendLine($"{indent}# @deprecated: {func.DeprecatedMessage ?? "deprecated"}");
         var asyncPrefix = func.IsAsync == true ? "async " : "";
         var retAnnotation = !string.IsNullOrEmpty(func.Ret) ? $" -> {func.Ret}" : "";
         sb.AppendLine($"{indent}{asyncPrefix}def {func.Name}({func.Signature}){retAnnotation}: ...");

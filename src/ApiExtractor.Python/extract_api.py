@@ -392,6 +392,79 @@ def format_annotation(ann: ast.expr | None) -> str | None:
         return None
     return ast.unparse(ann)
 
+def extract_parameters(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[dict[str, Any]]:
+    """Extract structured parameter information."""
+    args_obj = node.args
+    params: list[dict[str, Any]] = []
+
+    positional = list(getattr(args_obj, "posonlyargs", [])) + list(args_obj.args)
+    positional_defaults = list(args_obj.defaults)
+    default_start = len(positional) - len(positional_defaults)
+
+    for i, arg in enumerate(positional):
+        param: dict[str, Any] = {
+            "name": arg.arg,
+            "kind": "positional",
+        }
+        if arg.annotation:
+            param["type"] = ast.unparse(arg.annotation)
+        if i >= default_start and positional_defaults:
+            default_expr = positional_defaults[i - default_start]
+            if default_expr is not None:
+                param["default"] = ast.unparse(default_expr)
+        params.append(param)
+
+    if args_obj.vararg:
+        vararg = args_obj.vararg
+        param: dict[str, Any] = {
+            "name": vararg.arg,
+            "kind": "var_positional",
+        }
+        if vararg.annotation:
+            param["type"] = ast.unparse(vararg.annotation)
+        params.append(param)
+
+    for kw_arg, kw_default in zip(args_obj.kwonlyargs, args_obj.kw_defaults):
+        param = {
+            "name": kw_arg.arg,
+            "kind": "keyword_only",
+        }
+        if kw_arg.annotation:
+            param["type"] = ast.unparse(kw_arg.annotation)
+        if kw_default is not None:
+            param["default"] = ast.unparse(kw_default)
+        params.append(param)
+
+    if args_obj.kwarg:
+        kwarg = args_obj.kwarg
+        param = {
+            "name": kwarg.arg,
+            "kind": "var_keyword",
+        }
+        if kwarg.annotation:
+            param["type"] = ast.unparse(kwarg.annotation)
+        params.append(param)
+
+    return params
+
+def get_deprecation_info(node: ast.AST) -> tuple[bool, str | None]:
+    """Extract deprecation info from decorators (PEP 702 and common patterns)."""
+    decorators = getattr(node, "decorator_list", [])
+    for dec in decorators:
+        if isinstance(dec, ast.Name) and dec.id == "deprecated":
+            return True, None
+        if isinstance(dec, ast.Attribute) and dec.attr == "deprecated":
+            return True, None
+        if isinstance(dec, ast.Call):
+            func = dec.func
+            if (isinstance(func, ast.Name) and func.id == "deprecated") or (
+                isinstance(func, ast.Attribute) and func.attr == "deprecated"
+            ):
+                if dec.args and isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
+                    return True, dec.args[0].value
+                return True, None
+    return False, None
+
 def extract_function(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     entry_point_symbols: set[str] | None = None,
@@ -429,6 +502,10 @@ def extract_function(
         "sig": sig,
     }
 
+    params = extract_parameters(node)
+    if params:
+        result["params"] = params
+
     ret = format_annotation(node.returns)
     if ret:
         result["ret"] = ret
@@ -440,6 +517,12 @@ def extract_function(
 
     if isinstance(node, ast.AsyncFunctionDef):
         result["async"] = True
+
+    is_deprecated, deprecated_msg = get_deprecation_info(node)
+    if is_deprecated:
+        result["deprecated"] = True
+    if deprecated_msg:
+        result["deprecatedMsg"] = deprecated_msg
 
     # Mark as entry point if in the exported symbols
     if entry_point_symbols and node.name in entry_point_symbols:
@@ -487,6 +570,12 @@ def extract_class(
     if doc:
         result["doc"] = doc
 
+    is_deprecated, deprecated_msg = get_deprecation_info(node)
+    if is_deprecated:
+        result["deprecated"] = True
+    if deprecated_msg:
+        result["deprecatedMsg"] = deprecated_msg
+
     # Mark as entry point if in the exported symbols
     if entry_point_symbols and node.name in entry_point_symbols:
         result["entryPoint"] = True
@@ -532,7 +621,12 @@ def extract_class(
                 if not prop_type:
                     sig = func_info.get("sig", "")
                     prop_type = sig.split(" -> ")[-1] if " -> " in sig else None
-                properties.append({"name": func_info["name"], "type": prop_type, "doc": func_info.get("doc")})
+                prop_info = {"name": func_info["name"], "type": prop_type, "doc": func_info.get("doc")}
+                if func_info.get("deprecated"):
+                    prop_info["deprecated"] = True
+                if func_info.get("deprecatedMsg"):
+                    prop_info["deprecatedMsg"] = func_info.get("deprecatedMsg")
+                properties.append(prop_info)
             else:
                 # If we have @overload signatures for this method, emit those
                 # instead of the (typically generic *args/**kwargs) implementation.

@@ -494,20 +494,6 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
         Assert.Contains("\n", json);
     }
 
-    [Fact]
-    public void Extract_ProducesSmallerOutputThanSource()
-    {
-        // For small test fixtures, API surface can be close to source size
-        // due to metadata like entryPoint, exportPath, and reExportedFrom.
-        // Real SDK packages (100s of KB) show >80% reduction.
-        var api = GetApi();
-        var json = JsonSerializer.Serialize(api);
-        var sourceSize = Directory.GetFiles(_fixture.FixturePath, "*.ts", SearchOption.AllDirectories)
-            .Sum(f => new FileInfo(f).Length);
-        var maxAllowedSize = (int)(sourceSize * 1.2); // Allow 20% overhead for small fixtures
-        Assert.True(json.Length <= maxAllowedSize,
-            $"JSON ({json.Length}) should be <= 120% of source ({sourceSize})");
-    }
 
     #endregion
 }

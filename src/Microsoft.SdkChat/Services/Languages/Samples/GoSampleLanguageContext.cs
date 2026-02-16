@@ -13,7 +13,7 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
 {
     private readonly GoUsageAnalyzer _usageAnalyzer = new();
     private readonly ExtractionCache<ApiIndex> _cache = new(
-        async (path, ct) => (ApiIndex?)await new GoApiExtractor().ExtractAsync(path, ct), [".go"]);
+        async (path, ct) => (ApiIndex?)await new GoApiExtractor().ExtractAsync(path, ct: ct), [".go"]);
 
     public GoSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
