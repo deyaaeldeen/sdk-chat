@@ -123,18 +123,32 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
         // Mark error types structurally using Roslyn inheritance chain analysis
         MarkErrorTypes(typeMap, treeList, compilation);
 
-        var namespaces = typeMap.Values
-            .GroupBy(t => t.Namespace)
-            .OrderBy(g => g.Key)
-            .Select(g => new NamespaceInfo
+        // Group types by namespace using a dictionary (avoids LINQ GroupBy allocations)
+        var nsByName = new Dictionary<string, List<TypeInfo>>();
+        foreach (var mt in typeMap.Values)
+        {
+            var ns = mt.Namespace;
+            if (!nsByName.TryGetValue(ns, out var list))
             {
-                Name = g.Key,
-                Types = g.OrderBy(t => t.Name).Select(t => t.ToTypeInfo()).ToList()
-            })
-            .ToList();
+                list = [];
+                nsByName[ns] = list;
+            }
+            list.Add(mt.ToTypeInfo());
+        }
 
-        // Resolve transitive dependencies using the same compilation
-        var dependencies = ResolveTransitiveDependencies(compilation, namespaces, ct);
+        // Sort in-place instead of LINQ OrderBy (avoids extra array allocation)
+        var sortedKeys = nsByName.Keys.ToList();
+        sortedKeys.Sort(StringComparer.Ordinal);
+        List<NamespaceInfo> namespaces = [];
+        foreach (var key in sortedKeys)
+        {
+            var types = nsByName[key];
+            types.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+            namespaces.Add(new NamespaceInfo { Name = key, Types = types });
+        }
+
+        // Resolve transitive dependencies using the same compilation (pass treeList to avoid re-copy)
+        var dependencies = ResolveTransitiveDependencies(compilation, treeList, namespaces, ct);
 
         var apiIndex = new ApiIndex { Package = packageName, Namespaces = namespaces, Dependencies = dependencies };
         if (crossLanguageMap is not null)
@@ -830,13 +844,34 @@ public partial class CSharpApiExtractor : IApiExtractor<ApiIndex>
             CrossLanguagePackageId = map.PackageId,
             Namespaces = index.Namespaces.Select(ns => ns with
             {
-                Types = ns.Types.Select(type => type with
+                Types = ns.Types.Select(type =>
                 {
-                    CrossLanguageId = type.Id is not null && map.Ids.TryGetValue(type.Id, out var typeCrossLanguageId) ? typeCrossLanguageId : null,
-                    Members = type.Members?.Select(member => member with
+                    var typeCrossId = type.Id is not null && map.Ids.TryGetValue(type.Id, out var tid) ? tid : null;
+                    var hasAnyMemberMatch = false;
+                    List<MemberInfo>? updatedMembers = null;
+
+                    if (type.Members is { Count: > 0 })
                     {
-                        CrossLanguageId = member.Id is not null && map.Ids.TryGetValue(member.Id, out var memberCrossLanguageId) ? memberCrossLanguageId : null,
-                    }).ToList(),
+                        updatedMembers = type.Members.Select(member =>
+                        {
+                            if (member.Id is not null && map.Ids.TryGetValue(member.Id, out var mid))
+                            {
+                                hasAnyMemberMatch = true;
+                                return member with { CrossLanguageId = mid };
+                            }
+                            return member;
+                        }).ToList();
+                    }
+
+                    // Only clone the type record if something actually changed
+                    if (typeCrossId is null && !hasAnyMemberMatch)
+                        return type;
+
+                    return type with
+                    {
+                        CrossLanguageId = typeCrossId,
+                        Members = updatedMembers ?? type.Members,
+                    };
                 }).ToList(),
             }).ToList(),
         };

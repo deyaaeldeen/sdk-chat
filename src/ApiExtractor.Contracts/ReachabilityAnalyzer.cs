@@ -176,7 +176,7 @@ public static class ReachabilityAnalyzer
                 if (!typesByName.TryGetValue(name, out var t) || !t.IsRootCandidate || t.IsExplicitEntryPoint)
                     continue;
 
-                if (t.HasOperations || t.ReferencedTypes.Any(operationTypes.Contains))
+                if (t.HasOperations || t.ReferencedTypes.Overlaps(operationTypes))
                 {
                     sccIsRelevant = true;
                     break;

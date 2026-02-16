@@ -73,10 +73,10 @@ public partial class CSharpApiExtractor
     /// </summary>
     private static IReadOnlyList<DependencyInfo>? ResolveTransitiveDependencies(
         CSharpCompilation compilation,
+        IReadOnlyList<SyntaxTree> syntaxTrees,
         IReadOnlyList<NamespaceInfo> namespaces,
         CancellationToken ct)
     {
-        var syntaxTrees = compilation.SyntaxTrees.ToList();
         if (syntaxTrees.Count is 0) return null;
 
         // Collect all defined type names (to exclude from dependencies)

@@ -29,16 +29,17 @@ public static class JavaFormatter
                 .Select(m => (Client: c.Name, Method: m.Name)))
             .ToHashSet();
 
-        var deprecatedUncovered = coverage.UncoveredOperations
-            .Where(op => deprecatedOperations.Contains((op.ClientType, op.Operation)))
-            .ToList();
-
-        var filteredCoverage = coverage with
+        List<UncoveredOperation> deprecatedUncovered = [];
+        List<UncoveredOperation> filteredUncovered = [];
+        foreach (var op in coverage.UncoveredOperations)
         {
-            UncoveredOperations = coverage.UncoveredOperations
-                .Where(op => !deprecatedOperations.Contains((op.ClientType, op.Operation)))
-                .ToList(),
-        };
+            if (deprecatedOperations.Contains((op.ClientType, op.Operation)))
+                deprecatedUncovered.Add(op);
+            else
+                filteredUncovered.Add(op);
+        }
+
+        var filteredCoverage = coverage with { UncoveredOperations = filteredUncovered };
 
         var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, filteredCoverage);
         if (uncoveredByClient is null)

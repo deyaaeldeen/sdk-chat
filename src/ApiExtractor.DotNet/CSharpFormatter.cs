@@ -32,16 +32,18 @@ public static class CSharpFormatter
                 .Select(m => (Client: t.Name, Method: m.Name)))
             .ToHashSet();
 
-        var deprecatedUncovered = coverage.UncoveredOperations
-            .Where(op => deprecatedOperations.Contains((op.ClientType, op.Operation)))
-            .ToList();
-
-        var filteredCoverage = coverage with
+        // Partition uncovered ops in a single pass instead of two .Where() calls
+        List<UncoveredOperation> deprecatedUncovered = [];
+        List<UncoveredOperation> filteredUncovered = [];
+        foreach (var op in coverage.UncoveredOperations)
         {
-            UncoveredOperations = coverage.UncoveredOperations
-                .Where(op => !deprecatedOperations.Contains((op.ClientType, op.Operation)))
-                .ToList(),
-        };
+            if (deprecatedOperations.Contains((op.ClientType, op.Operation)))
+                deprecatedUncovered.Add(op);
+            else
+                filteredUncovered.Add(op);
+        }
+
+        var filteredCoverage = coverage with { UncoveredOperations = filteredUncovered };
 
         var uncoveredByClient = CoverageFormatter.AppendCoverageSummary(sb, filteredCoverage);
         if (uncoveredByClient is null)
@@ -57,7 +59,7 @@ public static class CSharpFormatter
             sb.AppendLine();
         }
 
-        // Format only types that have uncovered operations
+        // Cache all types once (avoids double GetAllTypes() call)
         var allTypes = index.GetAllTypes().ToList();
         var allTypeNames = allTypes.Select(t => IApiIndex.NormalizeTypeName(t.Name)).ToHashSet();
         var nsMap = BuildNamespaceMap(index);
@@ -162,13 +164,15 @@ public static class CSharpFormatter
         var currentLength = sb.Length;
 
         // Include types by priority, pulling in dependencies
+        List<TypeInfo> typesToAdd = [];
         foreach (var type in orderedTypes)
         {
             if (includedTypes.Contains(type.Name))
                 continue;
 
             // Calculate size of this type + its dependencies
-            List<TypeInfo> typesToAdd = [type];
+            typesToAdd.Clear();
+            typesToAdd.Add(type);
             type.CollectReferencedTypes(allTypeNames, reusableDeps);
             foreach (var depName in reusableDeps)
             {
@@ -226,8 +230,15 @@ public static class CSharpFormatter
     /// </summary>
     private static List<TypeInfo> GetPrioritizedTypes(List<TypeInfo> allTypes, HashSet<string> allTypeNames)
     {
-        // Get clients and their dependencies first
-        var clients = allTypes.Where(t => t.IsClientType).ToList();
+        // Pre-compute client set to avoid repeated IsClientType evaluation (avoids N × LINQ .Any())
+        var clientNames = new HashSet<string>();
+        foreach (var t in allTypes)
+        {
+            if (t.IsClientType)
+                clientNames.Add(t.Name);
+        }
+
+        var clients = allTypes.Where(t => clientNames.Contains(t.Name)).ToList();
         HashSet<string> clientDeps = [];
         HashSet<string> reusableDeps = [];
         foreach (var client in clients)
@@ -241,7 +252,7 @@ public static class CSharpFormatter
         return allTypes
             .OrderBy(t =>
             {
-                if (t.IsClientType) return 0;
+                if (clientNames.Contains(t.Name)) return 0;
                 if (clientDeps.Contains(t.Name)) return 1;
                 return t.TruncationPriority + 2;
             })
@@ -428,12 +439,14 @@ public static class CSharpFormatter
 
     private static string BuildInheritance(TypeInfo type)
     {
-        List<string> parts = [];
-        if (!string.IsNullOrEmpty(type.Base))
-            parts.Add(type.Base);
-        if (type.Interfaces?.Count > 0)
-            parts.AddRange(type.Interfaces);
-        return string.Join(", ", parts);
+        if (string.IsNullOrEmpty(type.Base))
+            return type.Interfaces?.Count > 0 ? string.Join(", ", type.Interfaces) : "";
+
+        if (type.Interfaces is not { Count: > 0 })
+            return type.Base;
+
+        // Base + interfaces — rare case, allocation acceptable
+        return $"{type.Base}, {string.Join(", ", type.Interfaces)}";
     }
 
     private static string EscapeXml(string text) =>
