@@ -93,25 +93,85 @@ public class JavaApiExtractor : IApiExtractor<ApiIndex>
     /// </summary>
     private async Task<(ApiIndex? Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
-        var result = await RunExtractorAsync("--json", rootPath, ct).ConfigureAwait(false);
-        var diagnostics = ParseStderrDiagnostics(result.StandardError);
+        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
+        var availability = _availability.GetAvailability();
 
-        if (string.IsNullOrWhiteSpace(result.StandardOutput))
-            return (null, diagnostics);
-
-        if (result.OutputTruncated)
-            throw new InvalidOperationException(
-                "Java extractor output was truncated (exceeded output size limit). " +
-                "The target package may be too large for extraction.");
-
-        var index = JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
-        if (index is null)
+        // Docker mode: fall back to buffered extraction
+        if (availability.Mode == ExtractorMode.Docker)
         {
+            var result = await RunExtractorAsync("--json", rootPath, ct).ConfigureAwait(false);
+            var diag = ParseStderrDiagnostics(result.StandardError);
+
+            if (string.IsNullOrWhiteSpace(result.StandardOutput))
+                return (null, diag);
+
+            if (result.OutputTruncated)
+                throw new InvalidOperationException(
+                    "Java extractor output was truncated (exceeded output size limit). " +
+                    "The target package may be too large for extraction.");
+
+            var idx = JsonSerializer.Deserialize(result.StandardOutput, SourceGenerationContext.Default.ApiIndex);
+            if (idx is null) return (null, diag);
+
+            var fin = FinalizeIndex(idx, crossLanguageMap, diag);
+            return (fin, fin.Diagnostics);
+        }
+
+        // Native/Runtime mode: stream stdout directly to JSON deserializer
+        await using var streamResult = await RunExtractorStreamAsync(rootPath, ct).ConfigureAwait(false);
+
+        if (streamResult.StandardOutputStream is null)
+        {
+            var diagnostics = ParseStderrDiagnostics(streamResult.StandardError);
             return (null, diagnostics);
         }
 
-        var finalized = FinalizeIndex(index, crossLanguageMap, diagnostics);
+        var index = await JsonSerializer.DeserializeAsync(
+            streamResult.StandardOutputStream,
+            SourceGenerationContext.Default.ApiIndex,
+            ct).ConfigureAwait(false);
+
+        await streamResult.CompleteAsync().ConfigureAwait(false);
+        var stderrDiagnostics = ParseStderrDiagnostics(streamResult.StandardError);
+
+        if (!streamResult.Success)
+        {
+            var errorMsg = streamResult.TimedOut
+                ? $"Java extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Java extractor failed: {streamResult.StandardError}";
+            throw new InvalidOperationException(errorMsg);
+        }
+
+        if (index is null) return (null, stderrDiagnostics);
+
+        var finalized = FinalizeIndex(index, crossLanguageMap, stderrDiagnostics);
         return (finalized, finalized.Diagnostics);
+    }
+
+    /// <summary>
+    /// Runs the extractor with streaming stdout for JSON deserialization.
+    /// </summary>
+    private async Task<StreamingProcessResult> RunExtractorStreamAsync(string rootPath, CancellationToken ct)
+    {
+        var availability = _availability.GetAvailability();
+
+        if (availability.Mode == ExtractorMode.NativeBinary)
+        {
+            return await ProcessSandbox.ExecuteWithStreamAsync(
+                availability.ExecutablePath!,
+                [rootPath, "--json"],
+                cancellationToken: ct).ConfigureAwait(false);
+        }
+
+        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
+            throw new InvalidOperationException(availability.UnavailableReason ?? "Java extractor not available");
+
+        var scriptPath = GetScriptPath();
+
+        return await ProcessSandbox.ExecuteWithStreamAsync(
+            availability.ExecutablePath!,
+            [scriptPath, rootPath, "--json"],
+            cancellationToken: ct).ConfigureAwait(false);
     }
 
     private static ApiIndex FinalizeIndex(ApiIndex index, CrossLanguageMap? crossLanguageMap, IReadOnlyList<ApiDiagnostic> upstreamDiagnostics)

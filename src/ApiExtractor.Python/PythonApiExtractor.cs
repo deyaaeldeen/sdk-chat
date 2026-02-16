@@ -92,69 +92,99 @@ public class PythonApiExtractor : IApiExtractor<ApiIndex>
         var startTime = System.Diagnostics.Stopwatch.GetTimestamp();
 
         var availability = _availability.GetAvailability();
-        ProcessResult result;
 
-        if (availability.Mode == ExtractorMode.NativeBinary)
+        // Docker mode: fall back to buffered extraction
+        if (availability.Mode == ExtractorMode.Docker)
         {
-            // Use precompiled native binary
-            result = await ProcessSandbox.ExecuteAsync(
-                availability.ExecutablePath!,
-                [rootPath, "--json"],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-        }
-        else if (availability.Mode == ExtractorMode.RuntimeInterpreter)
-        {
-            // Fall back to Python runtime
-            var scriptPath = GetScriptPath();
-
-            result = await ProcessSandbox.ExecuteAsync(
-                availability.ExecutablePath!,
-                [scriptPath, rootPath, "--json"],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-        }
-        else if (availability.Mode == ExtractorMode.Docker)
-        {
-            // Fall back to Docker container with precompiled extractor
-            result = await DockerSandbox.ExecuteAsync(
+            var result = await DockerSandbox.ExecuteAsync(
                 availability.DockerImageName!,
                 rootPath,
                 [rootPath, "--json"],
-                cancellationToken: ct
-            ).ConfigureAwait(false);
-        }
-        else
-        {
-            throw new InvalidOperationException(availability.UnavailableReason ?? "Python extractor not available");
+                cancellationToken: ct).ConfigureAwait(false);
+
+            if (!result.Success)
+            {
+                var errorMsg = result.TimedOut
+                    ? $"Python extractor (docker) timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                    : $"Python extractor (docker) failed: {result.StandardError}";
+                ExtractorTelemetry.RecordResult(activity, false, error: errorMsg);
+                throw new InvalidOperationException(errorMsg);
+            }
+
+            if (result.OutputTruncated)
+                throw new InvalidOperationException(
+                    "Python extractor output was truncated (exceeded output size limit). " +
+                    "The target package may be too large for extraction.");
+
+            var raw = DeserializeRaw(result.StandardOutput)
+                ?? throw new InvalidOperationException("Failed to parse Python extractor output");
+
+            var apiIndex = ConvertToApiIndex(raw);
+            ExtractorTelemetry.RecordResult(activity, true, apiIndex.Modules.Count);
+            var stderrDiag = ParseStderrDiagnostics(result.StandardError);
+            var fin = FinalizeIndex(apiIndex, crossLanguageMap, stderrDiag);
+            return (fin, fin.Diagnostics ?? []);
         }
 
-        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTime);
+        // Native/Runtime mode: stream stdout directly to JSON deserializer
+        await using var streamResult = await RunExtractorStreamAsync(rootPath, availability, ct).ConfigureAwait(false);
 
-        if (!result.Success)
+        if (streamResult.StandardOutputStream is null)
         {
-            var modeHint = availability.Mode == ExtractorMode.Docker ? " (docker)" : "";
-            var errorMsg = result.TimedOut
-                ? $"Python extractor{modeHint} timed out after {ExtractorTimeout.Value.TotalSeconds}s"
-                : $"Python extractor{modeHint} failed: {result.StandardError}";
+            var errorMsg = streamResult.StartupError ?? "Python extractor failed to start";
             ExtractorTelemetry.RecordResult(activity, false, error: errorMsg);
             throw new InvalidOperationException(errorMsg);
         }
 
-        // Parse JSON output
-        if (result.OutputTruncated)
-            throw new InvalidOperationException(
-                "Python extractor output was truncated (exceeded output size limit). " +
-                "The target package may be too large for extraction.");
+        var rawIndex = await JsonSerializer.DeserializeAsync(
+            streamResult.StandardOutputStream,
+            RawPythonJsonContext.Default.RawPythonApiIndex,
+            ct).ConfigureAwait(false);
 
-        var raw = DeserializeRaw(result.StandardOutput)
-            ?? throw new InvalidOperationException("Failed to parse Python extractor output");
+        await streamResult.CompleteAsync().ConfigureAwait(false);
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTime);
 
-        var apiIndex = ConvertToApiIndex(raw);
-        ExtractorTelemetry.RecordResult(activity, true, apiIndex.Modules.Count);
-        var stderrDiagnostics = ParseStderrDiagnostics(result.StandardError);
-        var finalized = FinalizeIndex(apiIndex, crossLanguageMap, stderrDiagnostics);
+        if (!streamResult.Success)
+        {
+            var errorMsg = streamResult.TimedOut
+                ? $"Python extractor timed out after {ExtractorTimeout.Value.TotalSeconds}s"
+                : $"Python extractor failed: {streamResult.StandardError}";
+            ExtractorTelemetry.RecordResult(activity, false, error: errorMsg);
+            throw new InvalidOperationException(errorMsg);
+        }
+
+        if (rawIndex is null)
+            throw new InvalidOperationException("Failed to parse Python extractor output");
+
+        var index = ConvertToApiIndex(rawIndex);
+        ExtractorTelemetry.RecordResult(activity, true, index.Modules.Count);
+        var stderrDiagnostics = ParseStderrDiagnostics(streamResult.StandardError);
+        var finalized = FinalizeIndex(index, crossLanguageMap, stderrDiagnostics);
         return (finalized, finalized.Diagnostics ?? []);
+    }
+
+    /// <summary>
+    /// Runs the extractor with streaming stdout for JSON deserialization.
+    /// </summary>
+    private static async Task<StreamingProcessResult> RunExtractorStreamAsync(string rootPath, ExtractorAvailabilityResult availability, CancellationToken ct)
+    {
+        if (availability.Mode == ExtractorMode.NativeBinary)
+        {
+            return await ProcessSandbox.ExecuteWithStreamAsync(
+                availability.ExecutablePath!,
+                [rootPath, "--json"],
+                cancellationToken: ct).ConfigureAwait(false);
+        }
+
+        if (availability.Mode != ExtractorMode.RuntimeInterpreter)
+            throw new InvalidOperationException(availability.UnavailableReason ?? "Python extractor not available");
+
+        var scriptPath = GetScriptPath();
+
+        return await ProcessSandbox.ExecuteWithStreamAsync(
+            availability.ExecutablePath!,
+            [scriptPath, rootPath, "--json"],
+            cancellationToken: ct).ConfigureAwait(false);
     }
 
     private static ApiIndex FinalizeIndex(ApiIndex index, CrossLanguageMap? crossLanguageMap, IReadOnlyList<ApiDiagnostic> upstreamDiagnostics)

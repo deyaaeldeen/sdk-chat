@@ -249,6 +249,88 @@ public static class ProcessSandbox
 
         return result.ToString();
     }
+
+    /// <summary>
+    /// Execute a process and return stdout as a <see cref="Stream"/> for streaming deserialization.
+    /// Stderr is captured in-memory. The caller must dispose the returned <see cref="StreamingProcessResult"/>
+    /// after consuming stdout.
+    /// </summary>
+    /// <remarks>
+    /// This avoids buffering the entire stdout into a <see cref="string"/> before deserialization,
+    /// halving peak memory for large JSON outputs (e.g., API extraction of Azure SDKs).
+    /// </remarks>
+    public static async Task<StreamingProcessResult> ExecuteWithStreamAsync(
+        string fileName,
+        IEnumerable<string>? arguments = null,
+        string? workingDirectory = null,
+        TimeSpan? timeout = null,
+        string? stdinData = null,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateFileName(fileName);
+
+        var effectiveTimeout = timeout ?? ExtractorTimeout.Value;
+        var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(effectiveTimeout);
+        var effectiveCt = timeoutCts.Token;
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        if (!string.IsNullOrEmpty(workingDirectory))
+        {
+            psi.WorkingDirectory = workingDirectory;
+        }
+
+        if (arguments is not null)
+        {
+            foreach (var arg in arguments)
+            {
+                psi.ArgumentList.Add(arg);
+            }
+        }
+
+        var startTime = Stopwatch.GetTimestamp();
+        Process? process;
+
+        try
+        {
+            process = Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            timeoutCts.Dispose();
+            return StreamingProcessResult.CreateFailed(-1, $"Failed to start process: {ex.Message}", timeoutCts);
+        }
+
+        if (process is null)
+        {
+            timeoutCts.Dispose();
+            return StreamingProcessResult.CreateFailed(-1, "Failed to start process", timeoutCts);
+        }
+
+        // Write stdin data if provided, then close stdin to signal EOF
+        if (stdinData is not null)
+        {
+            await process.StandardInput.WriteAsync(stdinData).ConfigureAwait(false);
+            await process.StandardInput.FlushAsync(effectiveCt).ConfigureAwait(false);
+        }
+        process.StandardInput.Close();
+
+        // Start capturing stderr in background - it's typically small
+        var stderrTask = ReadStreamWithLimitAsync(process.StandardError, MaxOutputChars, effectiveCt);
+
+        // Return the stdout stream for the caller to consume directly via streaming JSON deserialization.
+        // The caller is responsible for disposing StreamingProcessResult which handles cleanup.
+        return new StreamingProcessResult(process, process.StandardOutput.BaseStream, stderrTask, startTime, timeoutCts, effectiveCt);
+    }
 }
 
 /// <summary>
@@ -289,4 +371,113 @@ public sealed record ProcessResult
 
     public static ProcessResult Failed(int exitCode, string output, string error, TimeSpan? duration = null, bool timedOut = false)
         => new(exitCode, output, error, duration ?? TimeSpan.Zero, timedOut);
+}
+
+/// <summary>
+/// Result of a streaming process execution. Provides stdout as a <see cref="Stream"/>
+/// for direct deserialization without intermediate string buffering.
+/// Must be disposed after consuming the stream.
+/// </summary>
+public sealed class StreamingProcessResult : IAsyncDisposable, IDisposable
+{
+    private readonly Process? _process;
+    private readonly Task<string>? _stderrTask;
+    private readonly long _startTimestamp;
+    private readonly CancellationTokenSource _timeoutCts;
+    private readonly CancellationToken _effectiveCt;
+    private bool _disposed;
+
+    /// <summary>The stdout stream for streaming deserialization. Null on startup failure.</summary>
+    public Stream? StandardOutputStream { get; }
+
+    /// <summary>Stderr content. Available after <see cref="CompleteAsync"/> is called.</summary>
+    public string StandardError { get; private set; } = "";
+
+    /// <summary>Exit code. Available after <see cref="CompleteAsync"/> is called.</summary>
+    public int ExitCode { get; private set; } = -1;
+
+    /// <summary>Whether the process timed out.</summary>
+    public bool TimedOut { get; private set; }
+
+    /// <summary>Whether the process completed successfully (exit code 0, no timeout).</summary>
+    public bool Success => ExitCode == 0 && !TimedOut;
+
+    /// <summary>Elapsed duration. Available after <see cref="CompleteAsync"/> is called.</summary>
+    public TimeSpan Duration { get; private set; }
+
+    /// <summary>Error message for startup failures.</summary>
+    public string? StartupError { get; }
+
+    internal StreamingProcessResult(Process process, Stream stdoutStream, Task<string> stderrTask, long startTimestamp, CancellationTokenSource timeoutCts, CancellationToken effectiveCt)
+    {
+        _process = process;
+        StandardOutputStream = stdoutStream;
+        _stderrTask = stderrTask;
+        _startTimestamp = startTimestamp;
+        _timeoutCts = timeoutCts;
+        _effectiveCt = effectiveCt;
+    }
+
+    private StreamingProcessResult(int exitCode, string error, CancellationTokenSource timeoutCts)
+    {
+        ExitCode = exitCode;
+        StandardError = error;
+        StartupError = error;
+        _timeoutCts = timeoutCts;
+        _effectiveCt = default;
+    }
+
+    internal static StreamingProcessResult CreateFailed(int exitCode, string error, CancellationTokenSource timeoutCts)
+        => new(exitCode, error, timeoutCts);
+
+    /// <summary>
+    /// Wait for the process to exit and finalize stderr/exit code.
+    /// Call this AFTER consuming the stdout stream.
+    /// </summary>
+    public async Task CompleteAsync()
+    {
+        if (_process is null) return;
+
+        try
+        {
+            await _process.WaitForExitAsync(_effectiveCt).ConfigureAwait(false);
+            ExitCode = _process.ExitCode;
+            StandardError = _stderrTask is not null ? await _stderrTask.ConfigureAwait(false) : "";
+            Duration = Stopwatch.GetElapsedTime(_startTimestamp);
+        }
+        catch (OperationCanceledException)
+        {
+            TimedOut = true;
+            Duration = Stopwatch.GetElapsedTime(_startTimestamp);
+            try { _process.Kill(entireProcessTree: true); } catch { }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _process?.Dispose();
+        _timeoutCts.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        if (_process is not null)
+        {
+            try
+            {
+                if (!_process.HasExited)
+                    _process.Kill(entireProcessTree: true);
+            }
+            catch { }
+            _process.Dispose();
+        }
+
+        _timeoutCts.Dispose();
+        await Task.CompletedTask;
+    }
 }
