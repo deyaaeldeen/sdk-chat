@@ -36,6 +36,11 @@ public sealed record DependencyInfo
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
+    /// <summary>Whether this dependency is from the Python standard library.</summary>
+    [JsonPropertyName("isStdlib")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsStdlib { get; init; }
+
     /// <summary>Classes from this package that are referenced in the API.</summary>
     [JsonPropertyName("classes")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

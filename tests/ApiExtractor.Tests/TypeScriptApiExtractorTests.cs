@@ -511,3 +511,192 @@ public class TypeScriptApiExtractorTests : IClassFixture<TypeScriptExtractorFixt
 
     #endregion
 }
+
+/// <summary>
+/// Tests that verify the source parser's capabilities on the CompiledMode fixture.
+/// Uses TypeScriptCompiledFixture with multi-target conditional exports (node/browser/default).
+/// </summary>
+public class TypeScriptCompiledFixtureTests : IClassFixture<TypeScriptCompiledFixture>
+{
+    private readonly TypeScriptCompiledFixture _fixture;
+
+    public TypeScriptCompiledFixtureTests(TypeScriptCompiledFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private ApiIndex GetApi()
+    {
+        if (_fixture.SkipReason != null) Assert.Skip(_fixture.SkipReason);
+        return _fixture.Api!;
+    }
+
+    [Fact]
+    public void SourceParser_ProducesModules_BasedOnFileStructure()
+    {
+        var api = GetApi();
+        var moduleNames = api.Modules.Select(m => m.Name).ToList();
+
+        // Source parser creates modules from file paths (src/node.ts → "node" module).
+        // This coincidentally matches export condition names but is not condition-aware.
+        var hasNodeModule = moduleNames.Any(n =>
+            n.Contains("node", StringComparison.OrdinalIgnoreCase));
+        var hasBrowserModule = moduleNames.Any(n =>
+            n.Contains("browser", StringComparison.OrdinalIgnoreCase));
+
+        Assert.True(hasNodeModule && hasBrowserModule,
+            $"Expected modules for node and browser files, got: [{string.Join(", ", moduleNames)}]");
+    }
+
+    [Fact]
+    public void SourceParser_PlacesClasses_InFileBasedModules()
+    {
+        var api = GetApi();
+        var allClasses = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
+
+        var nodeClient = allClasses.FirstOrDefault(c => c.Name == "NodeClient");
+        var browserClient = allClasses.FirstOrDefault(c => c.Name == "BrowserClient");
+
+        Assert.NotNull(nodeClient);
+        Assert.NotNull(browserClient);
+
+        var nodeModule = api.Modules.FirstOrDefault(m =>
+            (m.Classes ?? []).Any(c => c.Name == "NodeClient"));
+        var browserModule = api.Modules.FirstOrDefault(m =>
+            (m.Classes ?? []).Any(c => c.Name == "BrowserClient"));
+
+        Assert.NotNull(nodeModule);
+        Assert.NotNull(browserModule);
+
+        // Different files → different modules (by file path, not by export condition)
+        Assert.NotEqual(nodeModule.Name, browserModule.Name);
+    }
+
+    [Fact]
+    public void SourceParser_PlacesInterfaces_InFileBasedModules()
+    {
+        var api = GetApi();
+        var allInterfaces = api.Modules.SelectMany(m => m.Interfaces ?? []).ToList();
+
+        var nodeOpts = allInterfaces.FirstOrDefault(i => i.Name == "NodeClientOptions");
+        var browserOpts = allInterfaces.FirstOrDefault(i => i.Name == "BrowserClientOptions");
+
+        Assert.NotNull(nodeOpts);
+        Assert.NotNull(browserOpts);
+
+        var nodeModule = api.Modules.FirstOrDefault(m =>
+            (m.Interfaces ?? []).Any(i => i.Name == "NodeClientOptions"));
+        var browserModule = api.Modules.FirstOrDefault(m =>
+            (m.Interfaces ?? []).Any(i => i.Name == "BrowserClientOptions"));
+
+        Assert.NotNull(nodeModule);
+        Assert.NotNull(browserModule);
+        Assert.NotEqual(nodeModule.Name, browserModule.Name);
+    }
+
+    [Fact]
+    public void SourceParser_SeparatesNodeAndBrowserMethods_ByFile()
+    {
+        var api = GetApi();
+
+        var browserModule = api.Modules.FirstOrDefault(m =>
+            m.Name.Contains("browser", StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(browserModule);
+
+        var browserClasses = browserModule.Classes ?? [];
+        var browserMethods = browserClasses.SelectMany(c => c.Methods ?? []).ToList();
+
+        // Node-only methods should not appear in the browser file's module
+        Assert.DoesNotContain(browserMethods, m => m.Name == "streamToFile");
+        Assert.DoesNotContain(browserMethods, m => m.Name == "readFromFile");
+    }
+
+    [Fact]
+    public void CompiledExtractor_DeclarationFiles_Exist()
+    {
+        var fixture = _fixture.FixturePath;
+
+        Assert.True(File.Exists(Path.Combine(fixture, "dist", "types", "index.d.ts")),
+            "dist/types/index.d.ts should exist (main declaration entry)");
+        Assert.True(File.Exists(Path.Combine(fixture, "dist", "types", "shared.d.ts")),
+            "dist/types/shared.d.ts should exist (shared types)");
+        Assert.True(File.Exists(Path.Combine(fixture, "dist", "types", "node", "index.d.ts")),
+            "dist/types/node/index.d.ts should exist (node condition)");
+        Assert.True(File.Exists(Path.Combine(fixture, "dist", "types", "browser", "index.d.ts")),
+            "dist/types/browser/index.d.ts should exist (browser condition)");
+    }
+
+    /// <summary>
+    /// The fixture references HttpPolicy, HttpRequest, and HttpResponse from
+    /// "some-http-lib". The import-statement collector walks import declarations
+    /// and records typeName→packageName mappings, enabling dependency tracking
+    /// without node_modules installed.
+    /// </summary>
+    [Fact]
+    public void SourceParser_ResolvesExternalPackageDependency_ViaImportDeclarations()
+    {
+        var api = GetApi();
+
+        Assert.NotNull(api.Dependencies);
+        Assert.Contains(api.Dependencies, d =>
+            d.Package.Contains("some-http-lib", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// ClientOptions.policies has type HttpPolicy[] where HttpPolicy is from
+    /// "some-http-lib". The raw type name collector extracts PascalCase names
+    /// from type annotations and matches them against import declarations,
+    /// enabling attribution to the source package.
+    /// </summary>
+    [Fact]
+    public void SourceParser_AttributesExternalTypes_ViaImportDeclarations()
+    {
+        var api = GetApi();
+        var allInterfaces = api.Modules.SelectMany(m => m.Interfaces ?? []).ToList();
+
+        var clientOpts = allInterfaces.FirstOrDefault(i => i.Name == "ClientOptions");
+        Assert.NotNull(clientOpts);
+
+        var policiesProp = clientOpts.Properties?.FirstOrDefault(p => p.Name == "policies");
+        Assert.NotNull(policiesProp);
+        Assert.NotNull(policiesProp.Type);
+
+        Assert.NotNull(api.Dependencies);
+        var httpLibDep = api.Dependencies.FirstOrDefault(d =>
+            d.Package.Contains("some-http-lib", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(httpLibDep);
+        Assert.NotNull(httpLibDep.Types);
+        Assert.Contains(httpLibDep.Types, t =>
+            t.Name.Contains("HttpPolicy", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// BaseClient.sendRequest takes HttpRequest and returns Promise&lt;HttpResponse&gt;.
+    /// Both types are from "some-http-lib". The raw type name collector captures
+    /// these from method parameter/return type annotations and matches them
+    /// against import declarations for dependency resolution.
+    /// </summary>
+    [Fact]
+    public void SourceParser_ResolvesExternalMethodTypes_ViaImportDeclarations()
+    {
+        var api = GetApi();
+        var allClasses = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
+
+        var baseClient = allClasses.FirstOrDefault(c => c.Name == "BaseClient");
+        Assert.NotNull(baseClient);
+
+        var sendMethod = baseClient.Methods?.FirstOrDefault(m => m.Name == "sendRequest");
+        Assert.NotNull(sendMethod);
+
+        Assert.NotNull(api.Dependencies);
+        var httpLibDep = api.Dependencies.FirstOrDefault(d =>
+            d.Package.Contains("some-http-lib", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(httpLibDep);
+        Assert.NotNull(httpLibDep.Types);
+        Assert.Contains(httpLibDep.Types, t =>
+            t.Name.Contains("HttpRequest", StringComparison.Ordinal));
+        Assert.Contains(httpLibDep.Types, t =>
+            t.Name.Contains("HttpResponse", StringComparison.Ordinal));
+    }
+}

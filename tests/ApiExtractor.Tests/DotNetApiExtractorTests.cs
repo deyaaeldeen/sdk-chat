@@ -462,3 +462,93 @@ public class DotNetApiExtractorTests
 
     #endregion
 }
+
+/// <summary>
+/// Tests that verify the source parser's capabilities on the CompiledMode fixture.
+/// This fixture has System.Text.Json references without NuGet restore.
+/// </summary>
+public class DotNetCompiledFixtureTests
+{
+    private static readonly string FixturePath =
+        Path.Combine(AppContext.BaseDirectory, "TestFixtures", "CompiledMode", "DotNet");
+
+    private readonly CSharpApiExtractor _sourceExtractor = new();
+
+    [Fact]
+    public async Task SourceParser_DetectsExternalPackageDependency()
+    {
+        var api = await _sourceExtractor.ExtractAsync(FixturePath);
+
+        Assert.NotNull(api.Dependencies);
+        Assert.Contains(api.Dependencies, d =>
+            d.Package.Contains("System.Text.Json", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SourceParser_CapturesGenericBaseType_AsString()
+    {
+        var api = await _sourceExtractor.ExtractAsync(FixturePath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+
+        var converter = types.FirstOrDefault(t => t.Name == "ServiceModelConverter");
+        Assert.NotNull(converter);
+        Assert.False(string.IsNullOrEmpty(converter.Base), "Base type string should be captured");
+
+        Assert.NotNull(api.Dependencies);
+        var stjDep = api.Dependencies.FirstOrDefault(d =>
+            d.Package.Contains("System.Text.Json", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(stjDep);
+        Assert.NotNull(stjDep.Types);
+        Assert.Contains(stjDep.Types, t =>
+            t.Name.Contains("JsonConverter", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SourceParser_RecordsNestedGenericTypeArguments()
+    {
+        var api = await _sourceExtractor.ExtractAsync(FixturePath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+
+        var model = types.FirstOrDefault(t => t.Name == "ServiceModel");
+        Assert.NotNull(model);
+
+        var metadataProp = model.Members?.FirstOrDefault(m => m.Name == "Metadata");
+        Assert.NotNull(metadataProp);
+        Assert.NotNull(metadataProp.Signature);
+
+        Assert.Contains("JsonElement", metadataProp.Signature);
+        Assert.Contains("Dictionary", metadataProp.Signature);
+    }
+
+    [Fact]
+    public void CompiledExtractor_MustEvaluate_CustomBuildOutputPath()
+    {
+        var csprojPath = Path.Combine(FixturePath, "TestPackage.csproj");
+        Assert.True(File.Exists(csprojPath), "Test fixture .csproj should exist");
+
+        var csprojContent = File.ReadAllText(csprojPath);
+        Assert.Contains("artifacts/bin", csprojContent);
+
+        var defaultBinPath = Path.Combine(FixturePath, "bin");
+        Assert.False(Directory.Exists(defaultBinPath),
+            "Default bin/ should not exist — compiled extractor must use MSBuild evaluation");
+    }
+
+    [Fact]
+    public async Task SourceParser_CapturesDocComments()
+    {
+        var api = await _sourceExtractor.ExtractAsync(FixturePath);
+        var types = api.Namespaces.SelectMany(n => n.Types).ToList();
+
+        var client = types.FirstOrDefault(t => t.Name == "JsonServiceClient");
+        Assert.NotNull(client);
+
+        Assert.False(string.IsNullOrEmpty(client.Doc),
+            "Source extractor should capture class-level doc comments");
+
+        var serializeMethod = client.Members?.FirstOrDefault(m => m.Name == "Serialize");
+        Assert.NotNull(serializeMethod);
+        Assert.False(string.IsNullOrEmpty(serializeMethod.Doc),
+            "Source extractor should capture method-level doc comments");
+    }
+}

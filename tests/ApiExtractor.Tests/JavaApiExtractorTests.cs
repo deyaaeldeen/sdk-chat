@@ -419,3 +419,167 @@ public class JavaApiExtractorTests : IClassFixture<JavaExtractorFixture>
 
     #endregion
 }
+
+/// <summary>
+/// Fixture that extracts Java API from the CompiledMode fixture once.
+/// Uses a fixture with generic bounds, bridge methods, nested generics, and inner classes.
+/// </summary>
+public class JavaCompiledFixture : IAsyncLifetime
+{
+    private static readonly string TestFixturesPath =
+        Path.Combine(AppContext.BaseDirectory, "TestFixtures", "CompiledMode", "Java");
+
+    public ApiIndex? Api { get; private set; }
+    public string? SkipReason { get; private set; }
+    public string FixturePath => TestFixturesPath;
+
+    public async ValueTask InitializeAsync()
+    {
+        var extractor = new JavaApiExtractor();
+        if (!extractor.IsAvailable())
+        {
+            SkipReason = extractor.UnavailableReason ?? "JBang not available";
+            return;
+        }
+
+        try
+        {
+            Api = await extractor.ExtractAsync(TestFixturesPath);
+        }
+        catch (Exception ex)
+        {
+            SkipReason = $"Java extraction failed: {ex.Message}";
+        }
+    }
+
+    public ValueTask DisposeAsync() => default;
+}
+
+/// <summary>
+/// Tests that verify the source parser's capabilities on a fixture with
+/// generic bounds, bridge methods, nested generics, and inner classes.
+/// </summary>
+public class JavaCompiledFixtureTests : IClassFixture<JavaCompiledFixture>
+{
+    private readonly JavaCompiledFixture _fixture;
+
+    public JavaCompiledFixtureTests(JavaCompiledFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private ApiIndex GetApi()
+    {
+        if (_fixture.SkipReason != null) Assert.Skip(_fixture.SkipReason);
+        return _fixture.Api!;
+    }
+
+    [Fact]
+    public void SourceParser_FindsDeclaredMethod_NotBridgeMethods()
+    {
+        var api = GetApi();
+        var allTypes = api.Packages.SelectMany(p =>
+            (p.Classes ?? []).Concat(p.Interfaces ?? [])).ToList();
+
+        var client = allTypes.FirstOrDefault(t => t.Name == "ServiceClient");
+        Assert.NotNull(client);
+
+        var processMethods = client.Methods?.Where(m => m.Name == "process").ToList();
+        Assert.NotNull(processMethods);
+        Assert.NotEmpty(processMethods);
+
+        var declaredProcess = processMethods.FirstOrDefault(m =>
+            m.Ret?.Contains("String", StringComparison.Ordinal) == true);
+        Assert.NotNull(declaredProcess);
+        Assert.Contains("String", declaredProcess.Ret!);
+    }
+
+    [Fact]
+    public void SourceParser_RecordsGenericBounds_AsStrings()
+    {
+        var api = GetApi();
+        var allTypes = api.Packages.SelectMany(p =>
+            (p.Classes ?? []).Concat(p.Interfaces ?? [])).ToList();
+
+        var response = allTypes.FirstOrDefault(t => t.Name == "ServiceResponse");
+        Assert.NotNull(response);
+
+        Assert.NotNull(response.TypeParams);
+        Assert.Contains("Comparable", response.TypeParams);
+    }
+
+    [Fact]
+    public void SourceParser_RecordsNestedGenerics_AsRawStrings()
+    {
+        var api = GetApi();
+        var allTypes = api.Packages.SelectMany(p =>
+            (p.Classes ?? []).Concat(p.Interfaces ?? [])).ToList();
+
+        var client = allTypes.FirstOrDefault(t => t.Name == "ServiceClient");
+        Assert.NotNull(client);
+
+        var getResource = client.Methods?.FirstOrDefault(m => m.Name == "getResource");
+        Assert.NotNull(getResource);
+
+        Assert.NotNull(getResource.Ret);
+        Assert.Contains("CompletableFuture", getResource.Ret);
+        Assert.Contains("ServiceResponse", getResource.Ret);
+    }
+
+    [Fact]
+    public void SourceParser_RecordsReturnTypes_WithImplicitImports()
+    {
+        var api = GetApi();
+        var allTypes = api.Packages.SelectMany(p =>
+            (p.Classes ?? []).Concat(p.Interfaces ?? [])).ToList();
+
+        var client = allTypes.FirstOrDefault(t => t.Name == "ServiceClient");
+        Assert.NotNull(client);
+
+        var listMetadata = client.Methods?.FirstOrDefault(m => m.Name == "listMetadata");
+        Assert.NotNull(listMetadata);
+        Assert.NotNull(listMetadata.Ret);
+        Assert.Contains("Map", listMetadata.Ret);
+        Assert.Contains("List", listMetadata.Ret);
+        Assert.Contains("String", listMetadata.Ret);
+    }
+
+    [Fact]
+    public void SourceParser_DetectsInnerBuilderClass()
+    {
+        var api = GetApi();
+        var allTypes = api.Packages.SelectMany(p =>
+            (p.Classes ?? []).Concat(p.Interfaces ?? [])).ToList();
+
+        var builder = allTypes.FirstOrDefault(t => t.Name == "Builder");
+        Assert.NotNull(builder);
+
+        Assert.NotNull(builder.Methods);
+        var endpointMethod = builder.Methods.FirstOrDefault(m => m.Name == "endpoint");
+        Assert.NotNull(endpointMethod);
+
+        var buildMethod = builder.Methods.FirstOrDefault(m => m.Name == "build");
+        Assert.NotNull(buildMethod);
+    }
+
+    [Fact]
+    public void SourceParser_FindsProcessor_Interface()
+    {
+        var api = GetApi();
+        var allTypes = api.Packages.SelectMany(p =>
+            (p.Classes ?? []).Concat(p.Interfaces ?? [])).ToList();
+
+        var processor = allTypes.FirstOrDefault(t => t.Name == "Processor");
+        if (processor != null)
+        {
+            Assert.NotNull(processor.Methods);
+            Assert.Contains(processor.Methods, m => m.Name == "process");
+        }
+
+        var client = allTypes.FirstOrDefault(t => t.Name == "ServiceClient");
+        Assert.NotNull(client);
+        Assert.NotNull(client.Implements);
+        Assert.Contains(client.Implements, i =>
+            i.Contains("Processor", StringComparison.Ordinal));
+    }
+}

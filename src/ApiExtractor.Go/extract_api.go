@@ -42,6 +42,7 @@ type PackageApi struct {
 
 type DependencyInfo struct {
 	Package    string      `json:"package"`
+	IsStdlib   bool        `json:"isStdlib,omitempty"`
 	Structs    []StructApi `json:"structs,omitempty"`
 	Interfaces []IfaceApi  `json:"interfaces,omitempty"`
 	Types      []TypeApi   `json:"types,omitempty"`
@@ -192,12 +193,11 @@ func isBuiltinType(typeName string) bool {
 		return true // malformed, treat as builtin
 	}
 
-	// Check if it's a stdlib package reference (e.g., "time.Time", "io.Reader")
+	// Check if it's a Go universe type (e.g., "error")
+	// Stdlib package references like "context.Context" and "io.Writer" are NOT builtins —
+	// they are external types that should be tracked as dependencies.
 	if strings.Contains(typeName, ".") {
-		parts := strings.SplitN(typeName, ".", 2)
-		if isStdlibPackage(parts[0]) {
-			return true
-		}
+		return false
 	}
 
 	return goBuiltinTypes[typeName]
@@ -1200,19 +1200,46 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 
 // TypeReferenceCollector collects type references from AST expressions
 type TypeReferenceCollector struct {
-	refs         map[string]bool
-	definedTypes map[string]bool
+	refs            map[string]bool
+	definedTypes    map[string]bool
+	interfaceEmbeds map[string]bool // types seen as interface embeds (definitionally interfaces)
 }
 
 func NewTypeReferenceCollector() *TypeReferenceCollector {
 	return &TypeReferenceCollector{
-		refs:         make(map[string]bool),
-		definedTypes: make(map[string]bool),
+		refs:            make(map[string]bool),
+		definedTypes:    make(map[string]bool),
+		interfaceEmbeds: make(map[string]bool),
 	}
 }
 
 func (c *TypeReferenceCollector) AddDefinedType(name string) {
 	c.definedTypes[name] = true
+}
+
+// AddInterfaceEmbed records a type seen as an embedded type in an interface definition.
+// In Go, interface embeds are definitionally interfaces.
+func (c *TypeReferenceCollector) AddInterfaceEmbed(expr ast.Expr) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *ast.Ident:
+		if isExported(e.Name) && !isBuiltinType(e.Name) {
+			c.interfaceEmbeds[e.Name] = true
+		}
+	case *ast.SelectorExpr:
+		if ident, ok := e.X.(*ast.Ident); ok {
+			c.interfaceEmbeds[ident.Name+"."+e.Sel.Name] = true
+		}
+	}
+	// Also collect as a regular reference
+	c.CollectFromExpr(expr)
+}
+
+// IsKnownInterface returns true if the type was seen as an interface embed.
+func (c *TypeReferenceCollector) IsKnownInterface(typeName string) bool {
+	return c.interfaceEmbeds[typeName]
 }
 
 // CollectFromExpr walks an AST expression and collects all type references.
@@ -1238,7 +1265,7 @@ func (c *TypeReferenceCollector) CollectFromExpr(expr ast.Expr) {
 		// Qualified name like "pkg.Type"
 		if ident, ok := e.X.(*ast.Ident); ok {
 			fullName := ident.Name + "." + e.Sel.Name
-			if !isBuiltinType(fullName) && !isStdlibPackage(ident.Name) {
+			if !isBuiltinType(fullName) {
 				c.refs[fullName] = true
 			}
 		}
@@ -1384,18 +1411,36 @@ func resolveTransitiveDependencies(ctx *extractionContext) []DependencyInfo {
 				fullPath = resolved
 			}
 
-			if !isStdlibPackage(fullPath) {
-				depTypes[fullPath] = append(depTypes[fullPath], typeBaseName)
-			}
+			depTypes[fullPath] = append(depTypes[fullPath], typeBaseName)
 		}
 	}
 
-	// Convert to DependencyInfo list
+	// Convert to DependencyInfo list, classifying known interface embeds
 	var deps []DependencyInfo
 	for pkgPath, types := range depTypes {
-		dep := DependencyInfo{Package: pkgPath}
+		dep := DependencyInfo{Package: pkgPath, IsStdlib: isStdlibPackage(pkgPath)}
 		for _, t := range types {
-			dep.Types = append(dep.Types, TypeApi{Name: t})
+			// Check if this type was seen as an interface embed (qualified name)
+			qualifiedName := ""
+			if resolved, ok := ctx.importMap[pkgPath]; ok {
+				_ = resolved // pkgPath is already resolved
+			}
+			// Try matching with the original alias from the import map
+			for alias, fullPath := range ctx.importMap {
+				if fullPath == pkgPath {
+					qualifiedName = alias + "." + t
+					break
+				}
+			}
+			if qualifiedName == "" {
+				qualifiedName = pkgPath + "." + t
+			}
+
+			if ctx.typeCollector.IsKnownInterface(qualifiedName) {
+				dep.Interfaces = append(dep.Interfaces, IfaceApi{Name: t})
+			} else {
+				dep.Types = append(dep.Types, TypeApi{Name: t})
+			}
 		}
 		deps = append(deps, dep)
 	}
@@ -1609,7 +1654,8 @@ func extractInterface(ctx *extractionContext, t *doc.Type, it *ast.InterfaceType
 
 	for _, m := range it.Methods.List {
 		if len(m.Names) == 0 {
-			// Embedded interface (Go interface composition)
+			// Embedded interface (Go interface composition) — track as known interface
+			ctx.typeCollector.AddInterfaceEmbed(m.Type)
 			i.Embeds = append(i.Embeds, formatExpr(m.Type))
 			continue
 		}
@@ -1668,7 +1714,7 @@ func extractTypeParams(tpl *ast.FieldList) []string {
 	for _, field := range tpl.List {
 		constraint := formatExpr(field.Type)
 		for _, name := range field.Names {
-			if constraint != "" && constraint != "any" {
+			if constraint != "" {
 				params = append(params, name.Name+" "+constraint)
 			} else {
 				params = append(params, name.Name)

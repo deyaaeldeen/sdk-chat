@@ -46,6 +46,11 @@ public sealed record DependencyInfo
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
+    /// <summary>Whether this dependency is from the Node.js runtime (@types/node).</summary>
+    [JsonPropertyName("isNode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsNode { get; init; }
+
     /// <summary>Classes from this package that are referenced in the API.</summary>
     [JsonPropertyName("classes")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

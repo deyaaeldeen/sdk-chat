@@ -46,6 +46,11 @@ public sealed record DependencyInfo
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
+    /// <summary>Whether this dependency is from the language standard library.</summary>
+    [JsonPropertyName("isStdlib")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsStdlib { get; init; }
+
     /// <summary>Structs from this module that are referenced in the API.</summary>
     [JsonPropertyName("structs")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

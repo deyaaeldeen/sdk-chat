@@ -31,15 +31,12 @@ except ImportError:
 
 def _build_builtins_set() -> frozenset[str]:
     """
-    Build the set of Python stdlib/builtin type names dynamically.
+    Build the set of Python builtin type names dynamically.
 
-    Uses runtime introspection of the executing interpreter so
-    the set automatically stays current across Python versions
-    (e.g. ExceptionGroup in 3.11, TaskGroup in 3.11, etc.)
-    without manual maintenance.
-
-    Dynamically imports all stdlib modules and collects their
-    exported names, so no static supplement is needed.
+    Only includes truly universal names that are always available without
+    imports (builtins module) and standard typing constructs. Types from
+    stdlib packages like os, json, http etc. are NOT included — they are
+    tracked as dependencies since they carry useful API surface information.
     """
     names: set[str] = set()
 
@@ -67,38 +64,6 @@ def _build_builtins_set() -> frozenset[str]:
     import abc
     names.update(["ABC", "ABCMeta", "abstractmethod"])
 
-    # 5. Dynamic introspection of all stdlib modules.
-    #    Imports each module in sys.stdlib_module_names and collects
-    #    exported names (from __all__ or public uppercase names).
-    #    Skips modules that are known to have side effects on import.
-    #    Redirects stdout to suppress any output from noisy modules.
-    import sys
-    import io
-    _SKIP_MODULES = frozenset({
-        "antigravity", "turtle", "turtledemo", "tkinter", "idlelib",
-        "test", "ensurepip", "venv", "_thread", "readline", "this",
-    })
-    for mod_name in sys.stdlib_module_names:
-        if mod_name.startswith("_") or mod_name in _SKIP_MODULES:
-            continue
-        old_stdout = sys.stdout
-        sys.stdout = io.StringIO()
-        try:
-            mod = __import__(mod_name, fromlist=["__name__"])
-            exported = getattr(mod, "__all__", None)
-            if exported is not None:
-                names.update(exported)
-            else:
-                names.update(
-                    name for name in dir(mod)
-                    if not name.startswith("_")
-                )
-        except Exception:
-            # Module may not be importable (platform-specific, etc.)
-            pass
-        finally:
-            sys.stdout = old_stdout
-
     return frozenset(names)
 
 
@@ -113,16 +78,14 @@ PYTHON_STDLIB_PACKAGES: frozenset[str] = _sys.stdlib_module_names
 
 
 def is_builtin_type(type_name: str) -> bool:
-    """Check if a type name is a Python builtin."""
+    """Check if a type name is a Python builtin (always available without imports)."""
     # Strip generic parameters (e.g., List[str] -> List)
     base_type = type_name.split("[")[0].strip()
     # Handle qualified names (e.g., typing.List -> List)
     if "." in base_type:
-        parts = base_type.split(".")
-        # Check if module is stdlib
-        if parts[0] in PYTHON_STDLIB_PACKAGES:
-            return True
-        base_type = parts[-1]
+        # Qualified stdlib names (e.g., os.PathLike, json.JSONDecoder) are NOT builtins —
+        # they require imports and should be tracked as dependencies.
+        return False
     return base_type in PYTHON_BUILTINS
 
 
@@ -210,6 +173,7 @@ class TypeReferenceCollector:
         self.refs: set[str] = set()
         self.defined_types: set[str] = set()
         self.resolved_packages: dict[str, str] = {}
+        self.import_map: dict[str, str] = {}  # simple_name -> module_path
 
     def add_defined_type(self, name: str) -> None:
         """Register a locally defined type."""
@@ -218,6 +182,26 @@ class TypeReferenceCollector:
     def collect_from_annotation(self, ann: ast.expr | None) -> None:
         """Collect type references from an annotation AST node."""
         collect_types_from_annotation(ann, self.refs)
+
+    def collect_imports(self, tree: ast.Module) -> None:
+        """
+        Collect import statements from an AST module, including those inside
+        TYPE_CHECKING blocks. Builds a mapping from simple names to their
+        source module paths (e.g., "HTTPResponse" -> "http.client").
+        """
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if not node.module or node.module == "__future__":
+                    continue
+                for alias in (node.names or []):
+                    name = alias.asname or alias.name
+                    if name != "*" and not is_builtin_type(name):
+                        self.import_map[name] = node.module
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.asname or alias.name
+                    if not is_builtin_type(name):
+                        self.import_map[name] = alias.name
 
     def get_external_refs(self) -> set[str]:
         """Get type references that are not locally defined and not builtins."""
@@ -229,16 +213,26 @@ class TypeReferenceCollector:
     def resolve_package(self, type_name: str, installed_packages: set[str]) -> str | None:
         """
         Try to resolve the package a type came from.
-        Uses import analysis and package lookup.
+        Uses import map first, then dotted-name analysis.
         """
         if type_name in self.resolved_packages:
             return self.resolved_packages[type_name]
 
+        # Check import map — deterministic resolution from source imports
+        base_name = type_name.split("[")[0]
+        if base_name in self.import_map:
+            module_path = self.import_map[base_name]
+            root_pkg = module_path.split(".")[0]
+            if root_pkg in installed_packages:
+                self.resolved_packages[type_name] = root_pkg
+                return root_pkg
+
+        # Fall back to dotted-name prefix matching
         if "." in type_name:
             parts = type_name.split(".")
             for i in range(len(parts) - 1, 0, -1):
                 pkg = ".".join(parts[:i])
-                if pkg in installed_packages and not is_stdlib_package(pkg):
+                if pkg in installed_packages:
                     self.resolved_packages[type_name] = pkg
                     return pkg
 
@@ -249,6 +243,7 @@ class TypeReferenceCollector:
         self.refs.clear()
         self.defined_types.clear()
         self.resolved_packages.clear()
+        self.import_map.clear()
 
 
 # Global collector instance
@@ -579,6 +574,9 @@ def extract_module(
     except (SyntaxError, UnicodeDecodeError):
         return {}
 
+    # Collect imports from this module (including TYPE_CHECKING blocks)
+    _type_collector.collect_imports(tree)
+
     # Calculate module name
     rel_path = file_path.relative_to(root_path)
     module_name = str(rel_path).replace('/', '.').replace('\\', '.').replace('.py', '')
@@ -796,7 +794,8 @@ def extract_type_from_package(type_name: str, package_path: Path) -> dict[str, A
 def resolve_transitive_dependencies(api: dict[str, Any], root_path: Path) -> list[dict[str, Any]]:
     """
     Resolve types referenced in the API that come from external packages.
-    Uses AST-based type collection for accurate dependency tracking.
+    Uses import map for deterministic resolution, then falls back to
+    installed package scanning.
     """
     external_refs = _type_collector.get_external_refs()
 
@@ -812,35 +811,41 @@ def resolve_transitive_dependencies(api: dict[str, Any], root_path: Path) -> lis
         pkg_name = _type_collector.resolve_package(type_name, installed_package_names)
 
         if pkg_name and pkg_name in installed_packages:
-            if is_stdlib_package(pkg_name):
-                continue
-
             pkg_path = installed_packages[pkg_name]
             type_info = extract_type_from_package(type_name.split(".")[-1], pkg_path)
             if type_info:
                 if pkg_name not in dependencies:
-                    dependencies[pkg_name] = {"package": pkg_name, "classes": []}
+                    dependencies[pkg_name] = {"package": pkg_name, "isStdlib": is_stdlib_package(pkg_name), "classes": []}
                 dependencies[pkg_name]["classes"].append(type_info)
                 continue
 
         # Fall back to searching all installed packages
-        for pkg_name, pkg_path in installed_packages.items():
-            if is_stdlib_package(pkg_name):
-                continue
-
+        found = False
+        for pkg_name_search, pkg_path in installed_packages.items():
             type_info = extract_type_from_package(type_name.split(".")[-1], pkg_path)
             if type_info:
-                if pkg_name not in dependencies:
-                    dependencies[pkg_name] = {"package": pkg_name, "classes": []}
-                dependencies[pkg_name]["classes"].append(type_info)
+                if pkg_name_search not in dependencies:
+                    dependencies[pkg_name_search] = {"package": pkg_name_search, "isStdlib": is_stdlib_package(pkg_name_search), "classes": []}
+                dependencies[pkg_name_search]["classes"].append(type_info)
+                found = True
                 break
+
+        # If still unresolved, use import map to record dependency without type details.
+        # Skip stdlib packages — they are tracked via isStdlib flag only when their
+        # types can be fully resolved from installed packages.
+        if not found:
+            base_name = type_name.split("[")[0]
+            if base_name in _type_collector.import_map:
+                module_path = _type_collector.import_map[base_name]
+                root_pkg = module_path.split(".")[0]
+                if not is_stdlib_package(root_pkg) and root_pkg not in dependencies:
+                    dependencies[root_pkg] = {"package": root_pkg, "isStdlib": False}
 
     result = []
     for dep_info in dependencies.values():
         if not dep_info.get("classes"):
-            del dep_info["classes"]
-        if dep_info.get("classes") or dep_info.get("functions"):
-            result.append(dep_info)
+            dep_info.pop("classes", None)
+        result.append(dep_info)
 
     return sorted(result, key=lambda d: d["package"])
 
@@ -912,6 +917,8 @@ def format_python_stubs(api: dict[str, Any]) -> str:
 
         for dep in dependencies:
             pkg_name = dep.get("package", "unknown")
+            if dep.get("isStdlib", False):
+                continue
             lines.append(f"# From: {pkg_name}")
             lines.append("")
 

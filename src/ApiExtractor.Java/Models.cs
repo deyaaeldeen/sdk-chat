@@ -46,6 +46,11 @@ public sealed record DependencyInfo
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
+    /// <summary>Whether this dependency is from the Java standard library.</summary>
+    [JsonPropertyName("isStdlib")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsStdlib { get; init; }
+
     /// <summary>Classes from this dependency that are referenced in the API.</summary>
     [JsonPropertyName("classes")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -56,10 +61,10 @@ public sealed record DependencyInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ClassInfo>? Interfaces { get; init; }
 
-    /// <summary>Enums from this dependency that are referenced in the API.</summary>
-    [JsonPropertyName("enums")]
+    /// <summary>Types from this dependency that could not be classified as class/interface from source alone.</summary>
+    [JsonPropertyName("types")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IReadOnlyList<EnumInfo>? Enums { get; init; }
+    public IReadOnlyList<ClassInfo>? Types { get; init; }
 }
 
 /// <summary>A Java package containing types.</summary>

@@ -178,6 +178,7 @@ public static class CSharpFormatter
             foreach (var dep in index.Dependencies)
             {
                 if (sb.Length >= maxLength) break;
+                if (dep.IsStdlib) continue;
 
                 sb.AppendLine($"// From: {dep.Package}");
                 sb.AppendLine();

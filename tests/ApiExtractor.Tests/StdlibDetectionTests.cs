@@ -51,10 +51,12 @@ public class StdlibDetectionTests
 
     /// <summary>
     /// The Go test fixture imports context and time (stdlib packages).
-    /// Verify the extractor does not report them as external dependencies.
+    /// The extractor now tracks stdlib packages in dependencies since they
+    /// are important type references in the public API surface (e.g., context.Context
+    /// parameters, io.Writer returns). Verify they ARE included.
     /// </summary>
     [Fact]
-    public async Task Go_Extract_StdlibPackages_NotInDependencies()
+    public async Task Go_Extract_StdlibPackages_IncludedInDependencies()
     {
         var extractor = new GoApiExtractor();
         if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason ?? "Go not available");
@@ -64,22 +66,16 @@ public class StdlibDetectionTests
         Assert.NotNull(api);
 
         // The fixture uses context.Context and time.Time — both stdlib.
-        // They must not appear in the dependencies list.
-        if (api.Dependencies is { Count: > 0 })
-        {
-            var depPackages = api.Dependencies.Select(d => d.Package).ToList();
-            Assert.DoesNotContain("context", depPackages);
-            Assert.DoesNotContain("time", depPackages);
-            Assert.DoesNotContain("fmt", depPackages);
-            Assert.DoesNotContain("io", depPackages);
+        // They should appear in dependencies since they're part of the public API surface.
+        Assert.NotNull(api.Dependencies);
+        Assert.True(api.Dependencies.Count > 0, "Expected dependencies to be non-empty");
 
-            // Stdlib packages never contain a dot in the first path element
-            foreach (var pkg in depPackages)
-            {
-                var firstElement = pkg.Contains('/') ? pkg[..pkg.IndexOf('/')] : pkg;
-                Assert.Contains('.', firstElement); // external packages have domain-based paths
-            }
-        }
+        var depPackages = api.Dependencies.Select(d => d.Package).ToList();
+        Assert.Contains("context", depPackages);
+
+        // Stdlib deps should be flagged as IsStdlib
+        var stdlibDeps = api.Dependencies.Where(d => d.Package == "context").ToList();
+        Assert.All(stdlibDeps, d => Assert.True(d.IsStdlib, $"Expected {d.Package} to be marked as stdlib"));
     }
 
     // =========================================================================
@@ -208,16 +204,54 @@ public class StdlibDetectionTests
         Assert.Contains("azcore", stubs);
     }
 
+    [Fact]
+    public void Go_StdlibDependency_ExcludedFromStubs()
+    {
+        // Stdlib deps with IsStdlib=true should be filtered by the formatter
+        var api = new GoApiIndex
+        {
+            Package = "test",
+            Packages =
+            [
+                new GoPackageApi
+                {
+                    Name = "test",
+                    Structs = [new GoStructApi { Name = "Client" }]
+                }
+            ],
+            Dependencies =
+            [
+                new Go.DependencyInfo
+                {
+                    Package = "context",
+                    IsStdlib = true,
+                    Interfaces = [new Go.IfaceApi { Name = "Context" }]
+                },
+                new Go.DependencyInfo
+                {
+                    Package = "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+                    Structs = [new GoStructApi { Name = "Policy" }]
+                }
+            ]
+        };
+
+        var stubs = api.ToStubs();
+        // Stdlib dep should be filtered from output
+        Assert.DoesNotContain("// From: context", stubs);
+        // External dep should remain
+        Assert.Contains("// From: github.com/Azure/azure-sdk-for-go/sdk/azcore", stubs);
+    }
+
     // =========================================================================
     // Java — Integration Tests
     // =========================================================================
 
     /// <summary>
     /// The Java test fixture imports java.time, java.util, and java.util.concurrent.
-    /// Verify these don't appear in extracted dependencies.
+    /// Stdlib packages are now included in dependencies but marked with IsStdlib=true.
     /// </summary>
     [Fact]
-    public async Task Java_Extract_StdlibPackages_NotInDependencies()
+    public async Task Java_Extract_StdlibPackages_IncludedInDependencies()
     {
         var extractor = new JavaApiExtractor();
         if (!extractor.IsAvailable()) Assert.Skip(extractor.UnavailableReason ?? "Java not available");
@@ -226,14 +260,19 @@ public class StdlibDetectionTests
 
         Assert.NotNull(api);
 
+        // Stdlib packages should be in dependencies, marked with IsStdlib=true
         if (api.Dependencies is { Count: > 0 })
         {
-            var depPackages = api.Dependencies.Select(d => d.Package).ToList();
-            // java.* packages must never be external dependencies
-            Assert.DoesNotContain(depPackages, p => p.StartsWith("java.", StringComparison.Ordinal));
-            Assert.DoesNotContain(depPackages, p => p.StartsWith("javax.", StringComparison.Ordinal));
-            Assert.DoesNotContain(depPackages, p => p.StartsWith("jdk.", StringComparison.Ordinal));
-            Assert.DoesNotContain(depPackages, p => p.StartsWith("sun.", StringComparison.Ordinal));
+            var stdlibDeps = api.Dependencies
+                .Where(d => d.Package.StartsWith("java.", StringComparison.Ordinal) ||
+                            d.Package.StartsWith("javax.", StringComparison.Ordinal) ||
+                            d.Package.StartsWith("jdk.", StringComparison.Ordinal))
+                .ToList();
+
+            foreach (var dep in stdlibDeps)
+            {
+                Assert.True(dep.IsStdlib, $"Expected {dep.Package} to be marked as stdlib");
+            }
         }
     }
 
@@ -393,6 +432,41 @@ public class StdlibDetectionTests
         Assert.Contains("com.azure.core", stubs);
     }
 
+    [Fact]
+    public void Java_StdlibDependency_ExcludedFromStubs()
+    {
+        var api = new JavaApiIndex
+        {
+            Package = "test",
+            Packages =
+            [
+                new JavaPackageInfo
+                {
+                    Name = "test",
+                    Classes = [new JavaClassInfo { Name = "Client" }]
+                }
+            ],
+            Dependencies =
+            [
+                new Java.DependencyInfo
+                {
+                    Package = "java.util",
+                    IsStdlib = true,
+                    Classes = [new JavaClassInfo { Name = "List" }]
+                },
+                new Java.DependencyInfo
+                {
+                    Package = "com.azure.core",
+                    Classes = [new JavaClassInfo { Name = "HttpPipeline" }]
+                }
+            ]
+        };
+
+        var stubs = api.ToStubs();
+        Assert.DoesNotContain("// From: java.util", stubs);
+        Assert.Contains("// From: com.azure.core", stubs);
+    }
+
     // =========================================================================
     // Python — Integration Tests
     // =========================================================================
@@ -488,28 +562,66 @@ public class StdlibDetectionTests
         Assert.Contains("azure-core", stubs);
     }
 
+    [Fact]
+    public void Python_StdlibDependency_ExcludedFromStubs()
+    {
+        var api = new PyApiIndex(
+            Package: "test-pkg",
+            Modules:
+            [
+                new PyModuleInfo("client",
+                    [new PyClassInfo { Name = "Client" }],
+                    null)
+            ],
+            Dependencies:
+            [
+                new Python.DependencyInfo
+                {
+                    Package = "os",
+                    IsStdlib = true,
+                    Classes = [new PyClassInfo { Name = "PathLike" }]
+                },
+                new Python.DependencyInfo
+                {
+                    Package = "azure-core",
+                    Classes = [new PyClassInfo { Name = "PipelinePolicy" }]
+                }
+            ]
+        );
+
+        var stubs = api.ToStubs();
+        Assert.DoesNotContain("# From: os", stubs);
+        Assert.Contains("# From: azure-core", stubs);
+    }
+
     // =========================================================================
     // .NET — Integration Tests
     // =========================================================================
 
     /// <summary>
     /// The .NET test fixture uses Task, CancellationToken, string, IAsyncEnumerable, etc.
-    /// Verify these System types don't appear as external dependencies.
+    /// System types are now included in dependencies but marked with IsStdlib=true.
     /// </summary>
     [Fact]
-    public async Task DotNet_Extract_StdlibTypes_NotInDependencies()
+    public async Task DotNet_Extract_StdlibTypes_IncludedInDependencies()
     {
         var extractor = new CSharpApiExtractor();
         var api = await extractor.ExtractAsync(Path.Combine(TestFixturesBase, "DotNet"));
 
         Assert.NotNull(api);
 
+        // System types should be in dependencies, marked with IsStdlib=true
         if (api.Dependencies is { Count: > 0 })
         {
-            var depPackages = api.Dependencies.Select(d => d.Package).ToList();
-            // System namespaces must never appear as external dependencies
-            Assert.DoesNotContain(depPackages, p => p.StartsWith("System", StringComparison.Ordinal));
-            Assert.DoesNotContain(depPackages, p => p.StartsWith("Microsoft.Extensions", StringComparison.Ordinal));
+            var systemDeps = api.Dependencies
+                .Where(d => d.Package.StartsWith("System", StringComparison.Ordinal) ||
+                            d.Package.StartsWith("Microsoft.Extensions", StringComparison.Ordinal))
+                .ToList();
+
+            foreach (var dep in systemDeps)
+            {
+                Assert.True(dep.IsStdlib, $"Expected {dep.Package} to be marked as stdlib");
+            }
         }
     }
 
@@ -628,6 +740,41 @@ public class StdlibDetectionTests
         var stubs = api.ToStubs();
         Assert.Contains("Dependency Types", stubs);
         Assert.Contains("Azure.Core", stubs);
+    }
+
+    [Fact]
+    public void DotNet_StdlibDependency_ExcludedFromStubs()
+    {
+        var api = new DotNetApiIndex
+        {
+            Package = "Test",
+            Namespaces =
+            [
+                new DotNetNamespaceInfo
+                {
+                    Name = "Test",
+                    Types = [new DotNetTypeInfo { Name = "Client", Kind = "class" }]
+                }
+            ],
+            Dependencies =
+            [
+                new DotNetDependencyInfo
+                {
+                    Package = "System.Runtime",
+                    IsStdlib = true,
+                    Types = [new DotNetTypeInfo { Name = "Task", Kind = "class" }]
+                },
+                new DotNetDependencyInfo
+                {
+                    Package = "Azure.Core",
+                    Types = [new DotNetTypeInfo { Name = "Response", Kind = "class" }]
+                }
+            ]
+        };
+
+        var stubs = api.ToStubs();
+        Assert.DoesNotContain("// From: System.Runtime", stubs);
+        Assert.Contains("// From: Azure.Core", stubs);
     }
 
     // =========================================================================
@@ -762,5 +909,40 @@ public class StdlibDetectionTests
         var stubs = api.ToStubs();
         Assert.Contains("Dependencies", stubs);
         Assert.Contains("@azure/core-rest-pipeline", stubs);
+    }
+
+    [Fact]
+    public void TypeScript_StdlibDependency_ExcludedFromStubs()
+    {
+        var api = new TsApiIndex
+        {
+            Package = "test",
+            Modules =
+            [
+                new TsModuleInfo
+                {
+                    Name = "test",
+                    Classes = [new TsClassInfo { Name = "Client", ExportPath = "." }]
+                }
+            ],
+            Dependencies =
+            [
+                new TsDependencyInfo
+                {
+                    Package = "@types/node",
+                    IsNode = true,
+                    Interfaces = [new TsInterfaceInfo { Name = "IncomingMessage" }]
+                },
+                new TsDependencyInfo
+                {
+                    Package = "@azure/core-rest-pipeline",
+                    Interfaces = [new TsInterfaceInfo { Name = "PipelinePolicy" }]
+                }
+            ]
+        };
+
+        var stubs = api.ToStubs();
+        Assert.DoesNotContain("// From: @types/node", stubs);
+        Assert.Contains("// From: @azure/core-rest-pipeline", stubs);
     }
 }

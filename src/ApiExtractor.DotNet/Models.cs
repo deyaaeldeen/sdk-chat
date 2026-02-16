@@ -54,6 +54,11 @@ public sealed record DependencyInfo
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
+    /// <summary>Whether this dependency is from the .NET base class library.</summary>
+    [JsonPropertyName("isStdlib")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsStdlib { get; init; }
+
     /// <summary>Types from this package that are referenced in the API.</summary>
     [JsonPropertyName("types")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

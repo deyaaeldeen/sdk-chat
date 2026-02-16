@@ -226,6 +226,8 @@ public static class PythonFormatter
 
             foreach (var dep in index.Dependencies)
             {
+                if (dep.IsStdlib) continue;
+
                 sb.AppendLine($"# From: {dep.Package}");
                 sb.AppendLine();
 

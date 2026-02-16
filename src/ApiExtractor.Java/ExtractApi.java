@@ -701,6 +701,7 @@ public class ExtractApi {
         // Reset the type collector and import map for this extraction
         typeCollector.clear();
         importMap.clear();
+        wildcardPackages.clear();
 
         String packageName = detectPackageName(root);
         List<Map<String, Object>> packages = new ArrayList<>();
@@ -865,11 +866,41 @@ public class ExtractApi {
         JAVA_SYSTEM_SIMPLE_NAMES = Collections.unmodifiableSet(names);
     }
 
+    // java.lang types are auto-imported (like Go's universe types) — these are true builtins.
+    // Types from java.util, java.io, java.net, etc. need explicit imports and should be tracked.
+    private static final Set<String> JAVA_LANG_NAMES;
+    static {
+        Set<String> langNames = new HashSet<>(JAVA_PRIMITIVES);
+        try {
+            FileSystem jrt = FileSystems.getFileSystem(URI.create("jrt:/"));
+            Path javaLang = jrt.getPath("/modules/java.base/java/lang");
+            if (Files.exists(javaLang)) {
+                try (var stream = Files.list(javaLang)) {
+                    stream.filter(p -> p.toString().endsWith(".class"))
+                        .forEach(p -> {
+                            String fileName = p.getFileName().toString();
+                            String simpleName = fileName.substring(0, fileName.length() - 6);
+                            if (!simpleName.contains("$") &&
+                                !simpleName.equals("package-info") &&
+                                !simpleName.equals("module-info")) {
+                                langNames.add(simpleName);
+                            }
+                        });
+                }
+            }
+        } catch (Exception e) {
+            // JRT not available — langNames will have primitives only.
+            // With --initialize-at-build-time=ExtractApi, this never triggers
+            // in native-image (JRT is available during the build).
+        }
+        JAVA_LANG_NAMES = Collections.unmodifiableSet(langNames);
+    }
+
     private static boolean isBuiltinType(String typeName) {
         if (typeName == null || typeName.isEmpty()) return true;
         String baseName = typeName.contains("<") ? typeName.substring(0, typeName.indexOf('<')) : typeName;
         baseName = baseName.contains(".") ? baseName.substring(baseName.lastIndexOf('.') + 1) : baseName;
-        return JAVA_SYSTEM_SIMPLE_NAMES.contains(baseName);
+        return JAVA_LANG_NAMES.contains(baseName);
     }
 
     private static boolean isStdlibPackage(String pkgName) {
@@ -891,6 +922,8 @@ public class ExtractApi {
         private final Set<String> definedTypes = new HashSet<>();
         /** Types seen in {@code implements} clauses (definitely interfaces). */
         private final Set<String> implementsRefs = new HashSet<>();
+        /** Types seen in {@code extends} clauses (definitely superclasses). */
+        private final Set<String> extendsRefs = new HashSet<>();
 
         void addDefinedType(String name) {
             if (name != null) {
@@ -909,6 +942,22 @@ public class ExtractApi {
                 String name = type.asClassOrInterfaceType().getNameAsString();
                 if (!isBuiltinType(name)) {
                     implementsRefs.add(name);
+                }
+            }
+            collectFromType(type);
+        }
+
+        /**
+         * Record a type reference that appeared in an {@code extends} clause
+         * for a class (not an interface). Such types are definitionally
+         * superclasses in Java.
+         */
+        void addExtendsRef(Type type) {
+            if (type == null) return;
+            if (type.isClassOrInterfaceType()) {
+                String name = type.asClassOrInterfaceType().getNameAsString();
+                if (!isBuiltinType(name)) {
+                    extendsRefs.add(name);
                 }
             }
             collectFromType(type);
@@ -1001,10 +1050,19 @@ public class ExtractApi {
             return implementsRefs.contains(baseName);
         }
 
+        /**
+         * Check if a base type name was seen in an {@code extends} clause
+         * of a class, meaning it is definitionally a superclass (class, not interface).
+         */
+        boolean isKnownSuperclass(String baseName) {
+            return extendsRefs.contains(baseName);
+        }
+
         void clear() {
             refs.clear();
             definedTypes.clear();
             implementsRefs.clear();
+            extendsRefs.clear();
         }
     }
 
@@ -1014,6 +1072,10 @@ public class ExtractApi {
     // Maps simple type names to their fully qualified package from import statements
     // This enables rigorous resolution instead of heuristic guessing
     private static final Map<String, String> importMap = new HashMap<>();
+
+    // Wildcard import packages (e.g., "com.azure.core" from "import com.azure.core.*")
+    // Used as fallback when a type isn't found in the explicit import map
+    private static final Set<String> wildcardPackages = new LinkedHashSet<>();
 
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> resolveTransitiveDependencies(List<Map<String, Object>> packages) {
@@ -1028,7 +1090,7 @@ public class ExtractApi {
         Map<String, List<String>> byPackage = new TreeMap<>();
         for (String typeName : externalTypes) {
             String pkg = resolvePackageFromImports(typeName);
-            if (pkg != null && !isStdlibPackage(pkg)) {
+            if (pkg != null) {
                 byPackage.computeIfAbsent(pkg, k -> new ArrayList<>()).add(typeName);
             }
         }
@@ -1038,9 +1100,11 @@ public class ExtractApi {
         for (Map.Entry<String, List<String>> entry : byPackage.entrySet()) {
             Map<String, Object> depInfo = new LinkedHashMap<>();
             depInfo.put("package", entry.getKey());
+            depInfo.put("isStdlib", isStdlibPackage(entry.getKey()));
 
             List<Map<String, Object>> classes = new ArrayList<>();
             List<Map<String, Object>> interfaces = new ArrayList<>();
+            List<Map<String, Object>> types = new ArrayList<>();
             for (String typeName : entry.getValue().stream().distinct().sorted().collect(Collectors.toList())) {
                 Map<String, Object> typeEntry = new LinkedHashMap<>();
                 String baseName = typeName.contains(".") ? typeName.substring(typeName.lastIndexOf('.') + 1) : typeName;
@@ -1048,8 +1112,12 @@ public class ExtractApi {
 
                 if (typeCollector.isKnownInterface(baseName)) {
                     interfaces.add(typeEntry);
-                } else {
+                } else if (typeCollector.isKnownSuperclass(baseName)) {
                     classes.add(typeEntry);
+                } else {
+                    // Type appears only in parameter/return positions —
+                    // cannot classify from source alone
+                    types.add(typeEntry);
                 }
             }
             if (!classes.isEmpty()) {
@@ -1057,6 +1125,9 @@ public class ExtractApi {
             }
             if (!interfaces.isEmpty()) {
                 depInfo.put("interfaces", interfaces);
+            }
+            if (!types.isEmpty()) {
+                depInfo.put("types", types);
             }
 
             result.add(depInfo);
@@ -1077,7 +1148,19 @@ public class ExtractApi {
         }
 
         // Look up in import map (collected from source files)
-        return importMap.get(typeName);
+        String resolved = importMap.get(typeName);
+        if (resolved != null) {
+            return resolved;
+        }
+
+        // Fall back to wildcard packages — if there's exactly one, use it.
+        // If multiple wildcard packages exist, we can't determine which one
+        // the type belongs to without compiled analysis, so we skip.
+        if (wildcardPackages.size() == 1) {
+            return wildcardPackages.iterator().next();
+        }
+
+        return null;
     }
 
     /**
@@ -1091,7 +1174,8 @@ public class ExtractApi {
             String importName = imp.getNameAsString();
             if (imp.isAsterisk()) {
                 // Wildcard import like "import com.azure.core.*"
-                // We can't map specific types, but we note the package exists
+                // Record the package for fallback resolution
+                wildcardPackages.add(importName);
                 continue;
             }
 
@@ -1139,6 +1223,13 @@ public class ExtractApi {
                 pkgInfo.computeIfAbsent("enums", k -> new ArrayList<>());
             list.add(info);
         }
+
+        // Recurse into nested/inner type declarations (e.g., Builder inner classes)
+        for (BodyDeclaration<?> member : type.getMembers()) {
+            if (member instanceof TypeDeclaration<?>) {
+                extractType((TypeDeclaration<?>) member, pkgInfo);
+            }
+        }
     }
 
     static Map<String, Object> extractClassOrInterface(ClassOrInterfaceDeclaration cid) {
@@ -1172,7 +1263,8 @@ public class ExtractApi {
             if (isInterface) {
                 typeCollector.addImplementsRef(extType);
             } else {
-                typeCollector.collectFromType(extType);
+                // Class extends — the target is a superclass (class, not interface)
+                typeCollector.addExtendsRef(extType);
             }
         }
 

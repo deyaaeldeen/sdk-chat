@@ -236,6 +236,7 @@ public static class JavaFormatter
             foreach (var dep in api.Dependencies)
             {
                 if (sb.Length >= maxLength) break;
+                if (dep.IsStdlib) continue;
 
                 sb.AppendLine($"// From: {dep.Package}");
                 sb.AppendLine();
@@ -252,10 +253,10 @@ public static class JavaFormatter
                     FormatType(sb, cls, GetKeyword(cls));
                 }
 
-                foreach (var e in dep.Enums ?? [])
+                foreach (var t in dep.Types ?? [])
                 {
                     if (sb.Length >= maxLength) break;
-                    FormatEnums(sb, [e]);
+                    FormatType(sb, t, "type");
                 }
             }
         }

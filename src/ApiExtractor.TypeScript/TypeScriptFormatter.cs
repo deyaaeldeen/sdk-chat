@@ -398,6 +398,7 @@ public static class TypeScriptFormatter
             foreach (var dep in index.Dependencies)
             {
                 if (sb.Length >= maxLength) break;
+                if (dep.IsNode) continue;
 
                 sb.AppendLine($"// From: {dep.Package}");
                 sb.AppendLine();

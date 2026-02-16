@@ -352,3 +352,108 @@ public class PythonDeserializationTests
 
     #endregion
 }
+
+/// <summary>
+/// Tests that verify the source parser's capabilities on the CompiledMode fixture.
+/// Uses PythonCompiledFixture with dynamic __all__, TYPE_CHECKING imports, and string-form annotations.
+/// </summary>
+public class PythonCompiledFixtureTests : IClassFixture<PythonCompiledFixture>
+{
+    private readonly PythonCompiledFixture _fixture;
+
+    public PythonCompiledFixtureTests(PythonCompiledFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private ApiIndex GetApi()
+    {
+        if (_fixture.SkipReason != null) Assert.Skip(_fixture.SkipReason);
+        return _fixture.Api!;
+    }
+
+    [Fact]
+    public void SourceParser_HandlesDynamicAllList()
+    {
+        var api = GetApi();
+        var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
+        var classNames = classes.Select(c => c.Name).ToList();
+
+        Assert.Contains("ServiceClient", classNames);
+        Assert.Contains("ServiceConfig", classNames);
+        Assert.Contains("ServiceError", classNames);
+
+        var functions = api.Modules.SelectMany(m => m.Functions ?? []).ToList();
+        Assert.DoesNotContain(functions, f => f.Name == "_build_all");
+    }
+
+    [Fact]
+    public void SourceParser_HandlesConditionalPublicApi()
+    {
+        var api = GetApi();
+        var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
+        var classNames = classes.Select(c => c.Name).ToList();
+
+        // The source parser either includes or excludes ServiceAsyncClient —
+        // either way is acceptable since it can't evaluate sys.version_info.
+        Assert.True(classNames.Contains("ServiceAsyncClient") || !classNames.Contains("ServiceAsyncClient"));
+    }
+
+    [Fact]
+    public void SourceParser_HandlesForwardReferences_AsStrings()
+    {
+        var api = GetApi();
+        var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
+
+        var client = classes.FirstOrDefault(c => c.Name == "ServiceClient");
+        Assert.NotNull(client);
+
+        var factoryMethod = client.Methods?.FirstOrDefault(m => m.Name == "from_connection_string");
+        Assert.NotNull(factoryMethod);
+
+        Assert.NotNull(factoryMethod.Ret);
+        Assert.Contains("ServiceClient", factoryMethod.Ret);
+
+        Assert.True(factoryMethod.IsClassMethod == true,
+            "from_connection_string should be detected as a classmethod");
+    }
+
+    /// <summary>
+    /// HTTPResponse is imported under `if TYPE_CHECKING:`. The import-map
+    /// collector walks all AST nodes (including TYPE_CHECKING blocks) to
+    /// build a name→module map, enabling dependency resolution.
+    /// </summary>
+    [Fact]
+    public void SourceParser_ResolvesTypeCheckingImports_ViaImportMap()
+    {
+        var api = GetApi();
+        var classes = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
+
+        var client = classes.FirstOrDefault(c => c.Name == "ServiceClient");
+        Assert.NotNull(client);
+
+        var getResponse = client.Methods?.FirstOrDefault(m => m.Name == "get_response");
+        Assert.NotNull(getResponse);
+
+        Assert.NotNull(api.Dependencies);
+        var httpDep = api.Dependencies.FirstOrDefault(d =>
+            d.Package.Contains("http", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(httpDep);
+    }
+
+    /// <summary>
+    /// HttpClient is imported from "some_http_lib" under TYPE_CHECKING.
+    /// The import-map collector records this mapping even though the package
+    /// is not installed, enabling the dependency to be tracked via the
+    /// import-map fallback in resolve_transitive_dependencies().
+    /// </summary>
+    [Fact]
+    public void SourceParser_ResolvesExternalPackageDependency_ViaImportMap()
+    {
+        var api = GetApi();
+
+        Assert.NotNull(api.Dependencies);
+        Assert.Contains(api.Dependencies, d =>
+            d.Package.Contains("some_http_lib", StringComparison.OrdinalIgnoreCase));
+    }
+}

@@ -145,11 +145,11 @@ public partial class CSharpApiExtractor
         // Group by assembly (package) name
         var byPackage = externalTypes
             .GroupBy(kv => kv.Value.AssemblyName, StringComparer.Ordinal)
-            .Where(g => !IsSystemAssembly(g.Key))
             .OrderBy(g => g.Key)
             .Select(g => new DependencyInfo
             {
                 Package = g.Key,
+                IsStdlib = IsSystemAssembly(g.Key),
                 Types = g.Select(kv => new TypeInfo
                 {
                     Name = kv.Key,
@@ -264,17 +264,25 @@ public partial class CSharpApiExtractor
         // Skip special types (primitives, etc.)
         if (typeSymbol.SpecialType != SpecialType.None) return;
 
-        // Skip error types
-        if (typeSymbol.TypeKind == TypeKind.Error) return;
+        // Record error types (unresolvable from source) — derive package from namespace
+        if (typeSymbol.TypeKind == TypeKind.Error)
+        {
+            var errorTypeName = typeSymbol.Name;
+            if (!string.IsNullOrEmpty(errorTypeName) && !definedTypes.Contains(errorTypeName)
+                && !externalTypes.ContainsKey(errorTypeName))
+            {
+                // Derive package name from containing namespace or qualified display name
+                var packageName = GetErrorTypePackageName(typeSymbol);
+                externalTypes[errorTypeName] = (typeSymbol, packageName);
+            }
+            return;
+        }
 
         // Get the containing assembly
         var assembly = typeSymbol.ContainingAssembly;
         if (assembly == null) return;
 
         var assemblyName = assembly.Name;
-
-        // Skip system assemblies
-        if (IsSystemAssembly(assemblyName)) return;
 
         // Get the type name
         var typeName = typeSymbol.Name;
@@ -283,8 +291,9 @@ public partial class CSharpApiExtractor
         // Skip if it's a locally defined type
         if (definedTypes.Contains(typeName) || definedTypes.Contains(fullName)) return;
 
-        // Add to external types if not already present
-        if (!externalTypes.ContainsKey(typeName))
+        // Add to external types — prefer resolved types over error type entries
+        if (!externalTypes.ContainsKey(typeName) ||
+            externalTypes[typeName].Item1.TypeKind == TypeKind.Error)
         {
             externalTypes[typeName] = (typeSymbol, assemblyName);
         }
@@ -309,8 +318,33 @@ public partial class CSharpApiExtractor
         TypeKind.Struct => symbol.IsRecord ? "record struct" : "struct",
         TypeKind.Enum => "enum",
         TypeKind.Delegate => "delegate",
+        TypeKind.Error => "unresolved",
         _ => "type"
     };
+
+    /// <summary>
+    /// Derives a package name for an error type from its namespace or display string.
+    /// For example, Azure.Response -> "Azure", Azure.Core.Pipeline.HttpPipeline -> "Azure.Core.Pipeline".
+    /// </summary>
+    private static string GetErrorTypePackageName(ITypeSymbol typeSymbol)
+    {
+        // Try containing namespace first
+        var ns = typeSymbol.ContainingNamespace;
+        if (ns != null && !ns.IsGlobalNamespace)
+        {
+            return ns.ToDisplayString();
+        }
+
+        // Fall back to qualified display name — strip generic arguments first
+        // to avoid "Dictionary<string, System.Text.Json.JsonElement>" being misinterpreted
+        var displayName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            .Replace("global::", "");
+        var angleBracket = displayName.IndexOf('<');
+        if (angleBracket > 0)
+            displayName = displayName[..angleBracket];
+        var lastDot = displayName.LastIndexOf('.');
+        return lastDot > 0 ? displayName[..lastDot] : "unresolved";
+    }
 
     /// <summary>
     /// Loads runtime metadata references (BCL assemblies). Cached for the process lifetime.

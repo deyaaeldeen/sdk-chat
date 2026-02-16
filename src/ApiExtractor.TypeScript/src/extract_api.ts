@@ -125,6 +125,8 @@ export interface ApiIndex {
 export interface DependencyInfo {
     /** The npm package name */
     package: string;
+    /** Whether this dependency is from the Node.js runtime (@types/node) */
+    isNode?: boolean;
     /** Types from this package that are referenced in the API */
     classes?: ClassInfo[];
     interfaces?: InterfaceInfo[];
@@ -137,11 +139,13 @@ export interface DependencyInfo {
 // ============================================================================
 
 /**
- * Paths that indicate a type is a builtin (from TypeScript lib or @types/node).
+ * Paths that indicate a type is a language-level builtin (from TypeScript lib).
+ * These are universal types like Promise, Array, Map that every JS runtime provides.
+ * Note: @types/node is NOT included — Node.js stdlib types (Buffer, http.IncomingMessage)
+ * are tracked as dependencies since they carry useful API surface information.
  */
 const BUILTIN_PATH_PATTERNS = [
     "/typescript/lib/",      // TypeScript lib files (lib.dom.d.ts, lib.es*.d.ts)
-    "/@types/node/",         // Node.js types
     "/node_modules/typescript/", // Alternative path format
 ];
 
@@ -155,10 +159,12 @@ const PRIMITIVE_TYPES = new Set([
 
 /**
  * Builtin type names discovered dynamically from the TypeScript project's
- * lib files (lib.es*.d.ts, lib.dom.d.ts) and @types/node declarations.
+ * lib files (lib.es*.d.ts, lib.dom.d.ts). These are language-level types
+ * like Promise, Array, Map that every JS runtime provides.
  * Populated at extraction time by scanning source files that match
  * BUILTIN_PATH_PATTERNS, ensuring the set stays current with the
- * TypeScript and @types/node versions installed in the target project.
+ * TypeScript version installed in the target project.
+ * Note: @types/node types are NOT builtins — they are stdlib dependencies.
  */
 let discoveredBuiltins = new Set<string>();
 
@@ -169,7 +175,7 @@ let typeResolutionProject: Project | null = null;
 
 /**
  * Sets the project to use for type resolution and discovers all builtin
- * type names from TypeScript lib files and @types/node declarations.
+ * type names from TypeScript lib files.
  *
  * Scans source files matching BUILTIN_PATH_PATTERNS and collects all
  * interface, class, type alias, and enum names. This replaces the previous
@@ -183,7 +189,7 @@ function setTypeResolutionProject(project: Project): void {
 }
 
 /**
- * Scans all source files from TypeScript lib and @types/node to collect
+ * Scans all source files from TypeScript lib to collect
  * every declared interface, class, type alias, enum, and variable name.
  */
 function discoverBuiltinTypes(project: Project): Set<string> {
@@ -223,8 +229,9 @@ function discoverBuiltinTypes(project: Project): Set<string> {
 }
 
 /**
- * Checks if a type name is a builtin using dynamically discovered type names.
- * Builtins are types defined in TypeScript's lib files or @types/node.
+ * Checks if a type name is a language-level builtin using dynamically discovered type names.
+ * Builtins are types defined in TypeScript's lib files (Promise, Array, Map, etc.).
+ * Note: @types/node types are NOT builtins — they are stdlib dependencies.
  */
 function isBuiltinType(typeName: string): boolean {
     // Strip generic parameters
@@ -235,7 +242,7 @@ function isBuiltinType(typeName: string): boolean {
         return true;
     }
 
-    // Check against dynamically discovered builtins from lib files / @types/node
+    // Check against dynamically discovered builtins from TypeScript lib files
     return discoveredBuiltins.has(baseName);
 }
 
@@ -413,11 +420,15 @@ function resolvePackageNameFromPath(filePath: string): string | undefined {
 /**
  * Collector for type references during extraction.
  * Accumulates all external type references found in the API surface.
+ * Tracks both resolved (via ts-morph type system) and unresolved
+ * (via import declarations) type references.
  */
 class TypeReferenceCollector {
     private refs = new Set<ResolvedTypeRef>();
     private project: Project | null = null;
     private definedTypes = new Set<string>();
+    private importedTypes = new Map<string, string>(); // typeName -> packageName
+    private rawTypeNames = new Set<string>(); // type names seen in annotations
 
     setProject(project: Project): void {
         this.project = project;
@@ -437,17 +448,87 @@ class TypeReferenceCollector {
         }
     }
 
+    /**
+     * Track a raw type name from an annotation string. Used to match
+     * unresolved types against import declarations.
+     */
+    collectRawTypeName(typeText: string): void {
+        if (!typeText) return;
+        // Extract potential type names from the type text.
+        // Handle patterns like "Promise<HttpClient>", "HttpClient | undefined", etc.
+        const tokens = typeText.split(/[<>|&,\[\]\s()]+/);
+        for (const token of tokens) {
+            const name = token.trim();
+            if (name && !PRIMITIVE_TYPES.has(name) && !isBuiltinType(name)) {
+                this.rawTypeNames.add(name);
+            }
+        }
+    }
+
+    /**
+     * Collect import declarations from source files to build a map of
+     * imported type names to their package names. This enables dependency
+     * tracking even when packages are not installed (node_modules missing).
+     */
+    collectFromImportDeclarations(sourceFiles: SourceFile[]): void {
+        for (const sf of sourceFiles) {
+            for (const imp of sf.getImportDeclarations()) {
+                const moduleSpecifier = imp.getModuleSpecifierValue();
+                // Only external packages (not relative imports)
+                if (moduleSpecifier.startsWith(".")) continue;
+
+                // Default import
+                const defaultImport = imp.getDefaultImport();
+                if (defaultImport) {
+                    this.importedTypes.set(defaultImport.getText(), moduleSpecifier);
+                }
+
+                // Named imports
+                for (const named of imp.getNamedImports()) {
+                    this.importedTypes.set(named.getName(), moduleSpecifier);
+                }
+
+                // Namespace import
+                const nsImport = imp.getNamespaceImport();
+                if (nsImport) {
+                    this.importedTypes.set(nsImport.getText(), moduleSpecifier);
+                }
+            }
+        }
+    }
+
     getExternalRefs(): ResolvedTypeRef[] {
         // Filter out locally defined types and types without package info
-        return Array.from(this.refs).filter(ref =>
+        const resolved = Array.from(this.refs).filter(ref =>
             !this.definedTypes.has(ref.name) &&
             ref.packageName !== undefined
         );
+
+        // Also include import-backed refs for types used in the API but not resolved by ts-morph
+        const resolvedNames = new Set(resolved.map(r => r.name));
+        for (const typeName of this.rawTypeNames) {
+            if (resolvedNames.has(typeName)) continue;
+            if (this.definedTypes.has(typeName)) continue;
+
+            const packageName = this.importedTypes.get(typeName);
+            if (packageName) {
+                resolved.push({
+                    name: typeName,
+                    fullName: typeName,
+                    declarationPath: "",
+                    packageName: packageName,
+                });
+            }
+        }
+
+        return resolved;
     }
 
     clear(): void {
         this.refs.clear();
         this.definedTypes.clear();
+        this.importedTypes.clear();
+        this.rawTypeNames.clear();
     }
 }
 
@@ -517,6 +598,12 @@ function formatParameter(p: ParameterDeclaration): string {
         sig += `: ${simplifyType(typeText)}`;
         // Collect type reference for dependency tracking
         typeCollector.collectFromType(type);
+        typeCollector.collectRawTypeName(typeText);
+    }
+    // Also collect from annotation node (preserves original names for unresolved types)
+    const typeNode = p.getTypeNode();
+    if (typeNode) {
+        typeCollector.collectRawTypeName(typeNode.getText());
     }
     return sig;
 }
@@ -529,6 +616,12 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
+        if (ret) typeCollector.collectRawTypeName(ret);
+    }
+    // Also collect from annotation node (preserves original names for unresolved types)
+    const retTypeNode = method.getReturnTypeNode();
+    if (retTypeNode) {
+        typeCollector.collectRawTypeName(retTypeNode.getText());
     }
 
     const result: MethodInfo = {
@@ -552,6 +645,7 @@ function extractProperty(prop: PropertyDeclaration): PropertyInfo {
 
     // Collect type reference for dependency tracking
     typeCollector.collectFromType(type);
+    typeCollector.collectRawTypeName(type.getText());
 
     const result: PropertyInfo = {
         name: prop.getName(),
@@ -583,6 +677,7 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
     const ext = cls.getExtends();
     if (ext) {
         result.extends = ext.getText();
+        typeCollector.collectRawTypeName(ext.getText());
         // Collect base class type
         const baseType = ext.getType();
         typeCollector.collectFromType(baseType);
@@ -595,6 +690,7 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
         result.implements = impl;
         // Collect interface types
         for (const implExpr of implExprs) {
+            typeCollector.collectRawTypeName(implExpr.getText());
             const implType = implExpr.getType();
             typeCollector.collectFromType(implType);
         }
@@ -641,6 +737,7 @@ function extractInterfaceMethod(method: Node): MethodInfo | undefined {
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
+        if (ret) typeCollector.collectRawTypeName(ret);
     }
 
     const result: MethodInfo = {
@@ -669,6 +766,7 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
+        if (ret) typeCollector.collectRawTypeName(ret);
     }
 
     const result: MethodInfo = {
@@ -687,9 +785,19 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
 function extractInterfaceProperty(prop: Node): PropertyInfo | undefined {
     if (!Node.isPropertySignature(prop)) return undefined;
 
+    const typeText = prop.getType().getText();
+    typeCollector.collectRawTypeName(typeText);
+    // Also collect from the type annotation node directly —
+    // the resolved type may be 'any' for uninstalled packages,
+    // but the annotation text preserves the original type name
+    const typeNode = prop.getTypeNode();
+    if (typeNode) {
+        typeCollector.collectRawTypeName(typeNode.getText());
+    }
+
     const result: PropertyInfo = {
         name: prop.getName(),
-        type: simplifyType(prop.getType().getText()),
+        type: simplifyType(typeText),
     };
 
     if (prop.isReadonly()) result.readonly = true;
@@ -777,6 +885,7 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
+        if (ret) typeCollector.collectRawTypeName(ret);
     }
 
     const result: FunctionInfo = {
@@ -1167,6 +1276,14 @@ export function extractPackage(rootPath: string): ApiIndex {
     const entryEntries = resolveEntryPointFiles(rootPath);
     const entryPointSymbols = extractExportedSymbols(project, entryEntries);
 
+    // Collect import declarations from all source files for import-based
+    // dependency tracking (handles uninstalled packages)
+    const sourceFilesForImports = project.getSourceFiles().filter(sf => {
+        const fp = sf.getFilePath();
+        return !fp.includes("node_modules");
+    });
+    typeCollector.collectFromImportDeclarations(sourceFilesForImports);
+
     const modules: ModuleInfo[] = [];
 
     for (const sourceFile of project.getSourceFiles()) {
@@ -1480,7 +1597,7 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
             }
         }
 
-        const depInfo: DependencyInfo = { package: packageName };
+        const depInfo: DependencyInfo = { package: packageName, isNode: isNodePackage(packageName) || undefined };
 
         const classes: ClassInfo[] = [];
         const interfaces: InterfaceInfo[] = [];
@@ -1489,7 +1606,12 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
 
         for (const typeName of uniqueTypeNames) {
             const resolved = resolvedTypes.get(typeName);
-            if (!resolved) continue;
+            if (!resolved) {
+                // Type couldn't be resolved (package not installed) —
+                // create a minimal unresolved entry
+                types.push({ name: typeName, type: "unresolved" } as TypeAliasInfo);
+                continue;
+            }
 
             const type = resolved.type;
             if ("constructors" in type || "methods" in type && "properties" in type && !("extends" in type && Array.isArray((type as InterfaceInfo).extends))) {
@@ -1511,13 +1633,20 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         if (enums.length > 0) depInfo.enums = enums;
         if (types.length > 0) depInfo.types = types;
 
-        // Only add if we have at least one resolved type
-        if (depInfo.classes || depInfo.interfaces || depInfo.enums || depInfo.types) {
-            dependencies.push(depInfo);
-        }
+        // Always include the dependency — even without resolved type details,
+        // the package reference from import declarations is valuable
+        dependencies.push(depInfo);
     }
 
     return dependencies.sort((a, b) => a.package.localeCompare(b.package));
+}
+
+/**
+ * Checks if a package is part of the Node.js runtime.
+ * Currently only @types/node is considered a Node.js runtime package.
+ */
+function isNodePackage(packageName: string): boolean {
+    return packageName === "@types/node" || packageName.startsWith("@types/node/");
 }
 
 // ============================================================================
@@ -1626,6 +1755,7 @@ export function formatStubs(api: ApiIndex): string {
         lines.push("");
 
         for (const dep of api.dependencies) {
+            if (dep.isNode) continue;
             lines.push(`// From: ${dep.package}`);
             lines.push("");
 
