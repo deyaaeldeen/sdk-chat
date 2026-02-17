@@ -24,7 +24,7 @@ public static class CSharpFormatter
     /// </summary>
     public static string FormatWithCoverage(ApiIndex index, UsageIndex coverage, int maxLength)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(Math.Min(maxLength, 8192));
 
         var deprecatedOperations = index.GetAllTypes()
             .SelectMany(t => (t.Members ?? [])
@@ -135,7 +135,7 @@ public static class CSharpFormatter
     /// </summary>
     public static string Format(ApiIndex index, int maxLength)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(Math.Min(maxLength, 8192));
 
         sb.AppendLine($"// {index.Package} - Public API Surface");
         sb.AppendLine();

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using PublicApiGraphEngine.Contracts;
 using Microsoft.CodeAnalysis;
@@ -49,16 +50,31 @@ public class CSharpUsageAnalyzer : IUsageAnalyzer<ApiIndex>
             })
             .ToList();
 
-        List<SyntaxTree> syntaxTrees = [];
-        var filePathMap = new Dictionary<SyntaxTree, string>();
+        List<SyntaxTree> syntaxTrees;
+        Dictionary<SyntaxTree, string> filePathMap;
 
-        foreach (var file in files)
+        // Parse files in parallel (mirrors the parallel parsing in the engine)
+        var parsedTrees = new ConcurrentBag<(SyntaxTree Tree, string RelativePath)>();
+        await Parallel.ForEachAsync(
+            files,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
+                CancellationToken = ct
+            },
+            async (file, token) =>
+            {
+                var code = await File.ReadAllTextAsync(file, token).ConfigureAwait(false);
+                var tree = CSharpSyntaxTree.ParseText(code, path: file, cancellationToken: token);
+                parsedTrees.Add((tree, Path.GetRelativePath(normalizedPath, file)));
+            }).ConfigureAwait(false);
+
+        syntaxTrees = new List<SyntaxTree>(parsedTrees.Count);
+        filePathMap = new Dictionary<SyntaxTree, string>(parsedTrees.Count);
+        foreach (var (tree, relativePath) in parsedTrees)
         {
-            ct.ThrowIfCancellationRequested();
-            var code = await File.ReadAllTextAsync(file, ct);
-            var tree = CSharpSyntaxTree.ParseText(code, path: file, cancellationToken: ct);
             syntaxTrees.Add(tree);
-            filePathMap[tree] = Path.GetRelativePath(normalizedPath, file);
+            filePathMap[tree] = relativePath;
         }
 
         // Create compilation for semantic analysis.

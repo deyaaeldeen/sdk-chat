@@ -30,9 +30,18 @@ public static class CoverageFormatter
         string commentPrefix = "//")
     {
         // Section 1: Compact summary of what's already covered
-        var coveredByClient = coverage.CoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).Distinct().ToList());
+        // Manual dictionary-based grouping avoids LINQ GroupBy/Distinct/ToList allocations
+        var coveredByClient = new Dictionary<string, List<string>>();
+        foreach (var op in coverage.CoveredOperations)
+        {
+            if (!coveredByClient.TryGetValue(op.ClientType, out var ops))
+            {
+                ops = [];
+                coveredByClient[op.ClientType] = ops;
+            }
+            if (!ops.Contains(op.Operation))
+                ops.Add(op.Operation);
+        }
 
         if (coveredByClient.Count > 0)
         {
@@ -46,9 +55,16 @@ public static class CoverageFormatter
         }
 
         // Section 2: Build uncovered-by-client dictionary
-        var uncoveredByClient = coverage.UncoveredOperations
-            .GroupBy(op => op.ClientType)
-            .ToDictionary(g => g.Key, g => g.Select(op => op.Operation).ToHashSet());
+        var uncoveredByClient = new Dictionary<string, HashSet<string>>();
+        foreach (var op in coverage.UncoveredOperations)
+        {
+            if (!uncoveredByClient.TryGetValue(op.ClientType, out var ops))
+            {
+                ops = [];
+                uncoveredByClient[op.ClientType] = ops;
+            }
+            ops.Add(op.Operation);
+        }
 
         if (uncoveredByClient.Count is 0)
         {

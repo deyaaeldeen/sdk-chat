@@ -9,13 +9,16 @@ using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services.Languages.Samples;
 
-public sealed class PythonSampleLanguageContext : SampleLanguageContext
+public sealed class PythonSampleLanguageContext : SampleLanguageContext, IDisposable
 {
     private readonly PythonUsageAnalyzer _usageAnalyzer = new();
     private readonly EngineCache<ApiIndex> _cache = new(
         async (path, ct) => (ApiIndex?)await new PythonPublicApiGraphEngine().GraphAsync(path, ct: ct), [".py"]);
 
     public PythonSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
+
+    /// <inheritdoc />
+    public void Dispose() => _cache.Dispose();
 
     public override SdkLanguage Language => SdkLanguage.Python;
 

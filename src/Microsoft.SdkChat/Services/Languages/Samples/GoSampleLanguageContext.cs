@@ -9,13 +9,16 @@ using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services.Languages.Samples;
 
-public sealed class GoSampleLanguageContext : SampleLanguageContext
+public sealed class GoSampleLanguageContext : SampleLanguageContext, IDisposable
 {
     private readonly GoUsageAnalyzer _usageAnalyzer = new();
     private readonly EngineCache<ApiIndex> _cache = new(
         async (path, ct) => (ApiIndex?)await new GoPublicApiGraphEngine().GraphAsync(path, ct: ct), [".go"]);
 
     public GoSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
+
+    /// <inheritdoc />
+    public void Dispose() => _cache.Dispose();
 
     public override SdkLanguage Language => SdkLanguage.Go;
 

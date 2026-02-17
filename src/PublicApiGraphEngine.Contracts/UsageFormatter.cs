@@ -16,7 +16,7 @@ public static class UsageFormatter
     /// </summary>
     public static string Format(UsageIndex index)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(256 + (index.CoveredOperations.Count + index.UncoveredOperations.Count) * 80);
 
         sb.AppendLine($"Analyzed {index.FileCount} files.");
         sb.AppendLine();

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
@@ -46,15 +47,32 @@ public static class DirectoryFingerprint
         using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Span<byte> longBuffer = stackalloc byte[8];
 
-        foreach (var (path, size, ticks) in entries)
+        // Reuse a single pooled buffer for UTF-8 encoding to avoid per-path byte[] allocations
+        var pathBuffer = ArrayPool<byte>.Shared.Rent(1024);
+        try
         {
-            hasher.AppendData(Encoding.UTF8.GetBytes(path));
+            foreach (var (path, size, ticks) in entries)
+            {
+                var byteCount = Encoding.UTF8.GetByteCount(path);
+                if (byteCount > pathBuffer.Length)
+                {
+                    ArrayPool<byte>.Shared.Return(pathBuffer);
+                    pathBuffer = ArrayPool<byte>.Shared.Rent(byteCount);
+                }
 
-            BinaryPrimitives.WriteInt64LittleEndian(longBuffer, size);
-            hasher.AppendData(longBuffer);
+                var written = Encoding.UTF8.GetBytes(path.AsSpan(), pathBuffer);
+                hasher.AppendData(pathBuffer.AsSpan(0, written));
 
-            BinaryPrimitives.WriteInt64LittleEndian(longBuffer, ticks);
-            hasher.AppendData(longBuffer);
+                BinaryPrimitives.WriteInt64LittleEndian(longBuffer, size);
+                hasher.AppendData(longBuffer);
+
+                BinaryPrimitives.WriteInt64LittleEndian(longBuffer, ticks);
+                hasher.AppendData(longBuffer);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(pathBuffer);
         }
 
         var hash = hasher.GetHashAndReset();

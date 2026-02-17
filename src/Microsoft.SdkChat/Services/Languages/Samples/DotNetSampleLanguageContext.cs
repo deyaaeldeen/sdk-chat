@@ -9,13 +9,16 @@ using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services.Languages.Samples;
 
-public sealed class DotNetSampleLanguageContext : SampleLanguageContext
+public sealed class DotNetSampleLanguageContext : SampleLanguageContext, IDisposable
 {
     private readonly CSharpUsageAnalyzer _usageAnalyzer = new();
     private readonly EngineCache<ApiIndex> _cache = new(
         async (path, ct) => (ApiIndex?)await new CSharpPublicApiGraphEngine().GraphAsync(path, ct: ct), [".cs"]);
 
     public DotNetSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
+
+    /// <inheritdoc />
+    public void Dispose() => _cache.Dispose();
 
     public override SdkLanguage Language => SdkLanguage.DotNet;
 

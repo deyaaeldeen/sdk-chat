@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Xml;
@@ -68,29 +69,30 @@ public partial class CSharpPublicApiGraphEngine
     }
 
     /// <summary>
-    /// Resolves transitive dependencies using Roslyn semantic analysis.
-    /// Uses a pre-created compilation with NuGet package references.
+    /// Single-pass Roslyn traversal that:
+    /// 1. Marks error types (System.Exception subtypes) in the type map
+    /// 2. Resolves transitive dependencies from the public API surface
+    /// Merging these two operations halves syntax-tree walking cost for large repos.
     /// </summary>
-    private static IReadOnlyList<DependencyInfo>? ResolveTransitiveDependencies(
+    private static IReadOnlyList<DependencyInfo>? ResolveTransitiveDependenciesAndMarkErrors(
+        ConcurrentDictionary<string, MergedType> typeMap,
         CSharpCompilation compilation,
         IReadOnlyList<SyntaxTree> syntaxTrees,
-        IReadOnlyList<NamespaceInfo> namespaces,
         CancellationToken ct)
     {
         if (syntaxTrees.Count is 0) return null;
 
-        // Collect all defined type names (to exclude from dependencies)
+        // Resolve System.Exception for error type marking
+        var exceptionType = compilation.GetTypeByMetadataName("System.Exception");
+
+        // Collect all defined type names from typeMap (to exclude from dependencies)
         var definedTypes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var ns in namespaces)
-            foreach (var type in ns.Types)
-            {
-                definedTypes.Add(IApiIndex.NormalizeTypeName(type.Name));
-                // Also add fully qualified name
-                if (!string.IsNullOrEmpty(ns.Name))
-                {
-                    definedTypes.Add($"{ns.Name}.{IApiIndex.NormalizeTypeName(type.Name)}");
-                }
-            }
+        foreach (var mt in typeMap.Values)
+        {
+            definedTypes.Add(IApiIndex.NormalizeTypeName(mt.Name));
+            if (!string.IsNullOrEmpty(mt.Namespace))
+                definedTypes.Add($"{mt.Namespace}.{IApiIndex.NormalizeTypeName(mt.Name)}");
+        }
 
         // Collect external type symbols from all public API surfaces
         var externalTypes = new Dictionary<string, (ITypeSymbol Symbol, string AssemblyName)>(StringComparer.Ordinal);
@@ -115,9 +117,36 @@ public partial class CSharpPublicApiGraphEngine
                 var semanticModel = compilation.GetSemanticModel(tree);
                 var root = tree.GetRoot(ct);
 
-                // Collect type references from all type declarations
+                // Collect type references and mark error types in a single traversal
                 foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
                 {
+                    // --- Error type marking (merged from MarkErrorTypes) ---
+                    // Check if this type inherits from System.Exception
+                    if (exceptionType is not null)
+                    {
+                        var symbol = semanticModel.GetDeclaredSymbol(typeDecl);
+                        if (symbol is not null)
+                        {
+                            var baseType = symbol.BaseType;
+                            while (baseType is not null)
+                            {
+                                if (SymbolEqualityComparer.Default.Equals(baseType, exceptionType))
+                                {
+                                    var name = GetTypeName(typeDecl);
+                                    var ns = symbol.ContainingNamespace is { IsGlobalNamespace: false } cns
+                                        ? cns.ToDisplayString()
+                                        : "";
+                                    var key = $"{ns}.{name}";
+                                    if (typeMap.TryGetValue(key, out var errorType))
+                                        errorType.IsError = true;
+                                    break;
+                                }
+                                baseType = baseType.BaseType;
+                            }
+                        }
+                    }
+
+                    // --- Dependency resolution ---
                     if (!typeDecl.Modifiers.Any(SyntaxKind.PublicKeyword)) continue;
 
                     // Base types and interfaces

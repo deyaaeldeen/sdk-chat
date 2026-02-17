@@ -116,14 +116,16 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
 
         var packageName = DetectPackageName(rootPath);
 
-        // Create compilation for semantic analysis (shared between error detection and dependency resolution)
+        // Create compilation for semantic analysis
         var treeList = syntaxTrees.ToList();
         var compilation = CreateCompilation(rootPath, treeList);
 
-        // Mark error types structurally using Roslyn inheritance chain analysis
-        MarkErrorTypes(typeMap, treeList, compilation);
+        // Single pass: resolve external dependencies AND mark error types (System.Exception subtypes).
+        // Merges two full Roslyn tree traversals into one, halving syntax-tree walking cost.
+        var dependencies = ResolveTransitiveDependenciesAndMarkErrors(typeMap, compilation, treeList, ct);
 
         // Group types by namespace using a dictionary (avoids LINQ GroupBy allocations)
+        // Note: must happen after the merged pass so ToTypeInfo() reflects IsError
         var nsByName = new Dictionary<string, List<TypeInfo>>();
         foreach (var mt in typeMap.Values)
         {
@@ -147,9 +149,6 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
             namespaces.Add(new NamespaceInfo { Name = key, Types = types });
         }
 
-        // Resolve transitive dependencies using the same compilation (pass treeList to avoid re-copy)
-        var dependencies = ResolveTransitiveDependencies(compilation, treeList, namespaces, ct);
-
         var apiIndex = new ApiIndex { Package = packageName, Namespaces = namespaces, Dependencies = dependencies };
         if (crossLanguageMap is not null)
         {
@@ -160,7 +159,7 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
         return apiIndex with { Diagnostics = diagnostics };
     }
 
-    // Transitive dependency resolution logic is in CSharpPublicApiGraphEngine.Dependencies.cs
+    // Transitive dependency resolution and error marking logic is in CSharpPublicApiGraphEngine.Dependencies.cs
 
     // Entry point detection logic is in CSharpPublicApiGraphEngine.EntryPoints.cs
 
@@ -451,7 +450,6 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
 
     /// <summary>
     /// Creates a Roslyn compilation with NuGet package references for semantic analysis.
-    /// The compilation is shared between error type detection and dependency resolution.
     /// </summary>
     private static CSharpCompilation CreateCompilation(string rootPath, IReadOnlyList<SyntaxTree> syntaxTrees)
     {
@@ -464,52 +462,6 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
                 .WithNullableContextOptions(NullableContextOptions.Enable));
-    }
-
-    /// <summary>
-    /// Marks error types structurally by walking each type's inheritance chain
-    /// using Roslyn's semantic model and checking for System.Exception.
-    /// </summary>
-    private static void MarkErrorTypes(
-        ConcurrentDictionary<string, MergedType> typeMap,
-        IReadOnlyList<SyntaxTree> syntaxTrees,
-        CSharpCompilation compilation)
-    {
-        var exceptionType = compilation.GetTypeByMetadataName("System.Exception");
-        if (exceptionType is null) return;
-
-        foreach (var tree in syntaxTrees)
-        {
-            var semanticModel = compilation.GetSemanticModel(tree);
-            var root = tree.GetRoot();
-
-            foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
-            {
-                var symbol = semanticModel.GetDeclaredSymbol(typeDecl);
-                if (symbol is null) continue;
-
-                // Walk the inheritance chain to check for System.Exception
-                var baseType = symbol.BaseType;
-                while (baseType is not null)
-                {
-                    if (SymbolEqualityComparer.Default.Equals(baseType, exceptionType))
-                    {
-                        // Map back to typeMap using the symbol's namespace and declared name
-                        var name = GetTypeName(typeDecl);
-                        var ns = symbol.ContainingNamespace is { IsGlobalNamespace: false } cns
-                            ? cns.ToDisplayString()
-                            : "";
-                        var key = $"{ns}.{name}";
-                        if (typeMap.TryGetValue(key, out var mt))
-                        {
-                            mt.IsError = true;
-                        }
-                        break;
-                    }
-                    baseType = baseType.BaseType;
-                }
-            }
-        }
     }
 
     /// <summary>

@@ -9,13 +9,16 @@ using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services.Languages.Samples;
 
-public sealed class JavaSampleLanguageContext : SampleLanguageContext
+public sealed class JavaSampleLanguageContext : SampleLanguageContext, IDisposable
 {
     private readonly JavaUsageAnalyzer _usageAnalyzer = new();
     private readonly EngineCache<ApiIndex> _cache = new(
         async (path, ct) => (ApiIndex?)await new JavaPublicApiGraphEngine().GraphAsync(path, ct: ct), [".java"]);
 
     public JavaSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
+
+    /// <inheritdoc />
+    public void Dispose() => _cache.Dispose();
 
     public override SdkLanguage Language => SdkLanguage.Java;
 

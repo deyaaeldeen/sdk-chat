@@ -9,13 +9,16 @@ using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services.Languages.Samples;
 
-public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
+public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext, IDisposable
 {
     private readonly TypeScriptUsageAnalyzer _usageAnalyzer = new();
     private readonly EngineCache<ApiIndex> _cache = new(
         async (path, ct) => (ApiIndex?)await new TypeScriptPublicApiGraphEngine().GraphAsync(path, ct: ct), [".ts"]);
 
     public TypeScriptSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
+
+    /// <inheritdoc />
+    public void Dispose() => _cache.Dispose();
 
     public override SdkLanguage Language => SdkLanguage.TypeScript;
 
