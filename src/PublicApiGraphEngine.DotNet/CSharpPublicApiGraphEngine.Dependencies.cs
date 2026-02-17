@@ -353,7 +353,7 @@ public partial class CSharpPublicApiGraphEngine
 
     /// <summary>
     /// Derives a package name for an error type from its namespace or display string.
-    /// For example, Azure.Response -> "Azure", Azure.Core.Pipeline.HttpPipeline -> "Azure.Core.Pipeline".
+    /// For example, Sdk.Response -> "Sdk", Sdk.Core.Pipeline.HttpPipeline -> "Sdk.Core.Pipeline".
     /// </summary>
     private static string GetErrorTypePackageName(ITypeSymbol typeSymbol)
     {

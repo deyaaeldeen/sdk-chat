@@ -792,19 +792,19 @@ public class GetReferencedTypesIntegrationTests : IDisposable
     [Fact]
     public void AllLanguages_DotSeparatedIdentifiers_TokenizedCorrectly()
     {
-        // "Azure.Response" should produce tokens "Azure" and "Response", not "Azure.Response"
-        HashSet<string> allTypeNames = ["Response", "Azure"];
+        // "Example.Response" should produce tokens "Example" and "Response", not "Example.Response"
+        HashSet<string> allTypeNames = ["Response", "Example"];
 
         // DotNet — most common case for dot-separated names
         var dotnetType = new DotNetModels.TypeInfo
         {
             Name = "Client",
             Kind = "class",
-            Members = [new DotNetModels.MemberInfo { Name = "Get", Kind = "method", Signature = "Azure.Response<string> Get()" }]
+            Members = [new DotNetModels.MemberInfo { Name = "Get", Kind = "method", Signature = "Example.Response<string> Get()" }]
         };
         var refs = dotnetType.GetReferencedTypes(allTypeNames);
         Assert.Contains("Response", refs);
-        Assert.Contains("Azure", refs);
+        Assert.Contains("Example", refs);
     }
 
     [Fact]

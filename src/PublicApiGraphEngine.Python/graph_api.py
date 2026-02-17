@@ -356,11 +356,11 @@ def extract_reexports_from_init(init_path: Path) -> tuple[set[str], dict[str, st
             is_external = not is_relative and module and not module.startswith('.')
 
             if is_external:
-                base_pkg = module.split('.')[0]
-                if module.startswith('azure.'):
-                    parts = module.split('.')
-                    if len(parts) >= 2:
-                        base_pkg = f"azure-{parts[1]}"
+                # Use the full module path as the re-export source.
+                # We can't reliably map import paths to distribution package
+                # names from AST alone (e.g., PIL → Pillow, dateutil →
+                # python-dateutil), so we report what we know: the module path.
+                base_pkg = module
 
             for alias in node.names:
                 if alias.name == '*':

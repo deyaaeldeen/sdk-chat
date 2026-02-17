@@ -166,8 +166,8 @@ public class SdkInfo
     public IReadOnlyList<string> AllSamplesCandidates { get; }
 
     /// <summary>
-    /// The library/package name graphed from build markers (e.g., "azure-storage-blob"
-    /// from pyproject.toml, "@azure/openai" from package.json). Null if not determined.
+    /// The library/package name graphed from build markers (e.g., "my-storage-sdk"
+    /// from pyproject.toml, "@example/package" from package.json). Null if not determined.
     /// </summary>
     public string? LibraryName { get; }
 
@@ -1798,7 +1798,7 @@ public class SdkInfo
 
     /// <summary>
     /// Graphs the Python package name from pyproject.toml.
-    /// Parses <c>[project] name = "azure-storage-blob"</c> and transforms hyphens
+    /// Parses <c>[project] name = "my-sdk"</c> and transforms hyphens
     /// to underscores for the canonical Python import name.
     /// </summary>
     private static string? ExtractPythonPackageName(string root)
@@ -1914,7 +1914,7 @@ public class SdkInfo
                 foreach (var line in File.ReadLines(gradlePath))
                 {
                     var trimmedLine = line.Trim();
-                    // Match: group = 'com.azure' or group = "com.azure"
+                    // Match: group = 'com.example' or group = "com.example"
                     if (!trimmedLine.StartsWith("group", StringComparison.OrdinalIgnoreCase))
                         continue;
 
@@ -1967,7 +1967,7 @@ public class SdkInfo
 
     /// <summary>
     /// Graphs the .NET root namespace from the first <c>*.csproj</c> found at root or in src/.
-    /// Falls back to deriving the namespace from the project file name (e.g., <c>Azure.Storage.Blobs</c>).
+    /// Falls back to deriving the namespace from the project file name (e.g., <c>Example.Sdk</c>).
     /// </summary>
     private static string? ExtractDotNetNamespace(string root)
     {
@@ -2014,7 +2014,7 @@ public class SdkInfo
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) { }
 
-        // Fallback: derive from project file name (e.g., "Azure.Storage.Blobs.csproj" → "Azure.Storage.Blobs")
+        // Fallback: derive from project file name (e.g., "Example.Sdk.csproj" → "Example.Sdk")
         return Path.GetFileNameWithoutExtension(csprojPath);
     }
 
@@ -2058,7 +2058,7 @@ public class SdkInfo
             string? altName = null;
             if (language == SdkLanguage.Python)
             {
-                // "azure-storage-blob" → "azure_storage_blob" (import name) and "azure.storage.blob" (dotted)
+                // "my-sdk" → "my_sdk" (import name) and "my.sdk" (dotted)
                 altName = libraryName.Replace('-', '.');
                 libraryName = libraryName.Replace('-', '_');
                 if (altName == libraryName) altName = null;

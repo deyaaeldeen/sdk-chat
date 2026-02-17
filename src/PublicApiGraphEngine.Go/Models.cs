@@ -110,7 +110,7 @@ public sealed record ApiIndex : IApiIndex
 /// <summary>Information about types from a dependency module.</summary>
 public sealed record DependencyInfo
 {
-    /// <summary>The module path (e.g., "github.com/Azure/azure-sdk-for-go/sdk/azcore").</summary>
+    /// <summary>The module path (e.g., "github.com/example/sdk-for-go/sdk/core").</summary>
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 

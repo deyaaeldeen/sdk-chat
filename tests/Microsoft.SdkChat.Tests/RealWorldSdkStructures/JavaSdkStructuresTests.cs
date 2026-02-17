@@ -67,7 +67,7 @@ public class JavaSdkStructuresTests : SdkStructureTestBase
     }
 
     // Pattern 4: src/main/java with nested package
-    // Examples: AWS SDK, Azure SDK
+    // Examples: AWS SDK, SDK
     [Fact]
     public void Pattern04_NestedPackageStructure()
     {

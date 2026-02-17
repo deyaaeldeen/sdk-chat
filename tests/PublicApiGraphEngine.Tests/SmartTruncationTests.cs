@@ -856,7 +856,7 @@ public class SmartTruncationTests
     {
         var api = new TypeScript.ApiIndex
         {
-            Package = "@azure/test",
+            Package = "@example/test",
             Modules =
             [
                 new TypeScript.ModuleInfo
@@ -885,10 +885,10 @@ public class SmartTruncationTests
 
         var result = TypeScriptFormatter.Format(api);
 
-        Assert.Contains("@azure/test", result);
+        Assert.Contains("@example/test", result);
         Assert.Contains("ClientA", result);
         Assert.Contains("ClientB", result);
-        Assert.Contains("@azure/test/subclient", result);
+        Assert.Contains("@example/test/subclient", result);
     }
 
     [Fact]
@@ -896,7 +896,7 @@ public class SmartTruncationTests
     {
         var api = new TypeScript.ApiIndex
         {
-            Package = "@azure/test",
+            Package = "@example/test",
             Modules =
             [
                 new TypeScript.ModuleInfo
@@ -925,8 +925,8 @@ public class SmartTruncationTests
 
         var result = TypeScriptFormatter.Format(api);
 
-        Assert.Contains("@azure/test/models", result);
-        Assert.DoesNotContain("@azure/test/./models", result);
+        Assert.Contains("@example/test/models", result);
+        Assert.DoesNotContain("@example/test/./models", result);
     }
 
     #endregion
@@ -2079,7 +2079,7 @@ public class SmartTruncationTests
             [
                 new TypeScript.DependencyInfo
                 {
-                    Package = "@azure/core-client",
+                    Package = "@example/core-client",
                     Classes = [new TypeScript.ClassInfo { Name = "ServiceClient", Properties = [new TypeScript.PropertyInfo { Name = "endpoint", Type = "string" }] }],
                     Interfaces = [new TypeScript.InterfaceInfo { Name = "OperationOptions", Properties = [new TypeScript.PropertyInfo { Name = "abortSignal", Type = "AbortSignal" }] }]
                 }
@@ -2126,7 +2126,7 @@ public class SmartTruncationTests
             [
                 new Go.DependencyInfo
                 {
-                    Package = "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+                    Package = "github.com/example/sdk-for-go/sdk/azcore",
                     Structs = [new Go.StructApi { Name = "ClientOptions", Fields = [new Go.FieldApi { Name = "Retry", Type = "RetryOptions" }] }]
                 }
             ]
@@ -2171,7 +2171,7 @@ public class SmartTruncationTests
             [
                 new Java.DependencyInfo
                 {
-                    Package = "com.azure:azure-core",
+                    Package = "com.example:example-core",
                     Classes = [new Java.ClassInfo { Name = "HttpClient", Fields = [new Java.FieldInfo { Name = "baseUrl", Type = "String" }] }],
                     Interfaces = [new Java.ClassInfo { Name = "TokenCredential", Methods = [new Java.MethodInfo { Name = "getToken", Sig = "()", Ret = "AccessToken" }] }]
                 }

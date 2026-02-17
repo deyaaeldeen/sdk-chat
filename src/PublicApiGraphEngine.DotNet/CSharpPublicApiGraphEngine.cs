@@ -21,7 +21,7 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
 {
     /// <summary>
     /// Maximum number of syntax trees to process per batch during semantic analysis.
-    /// This limits memory consumption for very large repos (e.g., Azure SDK with 10K+ files).
+    /// This limits memory consumption for very large repos (e.g., large SDKs with 10K+ files).
     /// Semantic models are released between batches to allow garbage collection.
     /// </summary>
     internal const int MaxSyntaxTreesPerBatch = 500;

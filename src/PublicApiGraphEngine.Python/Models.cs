@@ -59,7 +59,7 @@ public sealed record ApiIndex(
 /// <summary>Information about types from a dependency package.</summary>
 public sealed record DependencyInfo
 {
-    /// <summary>The package name (e.g., "azure-core").</summary>
+    /// <summary>The package name (e.g., "example-core").</summary>
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 

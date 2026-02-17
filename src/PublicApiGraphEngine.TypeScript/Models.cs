@@ -199,7 +199,7 @@ public sealed record ClassInfo
     [JsonPropertyName("exportPath")]
     public string? ExportPath { get; init; }
 
-    /// <summary>External package this type is re-exported from (e.g., "@azure/core-client").</summary>
+    /// <summary>External package this type is re-exported from (e.g., "@example/core-client").</summary>
     [JsonPropertyName("reExportedFrom")]
     public string? ReExportedFrom { get; init; }
 

@@ -70,11 +70,11 @@ public class TransitiveDependencyTests
             var code = """
                 namespace TestPkg;
 
-                // References Azure.Core types
+                // References Example.Core types
                 public class MyClient
                 {
-                    public Azure.Response GetResponse() => null!;
-                    public Azure.Core.Pipeline.HttpPipeline Pipeline { get; }
+                    public Example.Response GetResponse() => null!;
+                    public Example.Core.Pipeline.HttpPipeline Pipeline { get; }
                 }
                 """;
 
@@ -86,11 +86,11 @@ public class TransitiveDependencyTests
             Assert.NotNull(api);
             Assert.NotEmpty(api.Namespaces);
 
-            // Should find the external Azure types
+            // Should find the external Example types
             if (api.Dependencies != null && api.Dependencies.Count > 0)
             {
                 Assert.Contains(api.Dependencies, d =>
-                    d.Package.Contains("Azure", StringComparison.OrdinalIgnoreCase));
+                    d.Package.Contains("Example", StringComparison.OrdinalIgnoreCase));
             }
         }
         finally
@@ -147,7 +147,7 @@ public class TransitiveDependencyTests
             [
                 new DotNetDependencyInfo
                 {
-                    Package = "Azure.Core",
+                    Package = "Example.Core",
                     Types = [new DotNetTypeInfo { Name = "Response", Kind = "class" }]
                 }
             ]
@@ -156,7 +156,7 @@ public class TransitiveDependencyTests
         var stubs = api.ToStubs();
 
         Assert.Contains("Dependency Types", stubs);
-        Assert.Contains("Azure.Core", stubs);
+        Assert.Contains("Example.Core", stubs);
         Assert.Contains("Response", stubs);
     }
 
@@ -197,7 +197,7 @@ public class TransitiveDependencyTests
             [
                 new TsDependencyInfo
                 {
-                    Package = "@azure/core-rest-pipeline",
+                    Package = "@example/core-rest-pipeline",
                     Interfaces =
                     [
                         new TsInterfaceInfo { Name = "PipelinePolicy" }
@@ -209,7 +209,7 @@ public class TransitiveDependencyTests
         var stubs = api.ToStubs();
 
         Assert.Contains("Dependencies", stubs);
-        Assert.Contains("@azure/core-rest-pipeline", stubs);
+        Assert.Contains("@example/core-rest-pipeline", stubs);
         Assert.Contains("PipelinePolicy", stubs);
     }
 
@@ -274,7 +274,7 @@ public class TransitiveDependencyTests
             [
                 new PyDependencyInfo
                 {
-                    Package = "azure-core",
+                    Package = "example-core",
                     Classes =
                     [
                         new PyClassInfo { Name = "PipelinePolicy" }
@@ -286,7 +286,7 @@ public class TransitiveDependencyTests
         var stubs = api.ToStubs();
 
         Assert.Contains("Dependency Types", stubs);
-        Assert.Contains("azure-core", stubs);
+        Assert.Contains("example-core", stubs);
         Assert.Contains("PipelinePolicy", stubs);
     }
 
@@ -324,7 +324,7 @@ public class TransitiveDependencyTests
             [
                 new GoDependencyInfo
                 {
-                    Package = "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+                    Package = "github.com/example/sdk-for-go/sdk/azcore",
                     Interfaces =
                     [
                         new GoIfaceApi { Name = "Policy" }
@@ -412,7 +412,7 @@ public class TransitiveDependencyTests
             [
                 new JavaDependencyInfo
                 {
-                    Package = "com.azure.core",
+                    Package = "com.example.core",
                     Classes =
                     [
                         new JavaClassInfo { Name = "HttpPipeline" }
@@ -424,7 +424,7 @@ public class TransitiveDependencyTests
         var stubs = api.ToStubs();
 
         Assert.Contains("Dependency Types", stubs);
-        Assert.Contains("com.azure.core", stubs);
+        Assert.Contains("com.example.core", stubs);
         Assert.Contains("HttpPipeline", stubs);
     }
 

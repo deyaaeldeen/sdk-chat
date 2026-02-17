@@ -75,9 +75,9 @@ public class SignatureTokenizerTests
     [Fact]
     public void Tokenize_DotNetSignature_HandlesDotSeparatedNames()
     {
-        // C#: Azure.Response<BlobDownloadInfo>
-        var tokens = Tokenize("Azure.Response<BlobDownloadInfo>");
-        Assert.Contains("Azure", tokens);
+        // C#: Example.Response<BlobDownloadInfo>
+        var tokens = Tokenize("Example.Response<BlobDownloadInfo>");
+        Assert.Contains("Example", tokens);
         Assert.Contains("Response", tokens);
         Assert.Contains("BlobDownloadInfo", tokens);
     }

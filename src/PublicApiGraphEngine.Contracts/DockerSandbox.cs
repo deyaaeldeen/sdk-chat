@@ -32,7 +32,6 @@ public static class DockerSandbox
     [
         "mcr.microsoft.com/",
         "ghcr.io/microsoft/",
-        "ghcr.io/azure/",
         "public-api-graph-engine-"  // default unqualified local images
     ];
 

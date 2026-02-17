@@ -19,7 +19,7 @@
         "properties": {
           "packagePath": {
             "type": "string",
-            "description": "Absolute path to SDK root (e.g., /home/user/azure-sdk-for-python)"
+            "description": "Absolute path to SDK root (e.g., /home/user/my-sdk-for-python)"
           },
           "language": {
             "type": "string",

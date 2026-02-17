@@ -96,7 +96,7 @@ public class DockerSandboxTests : IDisposable
     [Theory]
     [InlineData("mcr.microsoft.com/sdk-chat/python:latest")]
     [InlineData("ghcr.io/microsoft/python-engine:v1")]
-    [InlineData("ghcr.io/azure/public-api-graph-engine:latest")]
+    [InlineData("ghcr.io/microsoft/public-api-graph-engine:latest")]
     [InlineData("public-api-graph-engine-python:latest")]
     public void ValidateImageSource_Allows_TrustedRegistries(string image)
     {

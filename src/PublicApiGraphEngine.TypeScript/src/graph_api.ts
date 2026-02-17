@@ -70,7 +70,7 @@ export interface ClassInfo {
     name: string;
     entryPoint?: boolean;
     exportPath?: string;  // The subpath to import from (e.g., "." or "./client")
-    reExportedFrom?: string;  // External package this is re-exported from (e.g., "@azure/core-client")
+    reExportedFrom?: string;  // External package this is re-exported from (e.g., "@example/core-client")
     extends?: string;
     implements?: string[];
     typeParams?: string;

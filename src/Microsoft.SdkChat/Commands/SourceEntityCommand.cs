@@ -22,7 +22,7 @@ public class SourceEntityCommand : Command
     {
         public DetectCommand() : base("detect", "Auto-detect source folder (src/, lib/) and language (.NET, Python, Java, TypeScript, Go)")
         {
-            var pathArg = new Argument<string>("path") { Description = "Path to SDK root directory (e.g., /path/to/azure-sdk-for-python)" };
+            var pathArg = new Argument<string>("path") { Description = "Path to SDK root directory (e.g., /path/to/my-sdk-for-python)" };
             var language = new Option<string?>("--language") { Description = "Override auto-detection: dotnet, python, java, typescript, javascript, go" };
             var json = new Option<bool>("--json") { Description = "Output as JSON for scripting/automation" };
 

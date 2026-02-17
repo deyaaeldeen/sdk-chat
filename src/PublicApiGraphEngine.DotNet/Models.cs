@@ -78,7 +78,7 @@ public sealed record ApiIndex : IApiIndex
 /// <summary>Information about types from a dependency package/assembly.</summary>
 public sealed record DependencyInfo
 {
-    /// <summary>The package name (e.g., "Azure.Core").</summary>
+    /// <summary>The package name (e.g., "Sdk.Core").</summary>
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 

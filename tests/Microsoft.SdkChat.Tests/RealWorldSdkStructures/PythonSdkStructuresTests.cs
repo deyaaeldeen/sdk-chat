@@ -54,7 +54,7 @@ public class PythonSdkStructuresTests : SdkStructureTestBase
     }
 
     // Pattern 3: Namespaced package (google/cloud/storage)
-    // Examples: google-cloud-python, azure-sdk-for-python
+    // Examples: google-cloud-python, example-sdk-for-python
     [Fact]
     public void Pattern03_NamespacedPackage()
     {
@@ -73,13 +73,13 @@ public class PythonSdkStructuresTests : SdkStructureTestBase
         Assert.Equal(samples, info.SamplesFolder);
     }
 
-    // Pattern 4: Azure SDK namespaced package
-    // Examples: azure-storage-blob
+    // Pattern 4: Namespaced package
+    // Examples: acme-storage-blob
     [Fact]
-    public void Pattern04_AzureNamespacedPackage()
+    public void Pattern04_NamespacedPackage()
     {
         CreateFile("setup.py");
-        var pkg = CreatePath("azure", "storage", "blob");
+        var pkg = CreatePath("acme", "storage", "blob");
         CreateFile(pkg, "__init__.py");
         CreateFile(pkg, "_blob_client.py");
         CreateFile(pkg, "_container_client.py");

@@ -785,7 +785,7 @@ public class UsageAnalyzerTests
     public void Python_BuildSignatureLookup_ProducesCorrectSignatures()
     {
         var apiIndex = new PyModels.ApiIndex(
-            "azure-storage-blob",
+            "example-storage-blob",
             [
                 new PyModels.ModuleInfo("main",
                     Classes:
@@ -894,12 +894,12 @@ public class UsageAnalyzerTests
     {
         var apiIndex = new JavaModels.ApiIndex
         {
-            Package = "com.azure.storage.blob",
+            Package = "com.example.storage.blob",
             Packages =
             [
                 new JavaModels.PackageInfo
                 {
-                    Name = "com.azure.storage.blob",
+                    Name = "com.example.storage.blob",
                     Classes =
                     [
                         new JavaModels.ClassInfo

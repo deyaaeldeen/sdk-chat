@@ -246,10 +246,10 @@ class Sample
         Directory.CreateDirectory(Path.Combine(pkg1, "src"));
         Directory.CreateDirectory(Path.Combine(pkg2, "src"));
 
-        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@example/storage-blob\", \"main\": \"dist/index.js\"}");
         File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), "export class BlobClient {}");
 
-        File.WriteAllText(Path.Combine(pkg2, "package.json"), "{\"name\": \"@azure/keyvault-secrets\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg2, "package.json"), "{\"name\": \"@example/keyvault-secrets\", \"main\": \"dist/index.js\"}");
         File.WriteAllText(Path.Combine(pkg2, "src", "index.ts"), "export class SecretClient {}");
 
         // Act
@@ -267,11 +267,11 @@ class Sample
     public async Task AnalyzeCoverageMonorepoAsync_DotNetPackages_FindsPackages()
     {
         // Arrange - .NET monorepo structure
-        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "Azure.Storage.Blobs");
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "Acme.Storage.Blobs");
         var pkg1Src = Path.Combine(pkg1, "src");
         Directory.CreateDirectory(pkg1Src);
 
-        File.WriteAllText(Path.Combine(pkg1Src, "Azure.Storage.Blobs.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(pkg1Src, "Acme.Storage.Blobs.csproj"), "<Project />");
         File.WriteAllText(Path.Combine(pkg1Src, "BlobClient.cs"), "public class BlobClient {}");
 
         // Act
@@ -286,12 +286,12 @@ class Sample
     public async Task AnalyzeCoverageMonorepoAsync_PythonPackages_FindsPackages()
     {
         // Arrange - Python monorepo structure
-        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "azure-storage-blob");
-        Directory.CreateDirectory(Path.Combine(pkg1, "azure", "storage", "blob"));
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "acme-storage-blob");
+        Directory.CreateDirectory(Path.Combine(pkg1, "acme", "storage", "blob"));
 
-        File.WriteAllText(Path.Combine(pkg1, "pyproject.toml"), "[project]\nname = \"azure-storage-blob\"");
-        File.WriteAllText(Path.Combine(pkg1, "azure", "storage", "blob", "__init__.py"), "");
-        File.WriteAllText(Path.Combine(pkg1, "azure", "storage", "blob", "_blob_client.py"), "class BlobClient: pass");
+        File.WriteAllText(Path.Combine(pkg1, "pyproject.toml"), "[project]\nname = \"acme-storage-blob\"");
+        File.WriteAllText(Path.Combine(pkg1, "acme", "storage", "blob", "__init__.py"), "");
+        File.WriteAllText(Path.Combine(pkg1, "acme", "storage", "blob", "_blob_client.py"), "class BlobClient: pass");
 
         // Act
         var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
@@ -308,7 +308,7 @@ class Sample
         var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "azblob");
         Directory.CreateDirectory(pkg1);
 
-        File.WriteAllText(Path.Combine(pkg1, "go.mod"), "module github.com/Azure/azure-sdk-for-go/sdk/storage/azblob");
+        File.WriteAllText(Path.Combine(pkg1, "go.mod"), "module github.com/example/sdk-for-go/sdk/storage/azblob");
         File.WriteAllText(Path.Combine(pkg1, "client.go"), "package azblob\n\ntype Client struct {}");
 
         // Act
@@ -323,12 +323,12 @@ class Sample
     public async Task AnalyzeCoverageMonorepoAsync_JavaPackages_FindsPackages()
     {
         // Arrange - Java Maven monorepo structure
-        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "azure-storage-blob");
-        var pkg1Src = Path.Combine(pkg1, "src", "main", "java", "com", "azure", "storage", "blob");
+        var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "acme-storage-blob");
+        var pkg1Src = Path.Combine(pkg1, "src", "main", "java", "com", "acme", "storage", "blob");
         Directory.CreateDirectory(pkg1Src);
 
         File.WriteAllText(Path.Combine(pkg1, "pom.xml"), "<project></project>");
-        File.WriteAllText(Path.Combine(pkg1Src, "BlobClient.java"), "package com.azure.storage.blob;\npublic class BlobClient {}");
+        File.WriteAllText(Path.Combine(pkg1Src, "BlobClient.java"), "package com.acme.storage.blob;\npublic class BlobClient {}");
 
         // Act
         var result = await Service.AnalyzeCoverageMonorepoAsync(TestRoot, null, null, null, ct: CancellationToken.None);
@@ -344,7 +344,7 @@ class Sample
         // Arrange
         var pkg1 = Path.Combine(TestRoot, "sdk", "storage", "storage-blob");
         Directory.CreateDirectory(Path.Combine(pkg1, "src"));
-        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@example/storage-blob\", \"main\": \"dist/index.js\"}");
         File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), "export class Client {}");
 
         // Use a synchronous IProgress<T> implementation to avoid race conditions.
@@ -372,7 +372,7 @@ class Sample
         Directory.CreateDirectory(Path.Combine(pkg1, "src"));
         Directory.CreateDirectory(nodeModules);
 
-        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@example/storage-blob\", \"main\": \"dist/index.js\"}");
         File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), "export class Client {}");
         File.WriteAllText(Path.Combine(nodeModules, "package.json"), "{\"name\": \"some-dep\"}"); // Should be ignored
 
@@ -396,7 +396,7 @@ class Sample
         Directory.CreateDirectory(pkg1Samples);
         Directory.CreateDirectory(Path.Combine(pkg2, "src"));
 
-        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@azure/storage-blob\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg1, "package.json"), "{\"name\": \"@example/storage-blob\", \"main\": \"dist/index.js\"}");
         File.WriteAllText(Path.Combine(pkg1, "src", "index.ts"), @"
 export class BlobClient {
     upload(): void {}
@@ -409,7 +409,7 @@ const client = new BlobClient();
 client.upload();
 ");
 
-        File.WriteAllText(Path.Combine(pkg2, "package.json"), "{\"name\": \"@azure/keyvault-secrets\", \"main\": \"dist/index.js\"}");
+        File.WriteAllText(Path.Combine(pkg2, "package.json"), "{\"name\": \"@example/keyvault-secrets\", \"main\": \"dist/index.js\"}");
         File.WriteAllText(Path.Combine(pkg2, "src", "index.ts"), "export class SecretClient {}");
 
         // Act

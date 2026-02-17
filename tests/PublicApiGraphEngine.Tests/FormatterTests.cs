@@ -205,7 +205,7 @@ public class FormatterTests
             "package": "test-pkg",
             "modules": [],
             "dependencies": [{
-                "package": "azure-core",
+                "package": "example-core",
                 "classes": [{
                     "name": "TokenCredential",
                     "methods": [{"name": "get_token", "sig": "self", "ret": "str"}]
@@ -218,7 +218,7 @@ public class FormatterTests
         Assert.NotNull(raw);
         Assert.NotNull(raw.Dependencies);
         Assert.Single(raw.Dependencies);
-        Assert.Equal("azure-core", raw.Dependencies[0].Package);
+        Assert.Equal("example-core", raw.Dependencies[0].Package);
         Assert.Equal("TokenCredential", raw.Dependencies[0].Classes![0].Name);
     }
 
@@ -394,7 +394,7 @@ public class FormatterTests
     {
         var api = new TypeScript.ApiIndex
         {
-            Package = "@azure/test",
+            Package = "@example/test",
             Modules =
             [
                 new TypeScript.ModuleInfo
@@ -422,7 +422,7 @@ public class FormatterTests
     {
         var api = new TypeScript.ApiIndex
         {
-            Package = "@azure/test",
+            Package = "@example/test",
             Modules =
             [
                 new TypeScript.ModuleInfo
@@ -803,7 +803,7 @@ public class FormatterTests
         [
             new DependencyInfo
             {
-                Package = "azure-core",
+                Package = "example-core",
                 Classes =
                 [
                     new ClassInfo { Name = "TokenCredential" }
@@ -839,7 +839,7 @@ public class FormatterTests
         [
             new DependencyInfo
             {
-                Package = "azure-core",
+                Package = "example-core",
                 Classes =
                 [
                     new ClassInfo
@@ -853,7 +853,7 @@ public class FormatterTests
 
         var stubs = PythonFormatter.Format(api);
         Assert.Contains("Dependency Types", stubs);
-        Assert.Contains("azure-core", stubs);
+        Assert.Contains("example-core", stubs);
         Assert.Contains("TokenCredential", stubs);
     }
 
@@ -866,7 +866,7 @@ public class FormatterTests
     {
         var api = new TypeScript.ApiIndex
         {
-            Package = "@azure/test",
+            Package = "@example/test",
             Modules =
             [
                 new TypeScript.ModuleInfo

@@ -193,7 +193,7 @@ public class StdlibDetectionTests
             [
                 new Go.DependencyInfo
                 {
-                    Package = "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+                    Package = "github.com/example/sdk-for-go/sdk/azcore",
                     Structs = [new GoStructApi { Name = "Policy" }]
                 }
             ]
@@ -229,7 +229,7 @@ public class StdlibDetectionTests
                 },
                 new Go.DependencyInfo
                 {
-                    Package = "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+                    Package = "github.com/example/sdk-for-go/sdk/azcore",
                     Structs = [new GoStructApi { Name = "Policy" }]
                 }
             ]
@@ -239,7 +239,7 @@ public class StdlibDetectionTests
         // Stdlib dep should be filtered from output
         Assert.DoesNotContain("// From: context", stubs);
         // External dep should remain
-        Assert.Contains("// From: github.com/Azure/azure-sdk-for-go/sdk/azcore", stubs);
+        Assert.Contains("// From: github.com/example/sdk-for-go/sdk/azcore", stubs);
     }
 
     // =========================================================================
@@ -421,7 +421,7 @@ public class StdlibDetectionTests
             [
                 new Java.DependencyInfo
                 {
-                    Package = "com.azure.core",
+                    Package = "com.example.core",
                     Classes = [new JavaClassInfo { Name = "HttpPipeline" }]
                 }
             ]
@@ -429,7 +429,7 @@ public class StdlibDetectionTests
 
         var stubs = api.ToStubs();
         Assert.Contains("Dependency Types", stubs);
-        Assert.Contains("com.azure.core", stubs);
+        Assert.Contains("com.example.core", stubs);
     }
 
     [Fact]
@@ -456,7 +456,7 @@ public class StdlibDetectionTests
                 },
                 new Java.DependencyInfo
                 {
-                    Package = "com.azure.core",
+                    Package = "com.example.core",
                     Classes = [new JavaClassInfo { Name = "HttpPipeline" }]
                 }
             ]
@@ -464,7 +464,7 @@ public class StdlibDetectionTests
 
         var stubs = api.ToStubs();
         Assert.DoesNotContain("// From: java.util", stubs);
-        Assert.Contains("// From: com.azure.core", stubs);
+        Assert.Contains("// From: com.example.core", stubs);
     }
 
     // =========================================================================
@@ -551,7 +551,7 @@ public class StdlibDetectionTests
             [
                 new Python.DependencyInfo
                 {
-                    Package = "azure-core",
+                    Package = "example-core",
                     Classes = [new PyClassInfo { Name = "PipelinePolicy" }]
                 }
             ]
@@ -559,7 +559,7 @@ public class StdlibDetectionTests
 
         var stubs = api.ToStubs();
         Assert.Contains("Dependency Types", stubs);
-        Assert.Contains("azure-core", stubs);
+        Assert.Contains("example-core", stubs);
     }
 
     [Fact]
@@ -583,7 +583,7 @@ public class StdlibDetectionTests
                 },
                 new Python.DependencyInfo
                 {
-                    Package = "azure-core",
+                    Package = "example-core",
                     Classes = [new PyClassInfo { Name = "PipelinePolicy" }]
                 }
             ]
@@ -591,7 +591,7 @@ public class StdlibDetectionTests
 
         var stubs = api.ToStubs();
         Assert.DoesNotContain("# From: os", stubs);
-        Assert.Contains("# From: azure-core", stubs);
+        Assert.Contains("# From: example-core", stubs);
     }
 
     // =========================================================================
@@ -731,7 +731,7 @@ public class StdlibDetectionTests
             [
                 new DotNetDependencyInfo
                 {
-                    Package = "Azure.Core",
+                    Package = "Example.Core",
                     Types = [new DotNetTypeInfo { Name = "Response", Kind = "class" }]
                 }
             ]
@@ -739,7 +739,7 @@ public class StdlibDetectionTests
 
         var stubs = api.ToStubs();
         Assert.Contains("Dependency Types", stubs);
-        Assert.Contains("Azure.Core", stubs);
+        Assert.Contains("Example.Core", stubs);
     }
 
     [Fact]
@@ -766,7 +766,7 @@ public class StdlibDetectionTests
                 },
                 new DotNetDependencyInfo
                 {
-                    Package = "Azure.Core",
+                    Package = "Example.Core",
                     Types = [new DotNetTypeInfo { Name = "Response", Kind = "class" }]
                 }
             ]
@@ -774,7 +774,7 @@ public class StdlibDetectionTests
 
         var stubs = api.ToStubs();
         Assert.DoesNotContain("// From: System.Runtime", stubs);
-        Assert.Contains("// From: Azure.Core", stubs);
+        Assert.Contains("// From: Example.Core", stubs);
     }
 
     // =========================================================================
@@ -900,7 +900,7 @@ public class StdlibDetectionTests
             [
                 new TsDependencyInfo
                 {
-                    Package = "@azure/core-rest-pipeline",
+                    Package = "@example/core-rest-pipeline",
                     Interfaces = [new TsInterfaceInfo { Name = "PipelinePolicy" }]
                 }
             ]
@@ -908,7 +908,7 @@ public class StdlibDetectionTests
 
         var stubs = api.ToStubs();
         Assert.Contains("Dependencies", stubs);
-        Assert.Contains("@azure/core-rest-pipeline", stubs);
+        Assert.Contains("@example/core-rest-pipeline", stubs);
     }
 
     [Fact]
@@ -935,7 +935,7 @@ public class StdlibDetectionTests
                 },
                 new TsDependencyInfo
                 {
-                    Package = "@azure/core-rest-pipeline",
+                    Package = "@example/core-rest-pipeline",
                     Interfaces = [new TsInterfaceInfo { Name = "PipelinePolicy" }]
                 }
             ]
@@ -943,6 +943,6 @@ public class StdlibDetectionTests
 
         var stubs = api.ToStubs();
         Assert.DoesNotContain("// From: @types/node", stubs);
-        Assert.Contains("// From: @azure/core-rest-pipeline", stubs);
+        Assert.Contains("// From: @example/core-rest-pipeline", stubs);
     }
 }

@@ -257,7 +257,7 @@ public static class ProcessSandbox
     /// </summary>
     /// <remarks>
     /// This avoids buffering the entire stdout into a <see cref="string"/> before deserialization,
-    /// halving peak memory for large JSON outputs (e.g., API graphing of Azure SDKs).
+    /// halving peak memory for large JSON outputs (e.g., API graphing of large SDKs).
     /// </remarks>
     public static async Task<StreamingProcessResult> ExecuteWithStreamAsync(
         string fileName,

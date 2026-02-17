@@ -15,12 +15,12 @@ namespace Microsoft.SdkChat.Tests.RealWorldSdkStructures;
 public class DotNetSdkStructuresTests : SdkStructureTestBase
 {
     // Pattern 1: src/{ProjectName}/{ProjectName}.csproj with source files
-    // Examples: Azure.Storage.Blobs, Azure.Identity
+    // Examples: Example.Storage.Blobs, Example.Identity
     [Fact]
     public void Pattern01_SrcProjectFolder_WithCsproj()
     {
-        var src = CreatePath("src", "Azure.Storage.Blobs");
-        CreateFile(src, "Azure.Storage.Blobs.csproj");
+        var src = CreatePath("src", "Example.Storage.Blobs");
+        CreateFile(src, "Example.Storage.Blobs.csproj");
         CreateFile(src, "BlobClient.cs");
         CreateFile(src, "BlobContainerClient.cs");
         var samples = CreatePath("samples");
@@ -29,7 +29,7 @@ public class DotNetSdkStructuresTests : SdkStructureTestBase
         var info = SdkInfo.Scan(_testRoot);
 
         Assert.Equal(SdkLanguage.DotNet, info.Language);
-        Assert.Contains("Azure.Storage.Blobs", info.SourceFolder);
+        Assert.Contains("Example.Storage.Blobs", info.SourceFolder);
         Assert.Equal(samples, info.SamplesFolder);
     }
 
@@ -210,7 +210,7 @@ public class DotNetSdkStructuresTests : SdkStructureTestBase
     public void Pattern12_QuickstartsFolder()
     {
         var src = CreatePath("src");
-        CreateFile(src, "Azure.AI.TextAnalytics.csproj");
+        CreateFile(src, "Example.AI.TextAnalytics.csproj");
         CreateFile(src, "TextAnalyticsClient.cs");
         var quickstarts = CreatePath("quickstarts");
         CreateFile(quickstarts, "AnalyzeText.cs");

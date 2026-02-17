@@ -28,7 +28,7 @@ public class CrossLanguageMetadataTests : IDisposable
         var path = Path.Combine(_tempDir, "map.json");
         File.WriteAllText(path, """
         {
-            "packageId": "Azure.Storage.Blobs",
+            "packageId": "Example.Storage.Blobs",
             "ids": {
                 "BlobClient": "cross-id-1",
                 "ContainerClient": "cross-id-2"
@@ -39,7 +39,7 @@ public class CrossLanguageMetadataTests : IDisposable
         var result = CrossLanguageMetadata.Load(path);
 
         Assert.NotNull(result);
-        Assert.Equal("Azure.Storage.Blobs", result.PackageId);
+        Assert.Equal("Example.Storage.Blobs", result.PackageId);
         Assert.Equal(2, result.Ids.Count);
         Assert.Equal("cross-id-1", result.Ids["BlobClient"]);
         Assert.Equal("cross-id-2", result.Ids["ContainerClient"]);

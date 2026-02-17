@@ -1073,7 +1073,7 @@ public class GraphApi {
     // This enables rigorous resolution instead of heuristic guessing
     private static final Map<String, String> importMap = new HashMap<>();
 
-    // Wildcard import packages (e.g., "com.azure.core" from "import com.azure.core.*")
+    // Wildcard import packages (e.g., "com.example.core" from "import com.example.core.*")
     // Used as fallback when a type isn't found in the explicit import map
     private static final Set<String> wildcardPackages = new LinkedHashSet<>();
 
@@ -1173,13 +1173,13 @@ public class GraphApi {
 
             String importName = imp.getNameAsString();
             if (imp.isAsterisk()) {
-                // Wildcard import like "import com.azure.core.*"
+                // Wildcard import like "import com.example.core.*"
                 // Record the package for fallback resolution
                 wildcardPackages.add(importName);
                 continue;
             }
 
-            // Regular import like "import com.azure.core.ClientOptions"
+            // Regular import like "import com.example.core.ClientOptions"
             // Map the simple name to the package
             int lastDot = importName.lastIndexOf('.');
             if (lastDot > 0) {

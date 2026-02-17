@@ -34,7 +34,7 @@ public class GoSdkStructuresTests : SdkStructureTestBase
     }
 
     // Pattern 2: pkg folder structure
-    // Examples: Azure SDK for Go packages
+    // Examples: Go SDK packages
     [Fact]
     public void Pattern02_PkgFolder()
     {

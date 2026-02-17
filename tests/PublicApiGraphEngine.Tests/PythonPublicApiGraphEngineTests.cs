@@ -229,7 +229,7 @@ public class PythonDeserializationTests
         {
             "name": "BlobClient",
             "doc": "A blob client.",
-            "reExportedFrom": "azure.storage.blob._blob_client",
+            "reExportedFrom": "example.storage.blob._blob_client",
             "methods": [],
             "properties": []
         }
@@ -238,7 +238,7 @@ public class PythonDeserializationTests
         var cls = JsonSerializer.Deserialize(json, RawPythonJsonContext.Default.RawPythonClass);
 
         Assert.NotNull(cls);
-        Assert.Equal("azure.storage.blob._blob_client", cls!.ReExportedFrom);
+        Assert.Equal("example.storage.blob._blob_client", cls!.ReExportedFrom);
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public class PythonDeserializationTests
             "name": "create_client",
             "sig": "(endpoint: str) -> ChatClient",
             "entryPoint": true,
-            "reExportedFrom": "azure.ai._factories"
+            "reExportedFrom": "example.ai._factories"
         }
         """;
 
@@ -274,7 +274,7 @@ public class PythonDeserializationTests
 
         Assert.NotNull(func);
         Assert.True(func!.EntryPoint);
-        Assert.Equal("azure.ai._factories", func.ReExportedFrom);
+        Assert.Equal("example.ai._factories", func.ReExportedFrom);
     }
 
     [Fact]

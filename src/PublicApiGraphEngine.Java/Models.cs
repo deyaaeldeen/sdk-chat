@@ -93,7 +93,7 @@ public sealed record ApiIndex : IApiIndex
 /// <summary>Information about types from a dependency package.</summary>
 public sealed record DependencyInfo
 {
-    /// <summary>The package/group ID (e.g., "com.azure:azure-core").</summary>
+    /// <summary>The package/group ID (e.g., "com.example:example-core").</summary>
     [JsonPropertyName("package")]
     public string Package { get; init; } = "";
 
