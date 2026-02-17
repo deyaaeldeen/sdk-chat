@@ -123,12 +123,47 @@ package api graph <path>         # Build public API graph
 package api coverage <path>      # Analyze coverage gaps
 ```
 
+## AOT Compatibility
+
+All code must be compatible with Native AOT (Ahead-of-Time) compilation. Follow these rules:
+
+### JSON serialization
+
+- **Always** use `System.Text.Json` source generators — never rely on reflection-based serialization.
+- Add `[JsonSerializable(typeof(YourType))]` to the appropriate `JsonSerializerContext` subclass for every type that is serialized/deserialized.
+- Use `[JsonSourceGenerationOptions(...)]` to configure naming policy, default ignore conditions, etc.
+- Never call `JsonSerializer.Serialize<T>()` or `JsonSerializer.Deserialize<T>()` without passing a source-generated `JsonTypeInfo<T>` or `JsonSerializerContext`.
+
+### Reflection
+
+- **Do not** use reflection (`Type.GetType`, `Activator.CreateInstance`, `Assembly.Load`, `MakeGenericType`, etc.) unless absolutely necessary and properly annotated.
+- If reflection is unavoidable, add the appropriate trim/AOT annotations: `[DynamicallyAccessedMembers]`, `[RequiresUnreferencedCode]`, `[RequiresDynamicCode]`.
+
+### Dependency injection
+
+- Avoid service registrations that rely on open generics or reflection-based scanning.
+- Prefer explicit factory registrations: `services.AddSingleton<IFoo>(sp => new Foo(...))`.
+
+### General rules
+
+- Do not use `dynamic` types.
+- Do not use `Type.MakeGenericType` or `MethodInfo.MakeGenericMethod` at runtime.
+- Avoid LINQ expressions compiled at runtime (`Expression.Compile()`).
+- Prefer compile-time code generation (source generators) over runtime code-gen patterns.
+- When adding new NuGet packages (with approval), verify they are annotated as AOT-compatible (`IsAotCompatible=true`).
+
+### Validation
+
+- Run `dotnet publish -p:PublishAot=true` periodically to catch AOT/trimming warnings early.
+- Fix all trim and AOT analysis warnings (`IL2XXX`, `IL3XXX`) before merging.
+
 ## Adding Features
 
 1. Add implementation in `src/`
 2. Add tests in corresponding `tests/` project
 3. Run `dotnet test` before committing
 4. Update README if adding CLI options or env vars
+5. Verify AOT compatibility — no new trim/AOT warnings
 
 ## Test Commands
 
@@ -156,3 +191,4 @@ dotnet test tests/Microsoft.SdkChat.IntegrationTests --filter "Category=Integrat
 - Change public API signatures in AgentClientProtocol.Sdk (breaking change)
 - Remove copyright headers
 - Run tests outside Docker if Python/Node/Go tests fail (container has all deps)
+- Use reflection-based JSON serialization or other AOT-incompatible patterns
