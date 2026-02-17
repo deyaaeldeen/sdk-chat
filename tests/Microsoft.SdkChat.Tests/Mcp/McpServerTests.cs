@@ -47,12 +47,13 @@ public class McpServerTests
     {
         // Arrange
         using var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(500));
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
 
         // Use an ephemeral port to avoid conflicts
         var port = GetAvailablePort();
 
         // Act - Start the HTTP server in a background task with cancellation token
+        Exception? serverException = null;
         var serverTask = Task.Run(async () =>
         {
             try
@@ -63,15 +64,20 @@ public class McpServerTests
             {
                 // Expected when the cancellation token is triggered
             }
+            catch (Exception ex)
+            {
+                serverException = ex;
+            }
         });
 
-        // Wait briefly to see if it throws immediately
-        var delayTask = Task.Delay(TimeSpan.FromMilliseconds(200));
-        var completedTask = await Task.WhenAny(serverTask, delayTask);
+        // Wait briefly to see if it exits immediately
+        await Task.WhenAny(serverTask, Task.Delay(TimeSpan.FromMilliseconds(500)));
 
-        // Assert - Server should not complete immediately (delay completes first)
-        Assert.Equal(delayTask, completedTask);
-        Assert.False(serverTask.IsCompleted, $"HTTP server with transport '{transport}' should not complete immediately");
+        // Assert - Server should not complete immediately
+        var reason = serverException is not null
+            ? $"HTTP server with transport '{transport}' exited immediately with: {serverException}"
+            : $"HTTP server with transport '{transport}' should not complete immediately";
+        Assert.False(serverTask.IsCompleted, reason);
 
         // Ensure cleanup - cancel and wait for server to shut down
         await cts.CancelAsync();
@@ -311,11 +317,12 @@ public class McpServerTests
         // (stdio transport is tested separately due to stdin dependency)
 
         using var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(500));
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
 
         var port = GetAvailablePort();
 
         // Test lowercase
+        Exception? lowerException = null;
         var taskLower = Task.Run(async () =>
         {
             try
@@ -326,12 +333,19 @@ public class McpServerTests
             {
                 // Expected: server shutdown via cancellation token
             }
+            catch (Exception ex)
+            {
+                lowerException = ex;
+            }
         });
 
-        await Task.Delay(200);
+        await Task.WhenAny(taskLower, Task.Delay(TimeSpan.FromMilliseconds(500)));
 
         // Assert - Verify lowercase transport name is accepted and server keeps running
-        Assert.False(taskLower.IsCompleted, $"Transport '{transport.ToLowerInvariant()}' should be accepted");
+        var lowerReason = lowerException is not null
+            ? $"Transport '{transport.ToLowerInvariant()}' exited immediately with: {lowerException}"
+            : $"Transport '{transport.ToLowerInvariant()}' should be accepted";
+        Assert.False(taskLower.IsCompleted, lowerReason);
 
         // Ensure cleanup - cancel explicitly
         await cts.CancelAsync();
@@ -346,9 +360,10 @@ public class McpServerTests
 
         // Test uppercase with new cancellation token and port
         using var cts2 = new CancellationTokenSource();
-        cts2.CancelAfter(TimeSpan.FromMilliseconds(500));
+        cts2.CancelAfter(TimeSpan.FromSeconds(5));
         var port2 = GetAvailablePort();
 
+        Exception? upperException = null;
         var taskUpper = Task.Run(async () =>
         {
             try
@@ -359,12 +374,19 @@ public class McpServerTests
             {
                 // Expected: server shutdown via cancellation token
             }
+            catch (Exception ex)
+            {
+                upperException = ex;
+            }
         });
 
-        await Task.Delay(200);
+        await Task.WhenAny(taskUpper, Task.Delay(TimeSpan.FromMilliseconds(500)));
 
         // Assert - Verify uppercase transport name is accepted and server keeps running
-        Assert.False(taskUpper.IsCompleted, $"Transport '{transport.ToUpperInvariant()}' should be accepted");
+        var upperReason = upperException is not null
+            ? $"Transport '{transport.ToUpperInvariant()}' exited immediately with: {upperException}"
+            : $"Transport '{transport.ToUpperInvariant()}' should be accepted";
+        Assert.False(taskUpper.IsCompleted, upperReason);
 
         // Ensure cleanup - cancel explicitly
         await cts2.CancelAsync();
