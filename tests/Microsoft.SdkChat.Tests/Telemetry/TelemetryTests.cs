@@ -84,12 +84,12 @@ public class SdkChatTelemetryTests : IDisposable
     }
 
     [Fact]
-    public void StartExtraction_CreatesActivityWithLanguageAndPath()
+    public void StartGraphing_CreatesActivityWithLanguageAndPath()
     {
-        using var activity = SdkChatTelemetry.StartExtraction("csharp", "/path/to/sdk");
+        using var activity = SdkChatTelemetry.StartGraphing("csharp", "/path/to/sdk");
 
         Assert.NotNull(activity);
-        Assert.Equal("api.extract", activity.OperationName);
+        Assert.Equal("api.graph", activity.OperationName);
         Assert.Equal(ActivityKind.Internal, activity.Kind);
         Assert.Equal("csharp", activity.GetTagItem("language"));
         Assert.Equal("/path/to/sdk", activity.GetTagItem("sdk.path"));

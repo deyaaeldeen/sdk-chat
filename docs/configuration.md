@@ -10,7 +10,7 @@
 | `GITHUB_TOKEN` | Alternative GitHub token |
 | `SDK_CLI_MODEL` | Override default AI model |
 | `SDK_CLI_TIMEOUT` | AI request timeout in seconds (default: 300) |
-| `SDK_CHAT_EXTRACTOR_TIMEOUT` | API extractor timeout in seconds (default: 300) |
+| `SDK_CHAT_ENGINE_TIMEOUT` | Public API Graph Engine timeout in seconds (default: 300) |
 | `SDK_CLI_DEBUG` | Set `true` to log prompts/responses |
 | `SDK_CLI_DEBUG_DIR` | Directory for debug output files |
 | `SDK_CLI_USE_OPENAI` | Set `true` to use OpenAI by default |

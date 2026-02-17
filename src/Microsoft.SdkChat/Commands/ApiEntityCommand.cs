@@ -8,20 +8,20 @@ using Microsoft.SdkChat.Services;
 namespace Microsoft.SdkChat.Commands;
 
 /// <summary>
-/// API entity commands: extract and coverage.
+/// API entity commands: graph and coverage.
 /// </summary>
 public class ApiEntityCommand : Command
 {
-    public ApiEntityCommand() : base("api", "Extract public API surface and analyze sample coverage")
+    public ApiEntityCommand() : base("api", "Build public API graph and analyze sample coverage")
     {
-        Add(new ExtractCommand());
+        Add(new GraphCommand());
         Add(new CoverageCommand());
     }
 
-    /// <summary>Extract public API surface.</summary>
-    private class ExtractCommand : Command
+    /// <summary>Build public API graph.</summary>
+    private class GraphCommand : Command
     {
-        public ExtractCommand() : base("extract", "Extract all public types, methods, and properties from SDK source")
+        public GraphCommand() : base("graph", "Build public API graph from SDK source")
         {
             var pathArg = new Argument<string>("path") { Description = "Path to SDK root directory" };
             var language = new Option<string?>("--language") { Description = "Override language detection" };
@@ -38,7 +38,7 @@ public class ApiEntityCommand : Command
             this.SetAction(async (ctx, ct) =>
             {
                 var service = new PackageInfoService();
-                var result = await service.ExtractPublicApiAsync(
+                var result = await service.GraphPublicApiAsync(
                     ctx.GetValue(pathArg)!,
                     ctx.GetValue(language),
                     ctx.GetValue(json),
@@ -47,7 +47,7 @@ public class ApiEntityCommand : Command
 
                 if (!result.Success)
                 {
-                    ConsoleUx.Error(result.ErrorMessage ?? "API extraction failed");
+                    ConsoleUx.Error(result.ErrorMessage ?? "API engine failed");
                     Environment.ExitCode = 1;
                     return;
                 }

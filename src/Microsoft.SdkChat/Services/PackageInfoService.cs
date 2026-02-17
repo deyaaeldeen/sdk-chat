@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 using System.Text.Json.Serialization;
-using ApiExtractor.Contracts;
-using ApiExtractor.DotNet;
-using ApiExtractor.Go;
-using ApiExtractor.Java;
-using ApiExtractor.Python;
-using ApiExtractor.TypeScript;
+using PublicApiGraphEngine.Contracts;
+using PublicApiGraphEngine.DotNet;
+using PublicApiGraphEngine.Go;
+using PublicApiGraphEngine.Java;
+using PublicApiGraphEngine.Python;
+using PublicApiGraphEngine.TypeScript;
 using Microsoft.SdkChat.Models;
 
 namespace Microsoft.SdkChat.Services;
@@ -36,14 +36,14 @@ public interface IPackageInfoService
     Task<SamplesFolderResult> DetectSamplesFolderAsync(string packagePath, CancellationToken ct = default);
 
     /// <summary>
-    /// Extracts the public API surface from an SDK package.
+    /// Graphs the public API surface from an SDK package.
     /// </summary>
     /// <param name="packagePath">Root path of the SDK package.</param>
     /// <param name="language">Optional language override.</param>
     /// <param name="asJson">If true, returns JSON format; otherwise returns language stubs.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>API extraction result with the public API surface.</returns>
-    Task<ApiExtractionResult> ExtractPublicApiAsync(string packagePath, string? language = null, bool asJson = false, string? crossLanguageMetadataPath = null, CancellationToken ct = default);
+    /// <returns>API graphing result with the public API surface.</returns>
+    Task<ApiGraphResult> GraphPublicApiAsync(string packagePath, string? language = null, bool asJson = false, string? crossLanguageMetadataPath = null, CancellationToken ct = default);
 
     /// <summary>
     /// Analyzes API coverage in existing samples or tests.
@@ -70,7 +70,7 @@ public interface IPackageInfoService
 
 /// <summary>
 /// Unified service for SDK package analysis: source detection, samples detection,
-/// API extraction, and coverage analysis.
+/// API graphing, and coverage analysis.
 /// </summary>
 public sealed class PackageInfoService : IPackageInfoService
 {
@@ -112,7 +112,7 @@ public sealed class PackageInfoService : IPackageInfoService
     }
 
     /// <inheritdoc />
-    public async Task<ApiExtractionResult> ExtractPublicApiAsync(
+    public async Task<ApiGraphResult> GraphPublicApiAsync(
         string packagePath,
         string? language = null,
         bool asJson = false,
@@ -127,7 +127,7 @@ public sealed class PackageInfoService : IPackageInfoService
 
         if (effectiveLanguage == null || effectiveLanguage == SdkLanguage.Unknown)
         {
-            return new ApiExtractionResult
+            return new ApiGraphResult
             {
                 Success = false,
                 ErrorCode = "LANGUAGE_DETECTION_FAILED",
@@ -136,25 +136,25 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
 
-        var extractor = CreateExtractor(effectiveLanguage.Value);
-        if (extractor == null)
+        var engine = CreateEngine(effectiveLanguage.Value);
+        if (engine == null)
         {
-            return new ApiExtractionResult
+            return new ApiGraphResult
             {
                 Success = false,
-                ErrorCode = "EXTRACTOR_NOT_FOUND",
-                ErrorMessage = $"No extractor available for language: {effectiveLanguage}",
+                ErrorCode = "ENGINE_NOT_FOUND",
+                ErrorMessage = $"No engine available for language: {effectiveLanguage}",
                 SourceFolder = sdkInfo.SourceFolder
             };
         }
 
-        if (!extractor.IsAvailable())
+        if (!engine.IsAvailable())
         {
-            return new ApiExtractionResult
+            return new ApiGraphResult
             {
                 Success = false,
-                ErrorCode = "EXTRACTOR_UNAVAILABLE",
-                ErrorMessage = extractor.UnavailableReason ?? $"Extractor for {effectiveLanguage} is not available",
+                ErrorCode = "ENGINE_UNAVAILABLE",
+                ErrorMessage = engine.UnavailableReason ?? $"Engine for {effectiveLanguage} is not available",
                 SourceFolder = sdkInfo.SourceFolder
             };
         }
@@ -163,15 +163,15 @@ public sealed class PackageInfoService : IPackageInfoService
             ? null
             : CrossLanguageMetadata.Load(crossLanguageMetadataPath);
 
-        var result = await extractor.ExtractAsyncCore(sdkInfo.SourceFolder, crossLanguageMap, ct).ConfigureAwait(false);
+        var result = await engine.GraphAsyncCore(sdkInfo.SourceFolder, crossLanguageMap, ct).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
-            var failure = (ExtractorResult.Failure)result;
-            return new ApiExtractionResult
+            var failure = (EngineResult.Failure)result;
+            return new ApiGraphResult
             {
                 Success = false,
-                ErrorCode = "EXTRACTION_FAILED",
+                ErrorCode = "ENGINE_FAILED",
                 ErrorMessage = failure.Error,
                 SourceFolder = sdkInfo.SourceFolder
             };
@@ -179,7 +179,7 @@ public sealed class PackageInfoService : IPackageInfoService
 
         var apiIndex = result.GetValueOrThrow();
 
-        return new ApiExtractionResult
+        return new ApiGraphResult
         {
             Success = true,
             SourceFolder = sdkInfo.SourceFolder,
@@ -225,45 +225,45 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
 
-        // Extract API and analyze usage in a single pass to avoid spawning the
-        // extractor process twice (once here and once inside AnalyzeUsageInternalAsync).
+        // Graph API and analyze usage in a single pass to avoid spawning the
+        // engine process twice (once here and once inside AnalyzeUsageInternalAsync).
         if (!AnalyzerRegistry.TryGetValue(effectiveLanguage.Value, out var factory))
         {
             return new CoverageAnalysisResult
             {
                 Success = false,
-                ErrorCode = "EXTRACTOR_NOT_FOUND",
-                ErrorMessage = $"No extractor available for language: {effectiveLanguage}"
+                ErrorCode = "ENGINE_NOT_FOUND",
+                ErrorMessage = $"No engine available for language: {effectiveLanguage}"
             };
         }
 
-        var (extractor, analyzer) = factory();
+        var (engine, analyzer) = factory();
 
-        if (!extractor.IsAvailable())
+        if (!engine.IsAvailable())
         {
             return new CoverageAnalysisResult
             {
                 Success = false,
-                ErrorCode = "EXTRACTOR_UNAVAILABLE",
-                ErrorMessage = extractor.UnavailableReason ?? $"Extractor for {effectiveLanguage} is not available"
+                ErrorCode = "ENGINE_UNAVAILABLE",
+                ErrorMessage = engine.UnavailableReason ?? $"Engine for {effectiveLanguage} is not available"
             };
         }
 
-        var extractResult = await extractor.ExtractAsyncCore(sdkInfo.SourceFolder, null, ct).ConfigureAwait(false);
-        if (!extractResult.IsSuccess)
+        var engineResult = await engine.GraphAsyncCore(sdkInfo.SourceFolder, null, ct).ConfigureAwait(false);
+        if (!engineResult.IsSuccess)
         {
-            var failure = (ExtractorResult.Failure)extractResult;
+            var failure = (EngineResult.Failure)engineResult;
             return new CoverageAnalysisResult
             {
                 Success = false,
-                ErrorCode = "EXTRACTION_FAILED",
+                ErrorCode = "ENGINE_FAILED",
                 ErrorMessage = failure.Error
             };
         }
 
-        var apiIndex = extractResult.GetValueOrThrow();
+        var apiIndex = engineResult.GetValueOrThrow();
 
-        // Analyze usage with the already-extracted API surface
+        // Analyze usage with the already-graphed API surface
         var usage = await analyzer.AnalyzeAsyncCore(effectiveSamplesPath, apiIndex, ct).ConfigureAwait(false);
         var deprecatedOps = GetDeprecatedOperations(apiIndex);
         var uncoveredFiltered = usage.UncoveredOperations
@@ -313,7 +313,7 @@ public sealed class PackageInfoService : IPackageInfoService
 
         switch (apiIndex)
         {
-            case ApiExtractor.DotNet.ApiIndex dotNetIndex:
+            case PublicApiGraphEngine.DotNet.ApiIndex dotNetIndex:
                 foreach (var type in dotNetIndex.GetAllTypes())
                 {
                     foreach (var member in type.Members?.Where(m => m.Kind == "method" && m.IsDeprecated == true) ?? [])
@@ -323,7 +323,7 @@ public sealed class PackageInfoService : IPackageInfoService
                 }
                 break;
 
-            case ApiExtractor.TypeScript.ApiIndex typeScriptIndex:
+            case PublicApiGraphEngine.TypeScript.ApiIndex typeScriptIndex:
                 foreach (var cls in typeScriptIndex.Modules.SelectMany(m => m.Classes ?? []))
                 {
                     foreach (var method in cls.Methods?.Where(m => m.IsDeprecated == true) ?? [])
@@ -333,7 +333,7 @@ public sealed class PackageInfoService : IPackageInfoService
                 }
                 break;
 
-            case ApiExtractor.Python.ApiIndex pythonIndex:
+            case PublicApiGraphEngine.Python.ApiIndex pythonIndex:
                 foreach (var cls in pythonIndex.GetAllClasses())
                 {
                     foreach (var method in cls.Methods?.Where(m => m.IsDeprecated == true) ?? [])
@@ -343,7 +343,7 @@ public sealed class PackageInfoService : IPackageInfoService
                 }
                 break;
 
-            case ApiExtractor.Java.ApiIndex javaIndex:
+            case PublicApiGraphEngine.Java.ApiIndex javaIndex:
                 foreach (var type in javaIndex.GetAllTypes())
                 {
                     foreach (var method in type.Methods?.Where(m => m.IsDeprecated == true) ?? [])
@@ -353,7 +353,7 @@ public sealed class PackageInfoService : IPackageInfoService
                 }
                 break;
 
-            case ApiExtractor.Go.ApiIndex goIndex:
+            case PublicApiGraphEngine.Go.ApiIndex goIndex:
                 foreach (var st in goIndex.GetAllStructs())
                 {
                     foreach (var method in st.Methods?.Where(m => m.IsDeprecated == true) ?? [])
@@ -368,23 +368,23 @@ public sealed class PackageInfoService : IPackageInfoService
     }
 
     /// <summary>
-    /// Registry of language-specific extractor and analyzer factories.
+    /// Registry of language-specific engine and analyzer factories.
     /// Adding a new language requires only adding an entry here.
     /// </summary>
-    private static readonly Dictionary<SdkLanguage, Func<(IApiExtractor Extractor, IUsageAnalyzer Analyzer)>> AnalyzerRegistry = new()
+    private static readonly Dictionary<SdkLanguage, Func<(IPublicApiGraphEngine Engine, IUsageAnalyzer Analyzer)>> AnalyzerRegistry = new()
     {
-        [SdkLanguage.DotNet] = () => (new CSharpApiExtractor(), new CSharpUsageAnalyzer()),
-        [SdkLanguage.Python] = () => (new PythonApiExtractor(), new PythonUsageAnalyzer()),
-        [SdkLanguage.Go] = () => (new GoApiExtractor(), new GoUsageAnalyzer()),
-        [SdkLanguage.TypeScript] = () => (new TypeScriptApiExtractor(), new TypeScriptUsageAnalyzer()),
-        [SdkLanguage.JavaScript] = () => (new TypeScriptApiExtractor(), new TypeScriptUsageAnalyzer()), // JS uses TS tooling
-        [SdkLanguage.Java] = () => (new JavaApiExtractor(), new JavaUsageAnalyzer()),
+        [SdkLanguage.DotNet] = () => (new CSharpPublicApiGraphEngine(), new CSharpUsageAnalyzer()),
+        [SdkLanguage.Python] = () => (new PythonPublicApiGraphEngine(), new PythonUsageAnalyzer()),
+        [SdkLanguage.Go] = () => (new GoPublicApiGraphEngine(), new GoUsageAnalyzer()),
+        [SdkLanguage.TypeScript] = () => (new TypeScriptPublicApiGraphEngine(), new TypeScriptUsageAnalyzer()),
+        [SdkLanguage.JavaScript] = () => (new TypeScriptPublicApiGraphEngine(), new TypeScriptUsageAnalyzer()), // JS uses TS tooling
+        [SdkLanguage.Java] = () => (new JavaPublicApiGraphEngine(), new JavaUsageAnalyzer()),
     };
 
-    private static IApiExtractor? CreateExtractor(SdkLanguage language)
+    private static IPublicApiGraphEngine? CreateEngine(SdkLanguage language)
     {
         if (AnalyzerRegistry.TryGetValue(language, out var factory))
-            return factory().Extractor;
+            return factory().Engine;
         return null;
     }
 
@@ -798,8 +798,8 @@ public sealed record SamplesFolderResult
     public required string RootPath { get; init; }
 }
 
-/// <summary>Result of API extraction.</summary>
-public sealed record ApiExtractionResult
+/// <summary>Result of API graphing.</summary>
+public sealed record ApiGraphResult
 {
     public required bool Success { get; init; }
     public string? ErrorCode { get; init; }
@@ -887,7 +887,7 @@ public sealed record UncoveredOperationInfo
     WriteIndented = true)]
 [JsonSerializable(typeof(SourceFolderResult))]
 [JsonSerializable(typeof(SamplesFolderResult))]
-[JsonSerializable(typeof(ApiExtractionResult))]
+[JsonSerializable(typeof(ApiGraphResult))]
 [JsonSerializable(typeof(CoverageAnalysisResult))]
 [JsonSerializable(typeof(CoverageBatchResult))]
 [JsonSerializable(typeof(CoverageBatchItem))]

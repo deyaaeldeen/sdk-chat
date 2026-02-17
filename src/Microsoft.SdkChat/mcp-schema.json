@@ -1,7 +1,7 @@
 {
   "name": "sdk-chat",
   "version": "0.1.0",
-  "description": "SDK Chat - Analyze SDKs, extract APIs, and generate production-quality code samples using AI",
+  "description": "SDK Chat - Analyze SDKs, graph APIs, and generate production-quality code samples using AI",
   "author": "Microsoft",
   "license": "MIT",
   "homepage": "https://github.com/deyaaeldeen/sdk-chat",
@@ -44,8 +44,8 @@
       }
     },
     {
-      "name": "extract_api",
-      "description": "Extract complete public API surface from SDK. WHEN TO USE: To understand SDK operations or prepare context. RETURNS: Compact API signatures (70% smaller than source).",
+      "name": "graph_api",
+      "description": "Build public API graph from SDK source. WHEN TO USE: To understand SDK operations or prepare context. RETURNS: Compact API signatures (70% smaller than source).",
       "inputSchema": {
         "type": "object",
         "properties": {

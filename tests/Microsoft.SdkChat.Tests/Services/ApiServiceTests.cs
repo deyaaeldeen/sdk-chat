@@ -7,15 +7,15 @@ using Xunit;
 namespace Microsoft.SdkChat.Tests.Services;
 
 /// <summary>
-/// Tests for API extraction and coverage analysis in PackageInfoService.
+/// Tests for API graphing and coverage analysis in PackageInfoService.
 /// Entity group: api
 /// </summary>
 public class ApiServiceTests : PackageInfoTestBase
 {
-    #region ExtractPublicApiAsync Tests
+    #region GraphPublicApiAsync Tests
 
     [Fact]
-    public async Task ExtractPublicApiAsync_DotNetProject_ExtractsApi()
+    public async Task GraphPublicApiAsync_DotNetProject_GraphsApi()
     {
         // Arrange
         var srcDir = Path.Combine(TestRoot, "src");
@@ -36,7 +36,7 @@ public class MyClient
 ");
 
         // Act
-        var result = await Service.ExtractPublicApiAsync(TestRoot);
+        var result = await Service.GraphPublicApiAsync(TestRoot);
 
         // Assert
         Assert.True(result.Success);
@@ -48,7 +48,7 @@ public class MyClient
     }
 
     [Fact]
-    public async Task ExtractPublicApiAsync_WithJsonFormat_ReturnsJson()
+    public async Task GraphPublicApiAsync_WithJsonFormat_ReturnsJson()
     {
         // Arrange
         var srcDir = Path.Combine(TestRoot, "src");
@@ -59,7 +59,7 @@ public class MyClient { public void DoWork() { } }
 ");
 
         // Act
-        var result = await Service.ExtractPublicApiAsync(TestRoot, asJson: true);
+        var result = await Service.GraphPublicApiAsync(TestRoot, asJson: true);
 
         // Assert
         Assert.True(result.Success);
@@ -68,13 +68,13 @@ public class MyClient { public void DoWork() { } }
     }
 
     [Fact]
-    public async Task ExtractPublicApiAsync_UnknownLanguage_ReturnsError()
+    public async Task GraphPublicApiAsync_UnknownLanguage_ReturnsError()
     {
         // Arrange - Empty directory
         File.WriteAllText(Path.Combine(TestRoot, "readme.txt"), "nothing here");
 
         // Act
-        var result = await Service.ExtractPublicApiAsync(TestRoot);
+        var result = await Service.GraphPublicApiAsync(TestRoot);
 
         // Assert
         Assert.False(result.Success);
@@ -82,14 +82,14 @@ public class MyClient { public void DoWork() { } }
     }
 
     [Fact]
-    public async Task ExtractPublicApiAsync_WithLanguageOverride_UsesOverride()
+    public async Task GraphPublicApiAsync_WithLanguageOverride_UsesOverride()
     {
-        // Arrange - Python project but force dotnet extraction
+        // Arrange - Python project but force dotnet engine
         File.WriteAllText(Path.Combine(TestRoot, "pyproject.toml"), "[project]");
         File.WriteAllText(Path.Combine(TestRoot, "main.py"), "class Foo: pass");
 
         // Act - Force dotnet, which will fail to find .cs files
-        var result = await Service.ExtractPublicApiAsync(TestRoot, language: "dotnet");
+        var result = await Service.GraphPublicApiAsync(TestRoot, language: "dotnet");
 
         // Assert - Should succeed but find nothing (or minimal)
         Assert.True(result.Success);
@@ -426,7 +426,7 @@ client.upload();
         Assert.NotNull(pkg2Result);
         Assert.True(pkg2Result.SkippedNoSamples, "pkg2 should be skipped because it has no samples");
 
-        // pkg1 has samples - it should either be analyzed or failed (depends on extractor availability)
+        // pkg1 has samples - it should either be analyzed or failed (depends on engine availability)
         var pkg1Result = result.Packages.FirstOrDefault(p => p.RelativePath?.Contains("storage", StringComparison.Ordinal) == true);
         Assert.NotNull(pkg1Result);
         Assert.False(pkg1Result.SkippedNoSamples, "pkg1 should not be skipped - it has samples");

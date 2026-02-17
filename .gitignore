@@ -5,7 +5,7 @@ artifacts/
 dist/
 
 # Allow test fixture build outputs
-!tests/ApiExtractor.Tests/TestFixtures/**/dist/
+!tests/PublicApiGraphEngine.Tests/TestFixtures/**/dist/
 
 # IDE
 .vs/

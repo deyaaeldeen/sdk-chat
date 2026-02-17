@@ -49,11 +49,11 @@ public static class SdkChatTelemetry
     }
 
     /// <summary>
-    /// Starts an activity for API extraction operations.
+    /// Starts an activity for API graphing operations.
     /// </summary>
-    public static Activity? StartExtraction(string language, string path)
+    public static Activity? StartGraphing(string language, string path)
     {
-        var activity = Source.StartActivity("api.extract", ActivityKind.Internal);
+        var activity = Source.StartActivity("api.graph", ActivityKind.Internal);
         activity?.SetTag("language", language);
         activity?.SetTag("sdk.path", path);
         return activity;

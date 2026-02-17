@@ -19,7 +19,7 @@ public class SdkResources(IPackageInfoService service)
 
     [McpServerResource(UriTemplate = "sdk://{path}/api"), Description(
         "Public API surface of the SDK package. " +
-        "Returns the extracted API signatures, types, methods, and documentation as JSON. " +
+        "Returns the graphed API signatures, types, methods, and documentation as JSON. " +
         "Use this to understand what operations the SDK provides without reading raw source code. " +
         "~70% more token-efficient than raw source.")]
     public async Task<string> GetApiAsync(
@@ -28,24 +28,24 @@ public class SdkResources(IPackageInfoService service)
     {
         try
         {
-            var result = await _service.ExtractPublicApiAsync(path, language: null, asJson: true, crossLanguageMetadataPath: null, ct: cancellationToken).ConfigureAwait(false);
+            var result = await _service.GraphPublicApiAsync(path, language: null, asJson: true, crossLanguageMetadataPath: null, ct: cancellationToken).ConfigureAwait(false);
             
             if (!result.Success)
             {
                 return JsonSerializer.Serialize(
-                    new McpErrorResponse { Error = result.ErrorMessage ?? "API extraction failed", ErrorCode = result.ErrorCode ?? "EXTRACTION_FAILED" },
+                    new McpErrorResponse { Error = result.ErrorMessage ?? "API engine failed", ErrorCode = result.ErrorCode ?? "ENGINE_FAILED" },
                     McpJsonContext.Default.McpErrorResponse);
             }
 
             // Return consistent JSON format - wrap the API surface in a response object
             return JsonSerializer.Serialize(
-                new McpResponse<ApiExtractionResult> { Success = true, Data = result },
-                McpJsonContext.Default.McpResponseApiExtractionResult);
+                new McpResponse<ApiGraphResult> { Success = true, Data = result },
+                McpJsonContext.Default.McpResponseApiGraphResult);
         }
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(
-                new McpErrorResponse { Error = ex.Message, ErrorCode = "EXTRACTION_ERROR" },
+                new McpErrorResponse { Error = ex.Message, ErrorCode = "ENGINE_ERROR" },
                 McpJsonContext.Default.McpErrorResponse);
         }
     }

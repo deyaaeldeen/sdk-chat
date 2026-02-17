@@ -7,7 +7,7 @@ namespace Microsoft.SdkChat.Services;
 
 /// <summary>
 /// Safe file system operations that skip dangerous folders.
-/// Extracted from SdkInfo for testability and single responsibility.
+/// Graphed from SdkInfo for testability and single responsibility.
 /// </summary>
 public static class SafeFileEnumerator
 {

@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
-using ApiExtractor.Contracts;
-using ApiExtractor.Python;
+using PublicApiGraphEngine.Contracts;
+using PublicApiGraphEngine.Python;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 
@@ -12,8 +12,8 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 public sealed class PythonSampleLanguageContext : SampleLanguageContext
 {
     private readonly PythonUsageAnalyzer _usageAnalyzer = new();
-    private readonly ExtractionCache<ApiIndex> _cache = new(
-        async (path, ct) => (ApiIndex?)await new PythonApiExtractor().ExtractAsync(path, ct: ct), [".py"]);
+    private readonly EngineCache<ApiIndex> _cache = new(
+        async (path, ct) => (ApiIndex?)await new PythonPublicApiGraphEngine().GraphAsync(path, ct: ct), [".py"]);
 
     public PythonSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -53,7 +53,7 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
         "Python 3.9+: type hints, async/await, PEP 8, docstrings, context managers, f-strings.";
 
     /// <summary>
-    /// Analyzes existing code to extract API usage patterns.
+    /// Analyzes existing code to graph API usage patterns.
     /// </summary>
     public override async Task<UsageIndex?> AnalyzeUsageAsync(
         string sourcePath,
@@ -63,7 +63,7 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
         if (!Directory.Exists(codePath))
             return null;
 
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
         if (apiIndex == null)
             return null;
 
@@ -83,16 +83,16 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
 
         if (apiIndex == null)
         {
             throw new InvalidOperationException(
-                $"Failed to extract API surface from '{sourcePath}'. " +
+                $"Failed to graph API surface from '{sourcePath}'. " +
                 "Ensure Python 3 is installed and the path contains valid Python source files.");
         }
 
-        // Validate that we extracted meaningful API surface
+        // Validate that we graphed meaningful API surface
         var classCount = apiIndex.Modules.Sum(m => m.Classes?.Count ?? 0);
         var functionCount = apiIndex.Modules.Sum(m => m.Functions?.Count ?? 0);
         if (classCount == 0 && functionCount == 0)
@@ -126,12 +126,12 @@ public sealed class PythonSampleLanguageContext : SampleLanguageContext
         yield return "</api-surface>\n";
     }
 
-    private async Task<ApiIndex?> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
+    private async Task<ApiIndex?> GetOrGraphApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("python", sourcePath);
+        using var activity = Telemetry.SdkChatTelemetry.StartGraphing("python", sourcePath);
         try
         {
-            return await _cache.ExtractAsync(sourcePath, ct);
+            return await _cache.GraphAsync(sourcePath, ct);
         }
         catch (Exception ex)
         {

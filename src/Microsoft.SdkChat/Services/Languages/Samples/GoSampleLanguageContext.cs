@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
-using ApiExtractor.Contracts;
-using ApiExtractor.Go;
+using PublicApiGraphEngine.Contracts;
+using PublicApiGraphEngine.Go;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 
@@ -12,8 +12,8 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 public sealed class GoSampleLanguageContext : SampleLanguageContext
 {
     private readonly GoUsageAnalyzer _usageAnalyzer = new();
-    private readonly ExtractionCache<ApiIndex> _cache = new(
-        async (path, ct) => (ApiIndex?)await new GoApiExtractor().ExtractAsync(path, ct: ct), [".go"]);
+    private readonly EngineCache<ApiIndex> _cache = new(
+        async (path, ct) => (ApiIndex?)await new GoPublicApiGraphEngine().GraphAsync(path, ct: ct), [".go"]);
 
     public GoSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -49,7 +49,7 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
         "Go: package main, explicit error handling, defer cleanup, context.Context, idiomatic.";
 
     /// <summary>
-    /// Analyzes existing code to extract API usage patterns.
+    /// Analyzes existing code to graph API usage patterns.
     /// </summary>
     public override async Task<UsageIndex?> AnalyzeUsageAsync(
         string sourcePath,
@@ -59,7 +59,7 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
         if (!Directory.Exists(codePath))
             return null;
 
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
         if (apiIndex == null)
             return null;
 
@@ -79,16 +79,16 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
 
         if (apiIndex == null)
         {
             throw new InvalidOperationException(
-                $"Failed to extract API surface from '{sourcePath}'. " +
+                $"Failed to graph API surface from '{sourcePath}'. " +
                 "Ensure Go is installed and the path contains valid Go source files.");
         }
 
-        // Validate that we extracted meaningful API surface
+        // Validate that we graphed meaningful API surface
         var structCount = apiIndex.Packages.Sum(p => p.Structs?.Count ?? 0);
         var interfaceCount = apiIndex.Packages.Sum(p => p.Interfaces?.Count ?? 0);
         var functionCount = apiIndex.Packages.Sum(p => p.Functions?.Count ?? 0);
@@ -123,12 +123,12 @@ public sealed class GoSampleLanguageContext : SampleLanguageContext
         yield return "</api-surface>\n";
     }
 
-    private async Task<ApiIndex?> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
+    private async Task<ApiIndex?> GetOrGraphApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("go", sourcePath);
+        using var activity = Telemetry.SdkChatTelemetry.StartGraphing("go", sourcePath);
         try
         {
-            return await _cache.ExtractAsync(sourcePath, ct);
+            return await _cache.GraphAsync(sourcePath, ct);
         }
         catch (Exception ex)
         {

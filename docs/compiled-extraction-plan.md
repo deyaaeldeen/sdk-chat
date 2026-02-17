@@ -2,24 +2,24 @@
 
 ## Overview
 
-Add 5 artifact-backed Public API Graph Engine extractors alongside the existing source-parsing extractors. A `CompositeExtractor` orchestrates the two tiers with explicit strategy selection. **Preconditions:** the SDK is already built and all dependencies are installed — building is out of scope. Each Graph Engine extractor receives strongly-typed, language-specific inputs (project file paths) from the caller. No heuristics. No file discovery. No path guessing. TypeScript gains multi-target export condition support (node/browser/etc.).
+Add 5 artifact-backed Public API Graph Engines alongside the existing source-parsing engines. A `CompositeEngine` orchestrates the two tiers with explicit strategy selection. **Preconditions:** the SDK is already built and all dependencies are installed — building is out of scope. Each Graph Engine receives strongly-typed, language-specific inputs (project file paths) from the caller. No heuristics. No file discovery. No path guessing. TypeScript gains multi-target export condition support (node/browser/etc.).
 
 ### Goals
 
 - **100% type accuracy**: every type in every public API signature fully resolves — no `TypeKind.Error`, no missing imports, no string-based guessing.
 - **Process the artifact, not the source**: extract the public API of the produced output (DLLs, `.d.ts`, `.class` files, installed packages, type-checked Go packages) — the API consumers actually see.
-- **Lean interface**: Graph Engine extractors implement the same `IApiExtractor<TIndex>` interface as source extractors. No new interfaces; orchestration logic lives in `CompositeExtractor`, not in the extractor contract.
+- **Lean interface**: Graph Engines implement the same `IPublicApiGraphEngine<TIndex>` interface as source engines. No new interfaces; orchestration logic lives in `CompositeEngine`, not in the engine contract.
 - **Zero heuristics**: all inputs (project file paths) are explicit parameters from the caller. Build output is resolved by querying the build system itself.
 
 ### Non-Goals
 
-- Modifying existing source-parsing extractors (they remain as-is for fallback).
+- Modifying existing source-parsing engines (they remain as-is for fallback).
 - Building SDKs, installing dependencies, or downloading packages.
 - Discovering project files — that's the caller's responsibility.
 
 ### Preconditions (caller must satisfy)
 
-| Language | What must be done before calling the Graph Engine extractor |
+| Language | What must be done before calling the Graph Engine |
 |----------|-------------------------------------------------------|
 | **C#** | `dotnet build <csproj>` (produces DLL + XML docs) |
 | **TypeScript** | `npm install && npm run build` (produces `.d.ts` files, populates `node_modules`) |
@@ -32,27 +32,27 @@ Add 5 artifact-backed Public API Graph Engine extractors alongside the existing 
 
 ## Architecture
 
-### Extraction Strategy
+### Engine Strategy
 
 ```
-ExtractionStrategy enum:
-  Compiled  — only Graph Engine extractor. Error if build output missing.
-  Source    — only source extractor. Current behavior.
+EngineStrategy enum:
+  Compiled  — only Graph Engine engine. Error if build output missing.
+  Source    — only source engine. Current behavior.
   Auto     — try Compiled → fall back to Source if build output absent. (default)
 ```
 
 Controlled via:
-- CLI: `--extraction-mode compiled|source|auto`
-- Env var: `SDK_CHAT_EXTRACTION_MODE`
+- CLI: `--engine-mode compiled|source|auto`
+- Env var: `SDK_CHAT_ENGINE_MODE`
 - MCP tool parameter
 
 ### Interface — No Changes
 
-Graph Engine extractors implement the existing `IApiExtractor<TIndex>`. No new interface. The `rootPath` parameter carries the project file path (for C#: the `.csproj` path; for Go: the `go.mod` directory; etc.).
+Graph Engines implement the existing `IPublicApiGraphEngine<TIndex>`. No new interface. The `rootPath` parameter carries the project file path (for C#: the `.csproj` path; for Go: the `go.mod` directory; etc.).
 
 ```
-IApiExtractor<TIndex>                    (existing — unchanged)
-├── ExtractAsync(rootPath, ct) → ExtractorResult<TIndex>
+IPublicApiGraphEngine<TIndex>                    (existing — unchanged)
+├── GraphAsync(rootPath, ct) → EngineResult<TIndex>
 ├── Language: string
 ├── IsAvailable(): bool
 ├── ToJson(index) → string
@@ -63,25 +63,25 @@ TypeScript requires two paths, so it accepts them via constructor parameters:
 
 ```csharp
 // TypeScript: two paths required
-new TypeScriptCompiledExtractor(tsconfigPath, packageJsonPath)
+new TypeScriptCompiledEngine(tsconfigPath, packageJsonPath)
 ```
 
-The `rootPath` in `ExtractAsync` is still the SDK root directory. Constructor-injected paths tell the extractor *which* project files and tools to use.
+The `rootPath` in `GraphAsync` is still the SDK root directory. Constructor-injected paths tell the engine *which* project files and tools to use.
 
-### CompositeExtractor
+### CompositeEngine
 
-Wraps a compiled `IApiExtractor<TIndex>` and a source `IApiExtractor<TIndex>`:
+Wraps a compiled `IPublicApiGraphEngine<TIndex>` and a source `IPublicApiGraphEngine<TIndex>`:
 
 ```
-CompositeExtractor<TIndex>(compiled, source)
+CompositeEngine<TIndex>(compiled, source)
 
-ExtractAsync(rootPath, ct):
+GraphAsync(rootPath, ct):
   strategy = resolve from CLI/env/parameter
 
   if strategy == Source:
-    return source.ExtractAsync(rootPath, ct)
+    return source.GraphAsync(rootPath, ct)
 
-  result = compiled.ExtractAsync(rootPath, ct)
+  result = compiled.GraphAsync(rootPath, ct)
 
   if result.IsSuccess:
     return result
@@ -90,15 +90,15 @@ ExtractAsync(rootPath, ct):
     return result  // propagate the failure as-is
 
   // strategy == Auto
-  log warning: "Graph Engine extraction failed: {result.Error}. Falling back to source."
-  return source.ExtractAsync(rootPath, ct)
+  log warning: "Graph Engine engine failed: {result.Error}. Falling back to source."
+  return source.GraphAsync(rootPath, ct)
 ```
 
-No `LocateBuildOutput`. No `GetBuildCommands`. The Graph Engine extractor either succeeds or returns `Failure` with a descriptive error. The `CompositeExtractor` makes the fallback decision.
+No `LocateBuildOutput`. No `GetBuildCommands`. The Graph Engine either succeeds or returns `Failure` with a descriptive error. The `CompositeEngine` makes the fallback decision.
 
 ### Build Layout Cache (new)
 
-To avoid repeated build-tool startup for output-layout resolution, Graph Engine extractors use a shared `BuildLayoutCache`.
+To avoid repeated build-tool startup for output-layout resolution, Graph Engines use a shared `BuildLayoutCache`.
 
 ```
 BuildLayoutCache
@@ -149,35 +149,35 @@ This guarantees "query once" behavior across repeated CLI invocations while stil
 ```csharp
 // projectFiles resolved by caller before reaching the registry
 AnalyzerRegistry = {
-    [DotNet]      = (pf) => new CompositeExtractor(
-                        new CSharpCompiledExtractor(pf.CsprojPath),
-                        new CSharpApiExtractor()),
-    [Python]      = (pf) => new CompositeExtractor(
-                        new PythonCompiledExtractor(),
-                        new PythonApiExtractor()),
-    [TypeScript]  = (pf) => new CompositeExtractor(
-                        new TypeScriptCompiledExtractor(pf.TsconfigPath, pf.PackageJsonPath),
-                        new TypeScriptApiExtractor()),
-    [JavaScript]  = (pf) => new CompositeExtractor(
-                        new TypeScriptCompiledExtractor(pf.TsconfigPath, pf.PackageJsonPath),
-                        new TypeScriptApiExtractor()),
-    [Java+Maven]  = (pf) => new CompositeExtractor(
-                        new JavaMavenCompiledExtractor(pf.PomXmlPath),
-                        new JavaApiExtractor()),
-    [Java+Gradle] = (pf) => new CompositeExtractor(
-                        new JavaGradleCompiledExtractor(pf.BuildGradlePath),
-                        new JavaApiExtractor()),
-    [Go]          = (pf) => new CompositeExtractor(
-                        new GoCompiledExtractor(),
-                        new GoApiExtractor()),
+    [DotNet]      = (pf) => new CompositeEngine(
+                        new CSharpCompiledEngine(pf.CsprojPath),
+                        new CSharpPublicApiGraphEngine()),
+    [Python]      = (pf) => new CompositeEngine(
+                        new PythonCompiledEngine(),
+                        new PythonPublicApiGraphEngine()),
+    [TypeScript]  = (pf) => new CompositeEngine(
+                        new TypeScriptCompiledEngine(pf.TsconfigPath, pf.PackageJsonPath),
+                        new TypeScriptPublicApiGraphEngine()),
+    [JavaScript]  = (pf) => new CompositeEngine(
+                        new TypeScriptCompiledEngine(pf.TsconfigPath, pf.PackageJsonPath),
+                        new TypeScriptPublicApiGraphEngine()),
+    [Java+Maven]  = (pf) => new CompositeEngine(
+                        new JavaMavenCompiledEngine(pf.PomXmlPath),
+                        new JavaPublicApiGraphEngine()),
+    [Java+Gradle] = (pf) => new CompositeEngine(
+                        new JavaGradleCompiledEngine(pf.BuildGradlePath),
+                        new JavaPublicApiGraphEngine()),
+    [Go]          = (pf) => new CompositeEngine(
+                        new GoCompiledEngine(),
+                        new GoPublicApiGraphEngine()),
 };
 ```
 
 ---
 
-## Per-Language Public API Graph Engine Extractors
+## Per-Language Public API Graph Engines
 
-### C#/.NET — `CSharpCompiledExtractor`
+### C#/.NET — `CSharpCompiledEngine`
 
 **Constructor input:** `string csprojPath`
 
@@ -214,14 +214,14 @@ AnalyzerRegistry = {
 Timeout: 30s for each msbuild invocation.
 ```
 
-#### Extraction Algorithm
+#### Engine Algorithm
 
 ```
 1. Load the SDK's DLL + all NuGet dependency DLLs into a CSharpCompilation:
    - MetadataReference.CreateFromFile(dllPath) — the SDK's own assembly
    - Runtime assembly refs (System.Runtime, etc.) — from AppContext.BaseDirectory
    - NuGet dependency DLLs — resolved from the .csproj's obj/project.assets.json
-     (existing logic from CSharpApiExtractor.Dependencies.cs)
+     (existing logic from CSharpPublicApiGraphEngine.Dependencies.cs)
 
 2. Walk compilation.GlobalNamespace recursively.
    For each INamedTypeSymbol where DeclaredAccessibility == Public:
@@ -239,7 +239,7 @@ Timeout: 30s for each msbuild invocation.
 
 ---
 
-### TypeScript — `TypeScriptCompiledExtractor`
+### TypeScript — `TypeScriptCompiledEngine`
 
 **Constructor inputs:** `string tsconfigPath`, `string packageJsonPath`
 
@@ -313,7 +313,7 @@ CASE: "exports" is an object:
 Result: list of { conditions: string[], subpath: string, dtsEntryPath: string }
 ```
 
-#### Extraction Algorithm
+#### Engine Algorithm
 
 ```
 For each (conditions, subpath, dtsEntryPath):
@@ -337,17 +337,17 @@ Add to TypeScript `ModuleInfo`:
 
 ---
 
-### Python — `PythonCompiledExtractor`
+### Python — `PythonCompiledEngine`
 
 **Constructor inputs:** none. Uses `python` from PATH (the standard executable name). The package must already be importable in this interpreter's environment (i.e., `pip install -e .` has been run).
 
-The `rootPath` parameter is the SDK root directory. The extractor derives the import name from the project metadata in that directory.
+The `rootPath` parameter is the SDK root directory. The engine derives the import name from the project metadata in that directory.
 
-#### Extraction Algorithm
+#### Engine Algorithm
 
 ```
 Run in subprocess using `python` (30s timeout):
-  python extract_api.py --mode=inspect <import_name>
+  python graph_api.py --mode=inspect <import_name>
 
 The import name is derived from the SDK root:
   Read pyproject.toml/setup.cfg/setup.py in rootPath for [project].name,
@@ -377,7 +377,7 @@ Error handling:
 
 ---
 
-### Java (Maven) — `JavaMavenCompiledExtractor`
+### Java (Maven) — `JavaMavenCompiledEngine`
 
 **Constructor input:** `string pomXmlPath` — path to `pom.xml`.
 
@@ -403,7 +403,7 @@ If not → Failure("No .class files in {dir}. Run: mvn compile -f {pomXmlPath}")
 
 ---
 
-### Java (Gradle) — `JavaGradleCompiledExtractor`
+### Java (Gradle) — `JavaGradleCompiledEngine`
 
 **Constructor input:** `string buildGradlePath` — path to `build.gradle` or `build.gradle.kts`.
 
@@ -427,9 +427,9 @@ Verify directory exists and contains ≥1 .class file.
 If not → Failure("No .class files in {dir}. Run: gradle compileJava -b {buildGradlePath}")
 ```
 
-### Java — Shared Extraction Algorithm
+### Java — Shared Engine Algorithm
 
-Both Maven and Gradle extractors share the same extraction algorithm once the classes directory is resolved:
+Both Maven and Gradle engines share the same engine algorithm once the classes directory is resolved:
 
 ```
 1. Add //DEPS org.ow2.asm:asm:9.7 to JBang header.
@@ -450,22 +450,22 @@ Both Maven and Gradle extractors share the same extraction algorithm once the cl
    to dotted names (com.azure.storage.blob.BlobClient).
 
 6. Javadoc pairing: parse source .java files with JavaParser
-   (existing dependency) for Javadoc extraction ONLY.
+   (existing dependency) for Javadoc parsing ONLY.
    Match by fully-qualified class + method name + parameter types.
 ```
 
 ---
 
-### Go — `GoCompiledExtractor`
+### Go — `GoCompiledEngine`
 
-**Constructor inputs:** none. The `rootPath` parameter to `ExtractAsync` is the directory containing `go.mod`.
+**Constructor inputs:** none. The `rootPath` parameter to `GraphAsync` is the directory containing `go.mod`.
 
-#### Extraction Algorithm
+#### Engine Algorithm
 
 ```
-1. Convert extractor from single-file script to Go module:
+1. Convert engine from single-file script to Go module:
    Add go.mod with golang.org/x/tools dependency.
-   Update GoApiExtractor.cs to "go build" the module directory.
+   Update GoPublicApiGraphEngine.cs to "go build" the module directory.
 
 2. Use packages.Load() with config:
    Mode: packages.NeedName | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo
@@ -507,15 +507,15 @@ Both Maven and Gradle extractors share the same extraction algorithm once the cl
 
 ### PackageInfoService
 
-- `CompositeExtractor` wrappers pair each compiled + source extractor.
-- `ExtractionStrategy` parameter propagates from CLI/env var/MCP.
-- Factory lambdas accept project file paths and construct Graph Engine extractors with the right constructor args.
-- When `Auto` fallback triggers, log warning with the Graph Engine extractor's error message.
+- `CompositeEngine` wrappers pair each compiled + source engine.
+- `EngineStrategy` parameter propagates from CLI/env var/MCP.
+- Factory lambdas accept project file paths and construct Graph Engines with the right constructor args.
+- When `Auto` fallback triggers, log warning with the Graph Engine's error message.
 
 ### CLI (Program.cs)
 
-- Add `--extraction-mode compiled|source|auto` option (default: `auto`).
-- Add `SDK_CHAT_EXTRACTION_MODE` env var override.
+- Add `--engine-mode compiled|source|auto` option (default: `auto`).
+- Add `SDK_CHAT_ENGINE_MODE` env var override.
 - Surface in MCP tools as a parameter.
 
 ### Cache Updates
@@ -530,9 +530,9 @@ Per-language fingerprint targets:
 | **Java** | `*.java` files | All `.class` files in the output directory |
 | **Go** | `*.go` files | `*.go` files (same — Go has no separate artifact) |
 
-`ExtractionCache`: cache key includes `(rootPath, extractionMode)` so compiled and source results don't collide.
+`EngineCache`: cache key includes `(rootPath, engineMode)` so compiled and source results don't collide.
 
-`BuildLayoutCache` (new): caches resolved build-output locations for Graph Engine extractors.
+`BuildLayoutCache` (new): caches resolved build-output locations for Graph Engines.
 
 - Key: `(language, projectFilePath)`
 - Invalidation: config fingerprint mismatch or missing/empty expected artifacts
@@ -541,11 +541,11 @@ Per-language fingerprint targets:
 
 ### Formatter Updates
 
-TypeScript `ModuleInfo` gains `condition` and `exportPath` fields. Formatters updated to render them in stubs output. No other schema changes — the Graph Engine extractors produce the same `ApiIndex` types as source extractors, just with higher-fidelity type information.
+TypeScript `ModuleInfo` gains `condition` and `exportPath` fields. Formatters updated to render them in stubs output. No other schema changes — the Graph Engines produce the same `ApiIndex` types as source engines, just with higher-fidelity type information.
 
 ### ReachabilityAnalyzer / SignatureTokenizer
 
-No changes expected — the `TypeNode` graph and `SignatureTokenizer` operate on the same `ApiIndex` schema. If Graph Engine extraction produces richer type strings (e.g., fully-qualified generic constraints), `SignatureTokenizer` handles them already since it splits on non-identifier characters.
+No changes expected — the `TypeNode` graph and `SignatureTokenizer` operate on the same `ApiIndex` schema. If Graph Engine processing produces richer type strings (e.g., fully-qualified generic constraints), `SignatureTokenizer` handles them already since it splits on non-identifier characters.
 
 ---
 
@@ -553,11 +553,11 @@ No changes expected — the `TypeNode` graph and `SignatureTokenizer` operate on
 
 ### Diff-Based Validation
 
-For each language, run both extractors on the same SDK and diff the output:
+For each language, run both engines on the same SDK and diff the output:
 
 ```
-source_result  = sourceExtractor.ExtractAsync(sdkRoot)
-compiled_result = compiledExtractor.ExtractAsync(sdkRoot)
+source_result  = sourceEngine.GraphAsync(sdkRoot)
+compiled_result = compiledEngine.GraphAsync(sdkRoot)
 diff = compare(source_result, compiled_result)
 ```
 
@@ -575,24 +575,24 @@ Track across a corpus (e.g., all Azure SDK packages for each language). This is 
 
 ### Compiled Mode Tests
 
-- Small SDK fixture projects per language, pre-built in the test fixture setup (build is a test prerequisite, not done by the extractor).
+- Small SDK fixture projects per language, pre-built in the test fixture setup (build is a test prerequisite, not done by the engine).
 - Verify: 0 unresolved types, 0 `TypeKind.Error`, 0 missing dependency entries.
 - TypeScript multi-target: fixture with `node`/`browser` conditions → verify separate module entries.
 
 ### Fallback Tests
 
-- Delete build output from fixture → verify `CompositeExtractor` in `Auto` mode activates source extractor with warning.
-- `--extraction-mode compiled` without build → verify error returned (not a crash).
-- `--extraction-mode source` → verify current behavior unchanged.
+- Delete build output from fixture → verify `CompositeEngine` in `Auto` mode activates source engine with warning.
+- `--engine-mode compiled` without build → verify error returned (not a crash).
+- `--engine-mode source` → verify current behavior unchanged.
 
 ### Diff Tests
 
-- Run both extractors on each fixture → verify compiled output is a superset of source output in type accuracy.
+- Run both engines on each fixture → verify compiled output is a superset of source output in type accuracy.
 
 ### Existing Tests
 
 - All existing source-mode tests remain unchanged and must pass.
-- Source extractors are not modified.
+- Source engines are not modified.
 
 ---
 
@@ -600,15 +600,15 @@ Track across a corpus (e.g., all Azure SDK packages for each language). This is 
 
 | Phase | Scope | Why first |
 |-------|-------|-----------|
-| **1** | `CompositeExtractor` + `ExtractionStrategy` enum + CLI flag + cache key update | Architecture plumbing — all subsequent extractors plug into this. |
-| **1.5** | `BuildLayoutCache` + config fingerprint utility | Removes repeated build-layout shell-outs for .NET/TypeScript/Java before language extractors land. |
-| **2** | `GoCompiledExtractor` | Lowest risk. `packages.Load()` does everything. No build artifact discovery. Existing Go extractor already shells out to Go toolchain. Proves the CompositeExtractor pattern end-to-end. |
-| **3** | `CSharpCompiledExtractor` | Low risk. Roslyn is already a dependency. `dotnet msbuild` query is reliable. Validates the DLL-based extraction path. |
-| **4** | `JavaMavenCompiledExtractor` + `JavaGradleCompiledExtractor` | Medium. ASM `SignatureVisitor` for generics is the main complexity. Two extractors but shared extraction algorithm — only build output resolution differs. |
-| **5** | `TypeScriptCompiledExtractor` | Medium-high. Export condition enumeration has many edge cases. |
-| **6** | `PythonCompiledExtractor` | Highest risk. Runtime import can trigger side effects. Subprocess isolation and timeout handling require care. |
+| **1** | `CompositeEngine` + `EngineStrategy` enum + CLI flag + cache key update | Architecture plumbing — all subsequent engines plug into this. |
+| **1.5** | `BuildLayoutCache` + config fingerprint utility | Removes repeated build-layout shell-outs for .NET/TypeScript/Java before language engines land. |
+| **2** | `GoCompiledEngine` | Lowest risk. `packages.Load()` does everything. No build artifact discovery. Existing Go engine already shells out to Go toolchain. Proves the CompositeEngine pattern end-to-end. |
+| **3** | `CSharpCompiledEngine` | Low risk. Roslyn is already a dependency. `dotnet msbuild` query is reliable. Validates the DLL-based engine path. |
+| **4** | `JavaMavenCompiledEngine` + `JavaGradleCompiledEngine` | Medium. ASM `SignatureVisitor` for generics is the main complexity. Two engines but shared engine algorithm — only build output resolution differs. |
+| **5** | `TypeScriptCompiledEngine` | Medium-high. Export condition enumeration has many edge cases. |
+| **6** | `PythonCompiledEngine` | Highest risk. Runtime import can trigger side effects. Subprocess isolation and timeout handling require care. |
 
-Each phase ships independently. `Auto` mode means users get Graph Engine extraction as soon as each language lands — no big bang.
+Each phase ships independently. `Auto` mode means users get Graph Engine processing as soon as each language lands — no big bang.
 
 ---
 
@@ -631,14 +631,14 @@ All queries delegate to the build system itself — zero heuristics.
 
 | Decision | Rationale |
 |----------|-----------|
-| No new interface | Graph Engine extractors implement existing `IApiExtractor<TIndex>`. Constructor-injected config replaces method parameters. Less API surface, easier to test, no breaking changes. |
-| `CompositeExtractor` as orchestrator | Fallback logic lives here, not in the extractors. Each extractor either succeeds or returns `Failure`. Clean separation. |
-| Strongly-typed constructor inputs | Each extractor takes exactly the paths it needs — no union types, no filename-based dispatch. `CSharpCompiledExtractor(csprojPath)`, `TypeScriptCompiledExtractor(tsconfigPath, packageJsonPath)`, `JavaMavenCompiledExtractor(pomXmlPath)`, `JavaGradleCompiledExtractor(buildGradlePath)`, `PythonCompiledExtractor()`, `GoCompiledExtractor()`. The caller decides which extractor to instantiate. |
-| Building is out of scope | The extractor assumes the SDK is built. If artifacts are missing, it returns `Failure` with a descriptive message. No `GetBuildCommands` method — the error message itself contains the command. |
+| No new interface | Graph Engines implement existing `IPublicApiGraphEngine<TIndex>`. Constructor-injected config replaces method parameters. Less API surface, easier to test, no breaking changes. |
+| `CompositeEngine` as orchestrator | Fallback logic lives here, not in the engines. Each engine either succeeds or returns `Failure`. Clean separation. |
+| Strongly-typed constructor inputs | Each engine takes exactly the paths it needs — no union types, no filename-based dispatch. `CSharpCompiledEngine(csprojPath)`, `TypeScriptCompiledEngine(tsconfigPath, packageJsonPath)`, `JavaMavenCompiledEngine(pomXmlPath)`, `JavaGradleCompiledEngine(buildGradlePath)`, `PythonCompiledEngine()`, `GoCompiledEngine()`. The caller decides which engine to instantiate. |
+| Building is out of scope | The engine assumes the SDK is built. If artifacts are missing, it returns `Failure` with a descriptive message. No `GetBuildCommands` method — the error message itself contains the command. |
 | `python` from PATH | Assumes standard `python` executable exists. No venv detection, no interpreter path configuration. Caller ensures the right environment is active before invoking. |
-| No `go build` pre-check for Go | `packages.Load()` is the single verification + extraction path. If it fails, that's the error. Simpler, more correct than a separate `go build ./...` step. |
+| No `go build` pre-check for Go | `packages.Load()` is the single verification + engine path. If it fails, that's the error. Simpler, more correct than a separate `go build ./...` step. |
 | Gradle `layout.buildDirectory` via init script | `buildDir` property is deprecated since Gradle 8.x. Init script approach is forward-compatible and avoids parsing deprecation warnings from stdout. |
 | Build system queries over config parsing | `dotnet msbuild`, `tsc --showConfig`, `mvn help:evaluate` evaluate their own config chains — we don't re-implement resolution logic. |
-| Timeouts on all shell-outs | 30s default. Prevents hung Maven/Gradle/tsc processes from blocking the extraction pipeline. |
+| Timeouts on all shell-outs | 30s default. Prevents hung Maven/Gradle/tsc processes from blocking the engine pipeline. |
 | Ship incrementally by language | Each language ships behind `Auto` mode. Go first (lowest risk), Python last (highest risk). Users get value as each lands. |
 | Diff-based accuracy metric | Run compiled vs. source on the same SDK, measure unresolved types / total types. This is the quality gate. |

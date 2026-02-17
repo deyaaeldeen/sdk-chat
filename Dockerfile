@@ -13,7 +13,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0
 LABEL org.opencontainers.image.source="https://github.com/deyaaeldeen/sdk-chat"
 LABEL org.opencontainers.image.description="SDK Chat development environment"
 
-# Install language runtimes for API extractors and AOT compilation tools
+# Install language runtimes for Public API Graph Engines and AOT compilation tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Core tools
     curl git unzip openssh-client \
@@ -21,11 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clang zlib1g-dev \
     # Docker CLI (uses host's Docker via socket mount)
     docker.io \
-    # Python extractor
+    # Python engine
     python3 python3-pip \
-    # Go extractor
+    # Go engine
     golang-go \
-    # Java extractor (JDK for JBang to compile .java scripts)
+    # Java engine (JDK for JBang to compile .java scripts)
     default-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
@@ -36,7 +36,7 @@ RUN curl https://get.volta.sh | bash -s -- --skip-setup && \
     chmod -R a+rx /opt/volta
 ENV PATH="$VOLTA_HOME/bin:$PATH"
 
-# Install JBang for Java extractor
+# Install JBang for Java engine
 ENV JBANG_DIR=/opt/jbang
 RUN curl -Ls https://sh.jbang.dev | bash -s - app setup && \
     chmod -R a+rx /opt/jbang && \

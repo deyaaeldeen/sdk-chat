@@ -42,7 +42,7 @@ dotnet run --project src/Microsoft.SdkChat -- package samples generate /path/to/
 | `package source detect <path>` | Auto-detect source folder and programming language |
 | `package samples detect <path>` | Find existing samples folder (samples/, examples/) |
 | `package samples generate <path>` | Generate production-ready code samples using AI |
-| `package api extract <path>` | Extract all public types, methods, and properties from SDK source |
+| `package api graph <path>` | Build public API graph from SDK source |
 | `package api coverage <path>` | Find which API operations are missing from samples |
 | `doctor` | Validate external dependencies |
 | `mcp` | Start MCP server for AI agent integration |
@@ -75,7 +75,7 @@ dotnet run --project src/Microsoft.SdkChat -- package samples generate /path/to/
 | `--use-openai` | `false` | Use OpenAI API instead of GitHub Copilot |
 | `--load-dotenv` | `false` | Load .env file from current directory |
 
-### `package api extract`
+### `package api graph`
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -170,7 +170,7 @@ Add to `claude_desktop_config.json`:
 | `detect_samples` | Find existing samples/examples folder. Use before generating samples to check what already exists and avoid duplicates. |
 | `build_samples_prompt` | Analyze SDK and build optimized system + user prompts for AI sample generation. Returns prompts, estimated tokens, language, and suggested output path. |
 | `validate_samples` | Parse and validate an LLM response containing generated samples. Returns structured samples on success or a correction prompt for retry on failure. |
-| `extract_api` | Extract the complete public API surface (types, methods, properties with signatures and docs). Returns code stubs or structured JSON (~70% smaller than raw source). |
+| `graph_api` | Build the public API graph (types, methods, properties with signatures and docs). Returns code stubs or structured JSON (~70% smaller than raw source). |
 | `analyze_coverage` | Compare public API against existing samples to find documentation gaps. Returns coverage percentage, covered operations with file:line references, and uncovered operations. |
 
 #### MCP Workflow
@@ -190,7 +190,7 @@ detect_source → build_samples_prompt → [call LLM] → validate_samples → w
 | `OPENAI_ENDPOINT` | Custom OpenAI-compatible endpoint |
 | `SDK_CLI_MODEL` | Override default AI model |
 | `SDK_CLI_TIMEOUT` | AI request timeout in seconds (default: 300) |
-| `SDK_CHAT_EXTRACTOR_TIMEOUT` | API extractor timeout in seconds (default: 300) |
+| `SDK_CHAT_ENGINE_TIMEOUT` | Public API Graph Engine timeout in seconds (default: 300) |
 | `SDK_CLI_DEBUG` | Set `true` to log prompts/responses |
 | `SDK_CLI_DEBUG_DIR` | Directory for debug output files |
 | `SDK_CLI_USE_OPENAI` | Set `true` to use OpenAI by default |

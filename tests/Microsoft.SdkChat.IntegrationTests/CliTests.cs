@@ -106,22 +106,22 @@ public class CliTests
 
     #endregion
 
-    #region API Extraction Tests
+    #region API Graphing Tests
 
     [Theory]
     [MemberData(nameof(SupportedLanguages))]
-    public async Task ApiExtract_ReturnsValidJson(string language)
+    public async Task ApiGraph_ReturnsValidJson(string language)
     {
         if (!_fixture.IsAvailable) Assert.Skip(_fixture.SkipReason ?? "CLI not available");
 
         var langFlag = CliFixture.GetLanguageFlag(language);
         var (exitCode, output, error) = await _fixture.RunWithFixtureAsync(
-            "package api extract", language, $"--language {langFlag} --json");
+            "package api graph", language, $"--language {langFlag} --json");
 
         Assert.True(exitCode == 0, $"[{language}] Exit code {exitCode}. Error: {error}. Output: {output}");
         Assert.False(string.IsNullOrWhiteSpace(output), $"[{language}] Expected output");
 
-        // API extraction should return JSON with package/namespace info
+        // API graphing should return JSON with package/namespace info
         Assert.True(
             output.Contains("\"package\"") || output.Contains("\"namespaces\"") || output.Contains("\"types\""),
             $"[{language}] Expected API JSON structure. Got: {output[..Math.Min(500, output.Length)]}");

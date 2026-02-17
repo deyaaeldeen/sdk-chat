@@ -33,7 +33,7 @@ SdkInfo (language detection)
      ↓
 SampleLanguageContext (language-specific)
      ↓
-ApiExtractor (Roslyn/ast/ts-morph/etc)
+PublicApiGraphEngine (Roslyn/ast/ts-morph/etc)
      ↓
 AiService (Copilot or OpenAI)
      ↓

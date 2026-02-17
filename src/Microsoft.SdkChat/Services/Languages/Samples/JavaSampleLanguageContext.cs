@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
-using ApiExtractor.Contracts;
-using ApiExtractor.Java;
+using PublicApiGraphEngine.Contracts;
+using PublicApiGraphEngine.Java;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 
@@ -12,8 +12,8 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 public sealed class JavaSampleLanguageContext : SampleLanguageContext
 {
     private readonly JavaUsageAnalyzer _usageAnalyzer = new();
-    private readonly ExtractionCache<ApiIndex> _cache = new(
-        async (path, ct) => (ApiIndex?)await new JavaApiExtractor().ExtractAsync(path, ct: ct), [".java"]);
+    private readonly EngineCache<ApiIndex> _cache = new(
+        async (path, ct) => (ApiIndex?)await new JavaPublicApiGraphEngine().GraphAsync(path, ct: ct), [".java"]);
 
     public JavaSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -51,7 +51,7 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
         "Java 17+: try-with-resources, Javadoc, proper exceptions, var where obvious.";
 
     /// <summary>
-    /// Analyzes existing code to extract API usage patterns.
+    /// Analyzes existing code to graph API usage patterns.
     /// </summary>
     public override async Task<UsageIndex?> AnalyzeUsageAsync(
         string sourcePath,
@@ -61,7 +61,7 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
         if (!Directory.Exists(codePath))
             return null;
 
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
         if (apiIndex == null)
             return null;
 
@@ -81,16 +81,16 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
 
         if (apiIndex == null)
         {
             throw new InvalidOperationException(
-                $"Failed to extract API surface from '{sourcePath}'. " +
+                $"Failed to graph API surface from '{sourcePath}'. " +
                 "Ensure JBang is installed and the path contains valid Java source files.");
         }
 
-        // Validate that we extracted meaningful API surface
+        // Validate that we graphed meaningful API surface
         var classCount = apiIndex.Packages.Sum(p => p.Classes?.Count ?? 0);
         var interfaceCount = apiIndex.Packages.Sum(p => p.Interfaces?.Count ?? 0);
         var enumCount = apiIndex.Packages.Sum(p => p.Enums?.Count ?? 0);
@@ -125,12 +125,12 @@ public sealed class JavaSampleLanguageContext : SampleLanguageContext
         yield return "</api-surface>\n";
     }
 
-    private async Task<ApiIndex?> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
+    private async Task<ApiIndex?> GetOrGraphApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("java", sourcePath);
+        using var activity = Telemetry.SdkChatTelemetry.StartGraphing("java", sourcePath);
         try
         {
-            return await _cache.ExtractAsync(sourcePath, ct);
+            return await _cache.GraphAsync(sourcePath, ct);
         }
         catch (Exception ex)
         {

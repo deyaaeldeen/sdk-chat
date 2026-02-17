@@ -1,4 +1,4 @@
-# Proposal: Replace TypeScript Extractor with SWC-based Rust Implementation
+# Proposal: Replace TypeScript Engine with SWC-based Rust Implementation
 
 **Status:** Draft  
 **Author:** AI Investigation  
@@ -6,7 +6,7 @@
 
 ## Summary
 
-Replace the current Bun-compiled TypeScript extractor (97 MB) with a native Rust binary using SWC parser (1.2 MB), reducing release container size by ~96 MB (19% of total).
+Replace the current Bun-compiled TypeScript engine (97 MB) with a native Rust binary using SWC parser (1.2 MB), reducing release container size by ~96 MB (19% of total).
 
 ## Current State
 
@@ -15,14 +15,14 @@ The release container (`sdk-chat:latest`) is 504 MB, with the following breakdow
 | Component | Size | Percentage |
 |-----------|------|------------|
 | Copilot CLI | 138 MB | 27% |
-| **ts_extractor** | **97 MB** | **19%** |
+| **ts_engine** | **97 MB** | **19%** |
 | sdk-chat (main CLI) | 40.5 MB | 8% |
-| java_extractor | 36.4 MB | 7% |
-| python_extractor | 8.1 MB | 2% |
-| go_extractor | 2.6 MB | 0.5% |
+| java_engine | 36.4 MB | 7% |
+| python_engine | 8.1 MB | 2% |
+| go_engine | 2.6 MB | 0.5% |
 | Base image | ~22 MB | 4% |
 
-The TypeScript extractor is the **second-largest component** because it bundles the entire Bun runtime + ts-morph + TypeScript compiler.
+The TypeScript engine is the **second-largest component** because it bundles the entire Bun runtime + ts-morph + TypeScript compiler.
 
 ## Proposed Solution
 
@@ -30,7 +30,7 @@ Replace the ts-morph/Bun implementation with a native Rust binary using [SWC](ht
 
 ### Proof of Concept Results
 
-A minimal SWC-based extractor was built and tested:
+A minimal SWC-based engine was built and tested:
 
 ```
 Current (Bun):    97 MB
@@ -75,18 +75,18 @@ Savings:        95.8 MB (98.8% reduction)
 | Cross-file type resolution | ✅ | ❌ | Low - most APIs are self-contained |
 | Generic type inference | ✅ | ❌ | Low - generics preserved in source |
 
-**Estimated feature coverage: 80-90%** for typical SDK extraction needs.
+**Estimated feature coverage: 80-90%** for typical SDK engine needs.
 
 ## Implementation Plan
 
 ### Phase 1: Core Parser (1-2 days)
 
-Create a new Rust crate `api-extractor-ts-rust/` with:
+Create a new Rust crate `public-api-graph-engine-ts-rust/` with:
 
 1. CLI argument parsing (clap)
 2. TypeScript file discovery (walkdir)
 3. SWC parsing integration
-4. AST visitor for extracting:
+4. AST visitor for graphing:
    - Exported classes with methods/properties
    - Exported interfaces
    - Exported functions
@@ -115,15 +115,15 @@ Match the existing JSON output format:
 
 ### Phase 3: Integration (0.5 days)
 
-1. Add Rust build stage to `extractors/typescript/Dockerfile`
-2. Update `TypeScriptApiExtractor.cs` to use new binary
+1. Add Rust build stage to `engines/typescript/Dockerfile`
+2. Update `TypeScriptPublicApiGraphEngine.cs` to use new binary
 3. Run existing tests to verify compatibility
 
 ### Phase 4: Fallback Strategy (Optional)
 
 Keep Bun version as fallback for edge cases:
 - Environment variable to choose implementation
-- Automatic fallback if Rust extractor fails
+- Automatic fallback if Rust engine fails
 
 ## Risks and Mitigations
 
@@ -136,14 +136,14 @@ Keep Bun version as fallback for edge cases:
 
 ## Build Dependencies
 
-Add to `extractors/typescript/Dockerfile`:
+Add to `engines/typescript/Dockerfile`:
 
 ```dockerfile
-# Stage: Build TypeScript extractor (Rust/SWC)
+# Stage: Build TypeScript engine (Rust/SWC)
 FROM rust:1.75-bookworm AS build-typescript
 
 WORKDIR /src
-COPY src/api-extractor-ts-rust/ .
+COPY src/public-api-graph-engine-ts-rust/ .
 
 RUN cargo build --release \
     --config 'profile.release.opt-level="z"' \
@@ -168,7 +168,7 @@ Note: Pin `serde = "=1.0.203"` for SWC compatibility.
 ## Success Metrics
 
 - [ ] Binary size < 5 MB (vs current 97 MB)
-- [ ] Passes existing TypeScript extractor tests
+- [ ] Passes existing TypeScript engine tests
 - [ ] No regression in sample generation quality
 - [ ] Build time < 2 minutes in CI
 
@@ -195,12 +195,12 @@ Note: Pin `serde = "=1.0.203"` for SWC compatibility.
 ### Keep Current (Bun)
 
 - **Pros:** No work required, full feature parity
-- **Cons:** 97 MB binary, largest extractor by far
+- **Cons:** 97 MB binary, largest engine by far
 - **Verdict:** Acceptable if size is not a priority
 
 ## Recommendation
 
-Proceed with SWC-based Rust implementation. The 19% container size reduction is significant, and the 80-90% feature coverage is sufficient for SDK API extraction. The fallback strategy mitigates risk.
+Proceed with SWC-based Rust implementation. The 19% container size reduction is significant, and the 80-90% feature coverage is sufficient for SDK API graphing. The fallback strategy mitigates risk.
 
 **Estimated effort:** 2-3 developer-days
 
@@ -208,4 +208,4 @@ Proceed with SWC-based Rust implementation. The 19% container size reduction is 
 
 - [SWC Documentation](https://swc.rs/)
 - [swc_ecma_parser crate](https://crates.io/crates/swc_ecma_parser)
-- [Current TypeScript extractor](../src/ApiExtractor.TypeScript/src/extract_api.ts)
+- [Current TypeScript engine](../src/PublicApiGraphEngine.TypeScript/src/graph_api.ts)

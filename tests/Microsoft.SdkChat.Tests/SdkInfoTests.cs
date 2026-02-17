@@ -552,7 +552,7 @@ public class SdkInfoTests : IDisposable
     // ── Import-based Samples Detection ──────────────────────────────────────
 
     [Fact]
-    public void ExtractLibraryName_Python_ExtractsFromPyprojectToml()
+    public void ExtractLibraryName_Python_GraphsFromPyprojectToml()
     {
         // Arrange
         File.WriteAllText(Path.Combine(_testRoot, "pyproject.toml"),
@@ -594,7 +594,7 @@ public class SdkInfoTests : IDisposable
     }
 
     [Fact]
-    public void ExtractLibraryName_JavaScript_ExtractsFromPackageJson()
+    public void ExtractLibraryName_JavaScript_GraphsFromPackageJson()
     {
         // Arrange
         File.WriteAllText(Path.Combine(_testRoot, "package.json"),
@@ -608,7 +608,7 @@ public class SdkInfoTests : IDisposable
     }
 
     [Fact]
-    public void ExtractLibraryName_TypeScript_ExtractsFromPackageJson()
+    public void ExtractLibraryName_TypeScript_GraphsFromPackageJson()
     {
         // Arrange
         File.WriteAllText(Path.Combine(_testRoot, "package.json"),
@@ -622,7 +622,7 @@ public class SdkInfoTests : IDisposable
     }
 
     [Fact]
-    public void ExtractLibraryName_Java_ExtractsGroupIdFromPom()
+    public void ExtractLibraryName_Java_GraphsGroupIdFromPom()
     {
         // Arrange
         File.WriteAllText(Path.Combine(_testRoot, "pom.xml"),
@@ -638,7 +638,7 @@ public class SdkInfoTests : IDisposable
     }
 
     [Fact]
-    public void ExtractLibraryName_Java_ExtractsGroupFromGradle()
+    public void ExtractLibraryName_Java_GraphsGroupFromGradle()
     {
         // Arrange
         File.WriteAllText(Path.Combine(_testRoot, "build.gradle"),
@@ -652,7 +652,7 @@ public class SdkInfoTests : IDisposable
     }
 
     [Fact]
-    public void ExtractLibraryName_Go_ExtractsModulePath()
+    public void ExtractLibraryName_Go_GraphsModulePath()
     {
         // Arrange
         File.WriteAllText(Path.Combine(_testRoot, "go.mod"),
@@ -666,7 +666,7 @@ public class SdkInfoTests : IDisposable
     }
 
     [Fact]
-    public void ExtractLibraryName_DotNet_ExtractsRootNamespace()
+    public void ExtractLibraryName_DotNet_GraphsRootNamespace()
     {
         // Arrange
         var srcDir = Path.Combine(_testRoot, "src");

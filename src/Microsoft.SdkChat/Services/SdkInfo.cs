@@ -166,7 +166,7 @@ public class SdkInfo
     public IReadOnlyList<string> AllSamplesCandidates { get; }
 
     /// <summary>
-    /// The library/package name extracted from build markers (e.g., "azure-storage-blob"
+    /// The library/package name graphed from build markers (e.g., "azure-storage-blob"
     /// from pyproject.toml, "@azure/openai" from package.json). Null if not determined.
     /// </summary>
     public string? LibraryName { get; }
@@ -212,7 +212,7 @@ public class SdkInfo
 
 
 
-    /// <summary>Gradle build file names for group-ID extraction.</summary>
+    /// <summary>Gradle build file names for group-ID parsing.</summary>
     private static readonly string[] GradleBuildFiles = ["build.gradle", "build.gradle.kts"];
 
     /// <summary>package.json fields to probe for source folder hints.</summary>
@@ -1054,7 +1054,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the first value from a TOML inline table on the same line.
+    /// Graphs the first value from a TOML inline table on the same line.
     /// e.g., package-dir = {"" = "src"} → "src"
     /// </summary>
     private static string? ExtractFirstInlineTableValue(string line)
@@ -1073,7 +1073,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts a specific key's value from a TOML inline array of tables.
+    /// Graphs a specific key's value from a TOML inline array of tables.
     /// e.g., packages = [{include = "pkg", from = "src"}] → "src" (for key "from")
     /// </summary>
     private static string? ExtractTomlKeyFromInlineArray(string line, string key)
@@ -1103,7 +1103,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the first string value from a TOML array.
+    /// Graphs the first string value from a TOML array.
     /// e.g., packages = ["src/mypackage"] → "src/mypackage"
     /// </summary>
     private static string? ExtractFirstArrayStringValue(string line)
@@ -1116,7 +1116,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts a quoted string value (single or double quotes) from the start of the input.
+    /// Graphs a quoted string value (single or double quotes) from the start of the input.
     /// Returns null if no quoted string is found.
     /// Handles backslash escapes in double-quoted strings (TOML basic strings).
     /// Single-quoted strings are literal (no escape processing, per TOML spec).
@@ -1281,7 +1281,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the first single or double quoted value from a string.
+    /// Graphs the first single or double quoted value from a string.
     /// e.g., " = ['src/main/java']" → "src/main/java"
     /// </summary>
     private static string? ExtractFirstQuotedValue(string input)
@@ -1435,7 +1435,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the root folder from a glob pattern (e.g., "src/**/*" -> "src").
+    /// Graphs the root folder from a glob pattern (e.g., "src/**/*" -> "src").
     /// Returns null if the pattern doesn't have a clear folder prefix.
     /// </summary>
     private static string? ExtractFolderFromGlobPattern(string pattern)
@@ -1455,7 +1455,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the root folder from a file path (e.g., "src/index.js" -> "src").
+    /// Graphs the root folder from a file path (e.g., "src/index.js" -> "src").
     /// Returns null if the path is just a filename without directory.
     /// </summary>
     private static string? ExtractFolderFromPath(string path)
@@ -1753,11 +1753,11 @@ public class SdkInfo
     private const int MaxImportScanFiles = 100;
 
     /// <summary>
-    /// Extracts the library/package name from language-specific build markers.
+    /// Graphs the library/package name from language-specific build markers.
     /// Returns null if the name cannot be determined.
     /// </summary>
     /// <remarks>
-    /// Per-language extraction:
+    /// Per-language engine:
     /// <list type="bullet">
     /// <item><b>Python:</b> <c>pyproject.toml</c> → <c>[project] name = "..."</c></item>
     /// <item><b>JS/TS:</b> <c>package.json</c> → <c>"name": "..."</c></item>
@@ -1782,7 +1782,7 @@ public class SdkInfo
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            // Record library name extraction failures for diagnostics
+            // Record library name parsing failures for diagnostics
             var activity = System.Diagnostics.Activity.Current;
             activity?.AddEvent(new System.Diagnostics.ActivityEvent("library_name_extract_failed",
                 tags: new System.Diagnostics.ActivityTagsCollection
@@ -1797,7 +1797,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the Python package name from pyproject.toml.
+    /// Graphs the Python package name from pyproject.toml.
     /// Parses <c>[project] name = "azure-storage-blob"</c> and transforms hyphens
     /// to underscores for the canonical Python import name.
     /// </summary>
@@ -1850,7 +1850,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the npm package name from package.json → <c>"name"</c> field.
+    /// Graphs the npm package name from package.json → <c>"name"</c> field.
     /// </summary>
     private static string? ExtractNpmPackageName(string root)
     {
@@ -1878,7 +1878,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the Java group/package prefix from pom.xml → <c>&lt;groupId&gt;</c>,
+    /// Graphs the Java group/package prefix from pom.xml → <c>&lt;groupId&gt;</c>,
     /// or from build.gradle → <c>group = '...'</c>.
     /// </summary>
     private static string? ExtractJavaGroupId(string root)
@@ -1936,7 +1936,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the Go module path from go.mod → <c>module github.com/org/repo/...</c>.
+    /// Graphs the Go module path from go.mod → <c>module github.com/org/repo/...</c>.
     /// </summary>
     private static string? ExtractGoModulePath(string root)
     {
@@ -1966,7 +1966,7 @@ public class SdkInfo
     }
 
     /// <summary>
-    /// Extracts the .NET root namespace from the first <c>*.csproj</c> found at root or in src/.
+    /// Graphs the .NET root namespace from the first <c>*.csproj</c> found at root or in src/.
     /// Falls back to deriving the namespace from the project file name (e.g., <c>Azure.Storage.Blobs</c>).
     /// </summary>
     private static string? ExtractDotNetNamespace(string root)

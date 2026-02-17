@@ -367,7 +367,7 @@ public class SampleGeneratorService(
         // Stream source context
         if (budgetTracker.Remaining > 0)
         {
-            // Use the coverage-aware streaming that includes API extraction and samples analysis
+            // Use the coverage-aware streaming that includes API graphing and samples analysis
             // This provides ~70% token reduction vs raw source
             await foreach (var chunk in context.StreamContextAsync(
                 sourcePath: sourceFolder,

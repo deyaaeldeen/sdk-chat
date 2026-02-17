@@ -24,7 +24,7 @@ public class SourceMcpTools
         "WHAT IT DOES: Scans for project files (.csproj, pyproject.toml, pom.xml, package.json, go.mod) and locates the primary source directory. " +
         "RETURNS: Source folder path, detected language, file extension, and SDK name. " +
         "SUPPORTS: .NET/C#, Python, Java, JavaScript, TypeScript, Go. " +
-        "NEXT STEPS: Use extract_api to see the public API, or build_samples_prompt to create documentation.")]
+        "NEXT STEPS: Use graph_api to see the public API, or build_samples_prompt to create documentation.")]
     public async Task<string> DetectSourceAsync(
         [Description("Absolute path to SDK root (e.g., /home/user/azure-sdk-for-python). Must contain project files like .csproj, pyproject.toml, etc.")] string packagePath,
         [Description("Force a specific language instead of auto-detection. Values: dotnet, python, java, javascript, typescript, go.")] string? language = null,

@@ -536,7 +536,7 @@ public class SampleGeneratorTool
 
     /// <summary>
     /// Streams context from source code and samples without materializing in memory.
-    /// Uses language-specific API extraction with coverage-aware formatting for ~70% token reduction.
+    /// Uses language-specific API graphing with coverage-aware formatting for ~70% token reduction.
     /// </summary>
     private static async IAsyncEnumerable<string> StreamContextAsync(
         string sourceFolder,

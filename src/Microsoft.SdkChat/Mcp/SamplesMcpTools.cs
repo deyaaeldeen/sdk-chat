@@ -120,8 +120,8 @@ public class SamplesMcpTools(FileHelper fileHelper, IPackageInfoService packageI
     [McpServerTool(Name = "build_samples_prompt"), Description(
         "Build an AI prompt for generating SDK code samples. " +
         "WHEN TO USE: To create documentation examples, quickstart code, or usage demonstrations for an SDK. " +
-        "WHAT IT DOES: Extracts the public API, analyzes existing samples to avoid duplicates, and builds a system + user prompt optimized for code generation. " +
-        "TOKEN EFFICIENCY: Uses ~70% less tokens than raw source by extracting semantic API information. " +
+        "WHAT IT DOES: Graphs the public API, analyzes existing samples to avoid duplicates, and builds a system + user prompt optimized for code generation. " +
+        "TOKEN EFFICIENCY: Uses ~70% less tokens than raw source by graphing semantic API information. " +
         "RETURNS: systemPrompt, userPrompt, estimatedTokens, language, fileExtension, and suggestedOutputPath. " +
         "SUPPORTS: .NET/C#, Python, Java, JavaScript, TypeScript, Go. " +
         "WORKFLOW: Call this tool → send the returned prompts to your LLM → call validate_samples with the LLM response → write the validated samples to disk.")]

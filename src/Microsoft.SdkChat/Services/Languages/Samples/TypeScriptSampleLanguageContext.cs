@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
-using ApiExtractor.Contracts;
-using ApiExtractor.TypeScript;
+using PublicApiGraphEngine.Contracts;
+using PublicApiGraphEngine.TypeScript;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 
@@ -12,8 +12,8 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
 {
     private readonly TypeScriptUsageAnalyzer _usageAnalyzer = new();
-    private readonly ExtractionCache<ApiIndex> _cache = new(
-        async (path, ct) => (ApiIndex?)await new TypeScriptApiExtractor().ExtractAsync(path, ct: ct), [".ts"]);
+    private readonly EngineCache<ApiIndex> _cache = new(
+        async (path, ct) => (ApiIndex?)await new TypeScriptPublicApiGraphEngine().GraphAsync(path, ct: ct), [".ts"]);
 
     public TypeScriptSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -51,7 +51,7 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
         "TypeScript: ES modules, async/await, strict types, const/let, arrow functions.";
 
     /// <summary>
-    /// Analyzes existing code to extract API usage patterns.
+    /// Analyzes existing code to graph API usage patterns.
     /// </summary>
     public override async Task<UsageIndex?> AnalyzeUsageAsync(
         string sourcePath,
@@ -61,7 +61,7 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
         if (!Directory.Exists(codePath))
             return null;
 
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
         if (apiIndex == null)
             return null;
 
@@ -81,16 +81,16 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
 
         if (apiIndex == null)
         {
             throw new InvalidOperationException(
-                $"Failed to extract API surface from '{sourcePath}'. " +
+                $"Failed to graph API surface from '{sourcePath}'. " +
                 "Ensure Node.js is installed and the path contains valid TypeScript source files.");
         }
 
-        // Validate that we extracted meaningful API surface
+        // Validate that we graphed meaningful API surface
         var classCount = apiIndex.Modules.Sum(m => m.Classes?.Count ?? 0);
         var interfaceCount = apiIndex.Modules.Sum(m => m.Interfaces?.Count ?? 0);
         var functionCount = apiIndex.Modules.Sum(m => m.Functions?.Count ?? 0);
@@ -125,12 +125,12 @@ public sealed class TypeScriptSampleLanguageContext : SampleLanguageContext
         yield return "</api-surface>\n";
     }
 
-    private async Task<ApiIndex?> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
+    private async Task<ApiIndex?> GetOrGraphApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("typescript", sourcePath);
+        using var activity = Telemetry.SdkChatTelemetry.StartGraphing("typescript", sourcePath);
         try
         {
-            return await _cache.ExtractAsync(sourcePath, ct);
+            return await _cache.GraphAsync(sourcePath, ct);
         }
         catch (Exception ex)
         {

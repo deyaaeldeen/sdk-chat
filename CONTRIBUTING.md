@@ -5,7 +5,7 @@
 | I want to... | Go to |
 |--------------|-------|
 | Run tests | [Testing](#testing) |
-| Add a new language extractor | [Adding a Language](#adding-a-language) |
+| Add a new language engine | [Adding a Language](#adding-a-language) |
 | Understand the architecture | [Architecture](#architecture) |
 | Follow code style | [Coding Standards](#coding-standards) |
 | Build the project | [Building](#building) |
@@ -52,7 +52,7 @@ The dev container includes: .NET SDK 10, Python 3, Node.js, Go, JBang, VHS, Copi
 |-------|------------|--------|
 | `sdk-chat-dev` | `Dockerfile` | Development and testing |
 | `sdk-chat-demo` | `demo/Dockerfile` | VHS demo recording |
-| `api-extractor-{lang}` | `extractors/{lang}/Dockerfile` | Per-language API extractor fallback |
+| `public-api-graph-engine-{lang}` | `engines/{lang}/Dockerfile` | Per-language Public API Graph Engine fallback |
 
 ### Running Natively
 
@@ -63,7 +63,7 @@ The CLI and MCP server run natively on the host without Docker:
 dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/sdk
 ```
 
-Language extractors automatically fall back to Docker when the runtime (Python, Go, Node.js, JBang) isn't installed.
+Language engines automatically fall back to Docker when the runtime (Python, Go, Node.js, JBang) isn't installed.
 
 ---
 
@@ -75,16 +75,16 @@ sdk-chat/
 │   ├── Microsoft.SdkChat/              # Main CLI tool
 │   ├── AgentClientProtocol.Sdk/        # ACP protocol implementation
 │   ├── AgentClientProtocol.Sdk.Generators/  # Source generator
-│   ├── ApiExtractor.Contracts/         # Shared interfaces
-│   ├── ApiExtractor.DotNet/            # C# extractor (Roslyn)
-│   ├── ApiExtractor.Python/            # Python extractor (ast)
-│   ├── ApiExtractor.TypeScript/        # TypeScript extractor (ts-morph)
-│   ├── ApiExtractor.Java/              # Java extractor (JavaParser)
-│   └── ApiExtractor.Go/                # Go extractor (go/parser)
+│   ├── PublicApiGraphEngine.Contracts/         # Shared interfaces
+│   ├── PublicApiGraphEngine.DotNet/            # C# engine (Roslyn)
+│   ├── PublicApiGraphEngine.Python/            # Python engine (ast)
+│   ├── PublicApiGraphEngine.TypeScript/        # TypeScript engine (ts-morph)
+│   ├── PublicApiGraphEngine.Java/              # Java engine (JavaParser)
+│   └── PublicApiGraphEngine.Go/                # Go engine (go/parser)
 ├── tests/
 │   ├── Microsoft.SdkChat.Tests/        # CLI + service tests (270+)
 │   ├── AgentClientProtocol.Sdk.Tests/  # Protocol tests (70+)
-│   └── ApiExtractor.Tests/             # Extractor tests (140+)
+│   └── PublicApiGraphEngine.Tests/             # Engine tests (140+)
 ├── demo/                               # Demo recording
 └── docs/                               # Documentation
 ```
@@ -108,15 +108,15 @@ dotnet test tests/Microsoft.SdkChat.Tests
 # Protocol
 dotnet test tests/AgentClientProtocol.Sdk.Tests
 
-# Extractors
-dotnet test tests/ApiExtractor.Tests
+# Engines
+dotnet test tests/PublicApiGraphEngine.Tests
 ```
 
 ### Run by Filter
 
 ```bash
 # By class name
-dotnet test --filter "FullyQualifiedName~DotNetApiExtractor"
+dotnet test --filter "FullyQualifiedName~DotNetPublicApiGraphEngine"
 
 # By test name
 dotnet test --filter "DisplayName~streaming"
@@ -131,19 +131,19 @@ Some tests require external tools (python3, node, jbang, go). They auto-skip if 
 
 ```csharp
 [SkippableFact]
-public async Task ExtractsApi()
+public async Task GraphsApi()
 {
-    Skip.IfNot(_extractor.IsAvailable(), "python3 not installed");
+    Skip.IfNot(_engine.IsAvailable(), "python3 not installed");
     // ...
 }
 ```
 
 ### Test Fixtures
 
-Located in `tests/ApiExtractor.Tests/TestFixtures/<Language>/`:
+Located in `tests/PublicApiGraphEngine.Tests/TestFixtures/<Language>/`:
 - Minimal but representative code samples
 - Cover classes, interfaces, enums, generics
-- Used by all extractor tests
+- Used by all engine tests
 
 ### Writing Tests
 
@@ -172,14 +172,14 @@ public class MyFeatureTests
 ### How It Works
 
 ```
-SDK Source → API Extractor → Minimal Context → AI → Samples
+SDK Source → Public API Graph Engine → Minimal Context → AI → Samples
    10MB           ↓              ~100KB        ↓     5 files
              Roslyn/ast/                   Claude/
              ts-morph/etc                 GPT/Copilot
 ```
 
 1. **Detect** — Language from project files
-2. **Extract** — Public API surface (~95% smaller than source)
+2. **Graph** — Public API surface (~95% smaller than source)
 3. **Generate** — AI creates samples with focused context
 4. **Write** — Idiomatic, runnable code with proper patterns
 
@@ -216,8 +216,8 @@ SDK Source → API Extractor → Minimal Context → AI → Samples
 |-----------|---------|
 | **Microsoft.SdkChat** | Main CLI with three modes (CLI, MCP, ACP) |
 | **AgentClientProtocol.Sdk** | Standalone ACP protocol implementation |
-| **ApiExtractor.\*** | Language-specific API extractors |
-| **ApiExtractor.Contracts** | Shared `IApiExtractor<T>` interface |
+| **PublicApiGraphEngine.\*** | Language-specific Public API Graph Engines |
+| **PublicApiGraphEngine.Contracts** | Shared `IPublicApiGraphEngine<T>` interface |
 
 ---
 
@@ -226,20 +226,20 @@ SDK Source → API Extractor → Minimal Context → AI → Samples
 ### 1. Create Project
 
 ```bash
-dotnet new classlib -n ApiExtractor.NewLang -o src/ApiExtractor.NewLang
-dotnet sln add src/ApiExtractor.NewLang
+dotnet new classlib -n PublicApiGraphEngine.NewLang -o src/PublicApiGraphEngine.NewLang
+dotnet sln add src/PublicApiGraphEngine.NewLang
 ```
 
-Add reference to `src/ApiExtractor.NewLang/ApiExtractor.NewLang.csproj`:
+Add reference to `src/PublicApiGraphEngine.NewLang/PublicApiGraphEngine.NewLang.csproj`:
 ```xml
-<ProjectReference Include="..\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj" />
+<ProjectReference Include="..\PublicApiGraphEngine.Contracts\PublicApiGraphEngine.Contracts.csproj" />
 ```
 
 ### 2. Implement Interface
 
 ```csharp
-// ApiExtractor.NewLang/NewLangApiExtractor.cs
-public class NewLangApiExtractor : IApiExtractor<ApiIndex>
+// PublicApiGraphEngine.NewLang/NewLangPublicApiGraphEngine.cs
+public class NewLangPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 {
     public string Language => "newlang";
     
@@ -251,7 +251,7 @@ public class NewLangApiExtractor : IApiExtractor<ApiIndex>
     
     public string? UnavailableReason { get; private set; }
     
-    public async Task<ExtractorResult<ApiIndex>> ExtractAsync(
+    public async Task<EngineResult<ApiIndex>> GraphAsync(
         string rootPath, 
         CancellationToken ct)
     {
@@ -266,7 +266,7 @@ public class NewLangApiExtractor : IApiExtractor<ApiIndex>
 ### 3. Define Models
 
 ```csharp
-// ApiExtractor.NewLang/Models.cs
+// PublicApiGraphEngine.NewLang/Models.cs
 public record ApiIndex
 {
     [JsonPropertyName("package")]
@@ -282,7 +282,7 @@ Use **records** with `{ get; init; }` properties.
 ### 4. Create Formatter
 
 ```csharp
-// ApiExtractor.NewLang/NewLangFormatter.cs
+// PublicApiGraphEngine.NewLang/NewLangFormatter.cs
 public static class NewLangFormatter
 {
     public static string Format(ApiIndex index)
@@ -295,33 +295,33 @@ public static class NewLangFormatter
 ### 5. Add CLI Entry Point
 
 ```csharp
-// ApiExtractor.NewLang/Program.cs
+// PublicApiGraphEngine.NewLang/Program.cs
 var options = CliOptions.Parse(args);
 if (options.ShowHelp || options.Path == null)
 {
-    Console.WriteLine(CliOptions.GetHelpText("NewLang", "ApiExtractor.NewLang"));
+    Console.WriteLine(CliOptions.GetHelpText("NewLang", "PublicApiGraphEngine.NewLang"));
     return options.ShowHelp ? 0 : 1;
 }
-// Standard extraction flow...
+// Standard engine flow...
 ```
 
 ### 6. Add Tests
 
-Create `tests/ApiExtractor.Tests/NewLangApiExtractorTests.cs`:
+Create `tests/PublicApiGraphEngine.Tests/NewLangPublicApiGraphEngineTests.cs`:
 
 ```csharp
-public class NewLangApiExtractorTests
+public class NewLangPublicApiGraphEngineTests
 {
     [SkippableFact]
-    public async Task ExtractsPublicApi()
+    public async Task GraphsPublicApi()
     {
-        Skip.IfNot(_extractor.IsAvailable(), "newlang not installed");
-        // Test extraction
+        Skip.IfNot(_engine.IsAvailable(), "newlang not installed");
+        // Test engine
     }
 }
 ```
 
-Add fixtures in `tests/ApiExtractor.Tests/TestFixtures/NewLang/`.
+Add fixtures in `tests/PublicApiGraphEngine.Tests/TestFixtures/NewLang/`.
 
 ### 7. Register in Main Tool
 
@@ -354,9 +354,9 @@ public string? OptionalProperty { get; init; }
 
 ### CLI Interface
 
-All extractors must support:
+All engines must support:
 ```
-<extractor> <path> [--json] [--stub] [--pretty] [-o <file>] [-h]
+<engine> <path> [--json] [--stub] [--pretty] [-o <file>] [-h]
 ```
 
 Exit codes: `0` success, `1` error.
@@ -372,8 +372,8 @@ dotnet build
 # Run CLI directly
 dotnet run --project src/Microsoft.SdkChat -- package sample generate /path/to/sdk
 
-# Run single extractor
-dotnet run --project src/ApiExtractor.DotNet -- /path --json --pretty
+# Run single engine
+dotnet run --project src/PublicApiGraphEngine.DotNet -- /path --json --pretty
 
 # Pack as tool
 dotnet pack src/Microsoft.SdkChat -o ./artifacts

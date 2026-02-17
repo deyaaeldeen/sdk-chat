@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.DotNet", "src\ApiExtractor.DotNet\ApiExtractor.DotNet.csproj", "{A524F753-AA6C-61F9-F212-5D61C244F109}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApiGraphEngine.DotNet", "src\PublicApiGraphEngine.DotNet\PublicApiGraphEngine.DotNet.csproj", "{A524F753-AA6C-61F9-F212-5D61C244F109}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.TypeScript", "src\ApiExtractor.TypeScript\ApiExtractor.TypeScript.csproj", "{4923A895-B67B-BDFE-8112-91A0B7B4C094}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApiGraphEngine.TypeScript", "src\PublicApiGraphEngine.TypeScript\PublicApiGraphEngine.TypeScript.csproj", "{4923A895-B67B-BDFE-8112-91A0B7B4C094}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentClientProtocol.Sdk.Tests", "tests\AgentClientProtocol.Sdk.Tests\AgentClientProtocol.Sdk.Tests.csproj", "{0AEACE9B-3B3C-D765-1F90-FC24B6FE5AD4}"
 EndProject
@@ -13,19 +13,19 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentClientProtocol.Sdk", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.SdkChat", "src\Microsoft.SdkChat\Microsoft.SdkChat.csproj", "{17872FD9-286B-A8BE-3CE5-E96FC8F1162D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.Java", "src\ApiExtractor.Java\ApiExtractor.Java.csproj", "{600FAB73-7201-B254-0C70-BAFA52B887EF}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApiGraphEngine.Java", "src\PublicApiGraphEngine.Java\PublicApiGraphEngine.Java.csproj", "{600FAB73-7201-B254-0C70-BAFA52B887EF}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.Tests", "tests\ApiExtractor.Tests\ApiExtractor.Tests.csproj", "{D4DFE24B-C71A-8C8D-0A8C-2472827C4586}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApiGraphEngine.Tests", "tests\PublicApiGraphEngine.Tests\PublicApiGraphEngine.Tests.csproj", "{D4DFE24B-C71A-8C8D-0A8C-2472827C4586}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.Python", "src\ApiExtractor.Python\ApiExtractor.Python.csproj", "{9F78A4EC-D250-E3A0-2D97-303C8DCA2916}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApiGraphEngine.Python", "src\PublicApiGraphEngine.Python\PublicApiGraphEngine.Python.csproj", "{9F78A4EC-D250-E3A0-2D97-303C8DCA2916}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentClientProtocol.Sdk.Generators", "src\AgentClientProtocol.Sdk.Generators\AgentClientProtocol.Sdk.Generators.csproj", "{26CE5C00-2388-1366-7A52-304275ED7AA5}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.Go", "src\ApiExtractor.Go\ApiExtractor.Go.csproj", "{817696C1-5738-DCE3-1D86-EB0360C08121}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApiGraphEngine.Go", "src\PublicApiGraphEngine.Go\PublicApiGraphEngine.Go.csproj", "{817696C1-5738-DCE3-1D86-EB0360C08121}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.SdkChat.Tests", "tests\Microsoft.SdkChat.Tests\Microsoft.SdkChat.Tests.csproj", "{209E0ED5-5A1F-24CE-57CC-4A521CA78D7E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiExtractor.Contracts", "src\ApiExtractor.Contracts\ApiExtractor.Contracts.csproj", "{DA24FC43-3FCE-E023-99B7-633EE5BC0177}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApiGraphEngine.Contracts", "src\PublicApiGraphEngine.Contracts\PublicApiGraphEngine.Contracts.csproj", "{DA24FC43-3FCE-E023-99B7-633EE5BC0177}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject

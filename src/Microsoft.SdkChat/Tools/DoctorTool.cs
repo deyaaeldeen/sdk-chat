@@ -10,7 +10,7 @@ namespace Microsoft.SdkChat.Tools;
 /// <summary>
 /// Validates all external dependencies required by the SDK Chat tool.
 /// Reports version information, path locations, and potential security concerns.
-/// In AOT mode with pre-compiled extractors, checks for extractor binaries instead of interpreters.
+/// In AOT mode with pre-compiled engines, checks for engine binaries instead of interpreters.
 /// </summary>
 public sealed partial class DoctorTool
 {
@@ -18,22 +18,22 @@ public sealed partial class DoctorTool
     private const string CrossMark = "✗";
     private const string WarningMark = "⚠";
 
-    // Source-generated regex for extracting Go version (avoids repeated compilation)
+    // Source-generated regex for graphing Go version (avoids repeated compilation)
     [GeneratedRegex(@"go(\d+\.\d+\.?\d*)")]
     private static partial Regex GoVersionRegex();
 
     /// <summary>
-    /// Checks if we're running in AOT mode with pre-compiled extractors available.
-    /// Returns true if all language extractors are present as native binaries.
+    /// Checks if we're running in AOT mode with pre-compiled engines available.
+    /// Returns true if all language engines are present as native binaries.
     /// </summary>
-    private static bool HasPrecompiledExtractors()
+    private static bool HasPrecompiledEngines()
     {
         var baseDir = AppContext.BaseDirectory;
-        var extractors = new[] { "go_extractor", "java_extractor", "python_extractor", "ts_extractor" };
+        var engines = new[] { "go_engine", "java_engine", "python_engine", "ts_engine" };
 
-        foreach (var extractor in extractors)
+        foreach (var engine in engines)
         {
-            var binaryName = OperatingSystem.IsWindows() ? $"{extractor}.exe" : extractor;
+            var binaryName = OperatingSystem.IsWindows() ? $"{engine}.exe" : engine;
             var path = Path.Combine(baseDir, binaryName);
             if (!File.Exists(path))
                 return false;
@@ -53,17 +53,17 @@ public sealed partial class DoctorTool
 
     public static async Task<int> ExecuteAsync(bool verbose, CancellationToken ct = default)
     {
-        var hasPrecompiledExtractors = HasPrecompiledExtractors();
+        var hasPrecompiledEngines = HasPrecompiledEngines();
 
-        if (hasPrecompiledExtractors)
+        if (hasPrecompiledEngines)
         {
             Console.WriteLine("SDK Chat Doctor - Native AOT Mode");
             Console.WriteLine("==================================\n");
-            Console.WriteLine($"{Checkmark} Running with pre-compiled extractors\n");
+            Console.WriteLine($"{Checkmark} Running with pre-compiled engines\n");
 
-            // In AOT mode, check for extractor binaries instead of interpreters
-            var results = CheckPrecompiledExtractors();
-            PrintExtractorResults(results, verbose);
+            // In AOT mode, check for engine binaries instead of interpreters
+            var results = CheckPrecompiledEngines();
+            PrintEngineResults(results, verbose);
 
             // Check for Copilot CLI
             var copilotStatus = await CheckCopilotCliAsync(ct);
@@ -73,13 +73,13 @@ public sealed partial class DoctorTool
             var allAvailable = results.All(r => r.IsAvailable);
             if (allAvailable)
             {
-                Console.WriteLine($"{Checkmark} All extractors available. SDK Chat is fully operational.");
+                Console.WriteLine($"{Checkmark} All engines available. SDK Chat is fully operational.");
                 return 0;
             }
             else
             {
                 var missing = results.Where(r => !r.IsAvailable).Select(r => r.Name);
-                Console.WriteLine($"{CrossMark} Missing extractors: {string.Join(", ", missing)}");
+                Console.WriteLine($"{CrossMark} Missing engines: {string.Join(", ", missing)}");
                 return 1;
             }
         }
@@ -117,8 +117,8 @@ public sealed partial class DoctorTool
 
         if (optionalMissing.Count > 0)
         {
-            Console.WriteLine($"{WarningMark} Some language extractors unavailable: {string.Join(", ", optionalMissing.Select(m => m.Name))}");
-            Console.WriteLine("  SDK Chat will work but cannot extract APIs for these languages.");
+            Console.WriteLine($"{WarningMark} Some language engines unavailable: {string.Join(", ", optionalMissing.Select(m => m.Name))}");
+            Console.WriteLine("  SDK Chat will work but cannot graph APIs for these languages.");
             return 0;
         }
 
@@ -394,48 +394,48 @@ public sealed partial class DoctorTool
         Console.WriteLine("  SDK_CHAT_PYTHON_PATH, SDK_CHAT_GO_PATH, SDK_CHAT_NODE_PATH, SDK_CHAT_JBANG_PATH");
     }
 
-    private sealed record ExtractorStatus(string Name, string Language, bool IsAvailable, string? Path);
+    private sealed record EngineStatus(string Name, string Language, bool IsAvailable, string? Path);
 
-    private static List<ExtractorStatus> CheckPrecompiledExtractors()
+    private static List<EngineStatus> CheckPrecompiledEngines()
     {
         var baseDir = AppContext.BaseDirectory;
-        var extractors = new (string Name, string Binary, string Language)[]
+        var engines = new (string Name, string Binary, string Language)[]
         {
-            ("Go Extractor", "go_extractor", "Go"),
-            ("Java Extractor", "java_extractor", "Java"),
-            ("Python Extractor", "python_extractor", "Python"),
-            ("TypeScript Extractor", "ts_extractor", "TypeScript/JavaScript"),
+            ("Go Engine", "go_engine", "Go"),
+            ("Java Engine", "java_engine", "Java"),
+            ("Python Engine", "python_engine", "Python"),
+            ("TypeScript Engine", "ts_engine", "TypeScript/JavaScript"),
         };
 
-        List<ExtractorStatus> results = [];
+        List<EngineStatus> results = [];
 
-        foreach (var (name, binary, language) in extractors)
+        foreach (var (name, binary, language) in engines)
         {
             var path = Path.Combine(baseDir, binary);
             var exists = File.Exists(path);
-            results.Add(new ExtractorStatus(name, language, exists, exists ? path : null));
+            results.Add(new EngineStatus(name, language, exists, exists ? path : null));
         }
 
-        // .NET extractor is always available (built into the binary)
-        results.Insert(0, new ExtractorStatus(".NET Extractor", "C#/F#", true, "built-in"));
+        // .NET engine is always available (built into the binary)
+        results.Insert(0, new EngineStatus(".NET Engine", "C#/F#", true, "built-in"));
 
         return results;
     }
 
-    private static void PrintExtractorResults(List<ExtractorStatus> results, bool verbose)
+    private static void PrintEngineResults(List<EngineStatus> results, bool verbose)
     {
-        Console.WriteLine("Pre-compiled Extractors:");
+        Console.WriteLine("Pre-compiled Engines:");
         Console.WriteLine("-------------------------");
-        foreach (var extractor in results)
+        foreach (var engine in results)
         {
-            var icon = extractor.IsAvailable ? Checkmark : CrossMark;
-            var status = extractor.IsAvailable ? "available" : "MISSING";
+            var icon = engine.IsAvailable ? Checkmark : CrossMark;
+            var status = engine.IsAvailable ? "available" : "MISSING";
 
-            Console.WriteLine($"{icon} {extractor.Name,-20} ({extractor.Language}) - {status}");
+            Console.WriteLine($"{icon} {engine.Name,-20} ({engine.Language}) - {status}");
 
-            if (verbose && extractor.IsAvailable && extractor.Path != null && extractor.Path != "built-in")
+            if (verbose && engine.IsAvailable && engine.Path != null && engine.Path != "built-in")
             {
-                Console.WriteLine($"    Path: {extractor.Path}");
+                Console.WriteLine($"    Path: {engine.Path}");
             }
         }
         Console.WriteLine();

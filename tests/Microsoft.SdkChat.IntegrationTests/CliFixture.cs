@@ -35,9 +35,9 @@ public class CliFixture : IAsyncLifetime
     public string ProjectPath => Path.Combine(RepoRoot, "src", "Microsoft.SdkChat", "Microsoft.SdkChat.csproj");
 
     /// <summary>
-    /// Path to test fixtures (shared with ApiExtractor.Tests).
+    /// Path to test fixtures (shared with PublicApiGraphEngine.Tests).
     /// </summary>
-    public string FixturesPath => Path.Combine(RepoRoot, "tests", "ApiExtractor.Tests", "TestFixtures");
+    public string FixturesPath => Path.Combine(RepoRoot, "tests", "PublicApiGraphEngine.Tests", "TestFixtures");
 
     /// <summary>
     /// Whether the test environment is available (dotnet SDK + fixtures).
@@ -100,7 +100,7 @@ public class CliFixture : IAsyncLifetime
     /// <summary>
     /// Runs a command with a fixture path for a specific language.
     /// </summary>
-    /// <param name="command">Base command (e.g., "package api extract").</param>
+    /// <param name="command">Base command (e.g., "package api graph").</param>
     /// <param name="language">Fixture language folder (DotNet, Python, etc.).</param>
     /// <param name="additionalArgs">Additional CLI args (e.g., "--language dotnet").</param>
     /// <param name="timeoutSeconds">Timeout in seconds.</param>

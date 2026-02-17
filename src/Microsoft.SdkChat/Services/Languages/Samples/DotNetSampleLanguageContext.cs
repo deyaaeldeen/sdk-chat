@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
-using ApiExtractor.Contracts;
-using ApiExtractor.DotNet;
+using PublicApiGraphEngine.Contracts;
+using PublicApiGraphEngine.DotNet;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 
@@ -12,8 +12,8 @@ namespace Microsoft.SdkChat.Services.Languages.Samples;
 public sealed class DotNetSampleLanguageContext : SampleLanguageContext
 {
     private readonly CSharpUsageAnalyzer _usageAnalyzer = new();
-    private readonly ExtractionCache<ApiIndex> _cache = new(
-        async (path, ct) => (ApiIndex?)await new CSharpApiExtractor().ExtractAsync(path, ct: ct), [".cs"]);
+    private readonly EngineCache<ApiIndex> _cache = new(
+        async (path, ct) => (ApiIndex?)await new CSharpPublicApiGraphEngine().GraphAsync(path, ct: ct), [".cs"]);
 
     public DotNetSampleLanguageContext(FileHelper fileHelper) : base(fileHelper) { }
 
@@ -40,9 +40,9 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
 
-        // Validate that we extracted meaningful API surface
+        // Validate that we graphed meaningful API surface
         var typeCount = apiIndex.Namespaces.Sum(ns => ns.Types.Count);
         if (typeCount == 0)
         {
@@ -76,7 +76,7 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
     }
 
     /// <summary>
-    /// Analyzes existing code (samples/tests) to extract API usage patterns.
+    /// Analyzes existing code (samples/tests) to graph API usage patterns.
     /// Returns structured coverage info instead of raw code - ~95% token reduction.
     /// </summary>
     public override async Task<UsageIndex?> AnalyzeUsageAsync(
@@ -88,7 +88,7 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
             return null;
 
         // Get API index (may be cached from StreamContextAsync)
-        var apiIndex = await GetOrExtractApiIndexAsync(sourcePath, ct);
+        var apiIndex = await GetOrGraphApiIndexAsync(sourcePath, ct);
 
         // Analyze usage
         return await _usageAnalyzer.AnalyzeAsync(codePath, apiIndex, ct);
@@ -100,13 +100,13 @@ public sealed class DotNetSampleLanguageContext : SampleLanguageContext
     public override string FormatUsage(UsageIndex usage) => _usageAnalyzer.Format(usage);
 
     /// <summary>
-    /// Gets cached API index or extracts it.
+    /// Gets cached API index or graphs it.
     /// </summary>
-    private async Task<ApiIndex> GetOrExtractApiIndexAsync(string sourcePath, CancellationToken ct)
+    private async Task<ApiIndex> GetOrGraphApiIndexAsync(string sourcePath, CancellationToken ct)
     {
-        using var activity = Telemetry.SdkChatTelemetry.StartExtraction("dotnet", sourcePath);
-        return await _cache.ExtractAsync(sourcePath, ct)
-            ?? throw new InvalidOperationException($"Failed to extract API surface from '{sourcePath}'.");
+        using var activity = Telemetry.SdkChatTelemetry.StartGraphing("dotnet", sourcePath);
+        return await _cache.GraphAsync(sourcePath, ct)
+            ?? throw new InvalidOperationException($"Failed to graph API surface from '{sourcePath}'.");
     }
 
     protected override int GetPriority(FileMetadata file)

@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <!--
-    Note: Test fixtures are referenced from ApiExtractor.Tests/TestFixtures at runtime.
+    Note: Test fixtures are referenced from PublicApiGraphEngine.Tests/TestFixtures at runtime.
     The fixture locates the project and runs it via `dotnet run`.
   -->
 

@@ -39,7 +39,7 @@ internal sealed record McpErrorResponse
 [JsonSerializable(typeof(McpErrorResponse))]
 [JsonSerializable(typeof(McpResponse<SourceFolderResult>))]
 [JsonSerializable(typeof(McpResponse<SamplesFolderResult>))]
-[JsonSerializable(typeof(McpResponse<ApiExtractionResult>))]
+[JsonSerializable(typeof(McpResponse<ApiGraphResult>))]
 [JsonSerializable(typeof(McpResponse<CoverageAnalysisResult>))]
 [JsonSerializable(typeof(McpResponse<SamplesPromptResult>))]
 [JsonSerializable(typeof(ValidateSamplesResult))]

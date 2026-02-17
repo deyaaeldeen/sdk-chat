@@ -40,7 +40,7 @@ docs/
 .DS_Store
 Thumbs.db
 
-# Node (TypeScript extractor builds locally)
+# Node (TypeScript engine builds locally)
 **/node_modules/
 
 # Misc

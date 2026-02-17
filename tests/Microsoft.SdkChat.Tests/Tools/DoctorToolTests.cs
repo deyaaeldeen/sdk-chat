@@ -380,7 +380,7 @@ public class DoctorToolTests
 
             // Should have one of the summary messages
             var hasSummary = output.Contains("fully operational", StringComparison.Ordinal) ||
-                            output.Contains("extractors unavailable", StringComparison.Ordinal) ||
+                            output.Contains("engines unavailable", StringComparison.Ordinal) ||
                             output.Contains("Critical dependencies", StringComparison.Ordinal);
             Assert.True(hasSummary, "Expected a summary message at the end");
         }

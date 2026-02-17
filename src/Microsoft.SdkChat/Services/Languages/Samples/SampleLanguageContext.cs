@@ -3,7 +3,7 @@
 
 using System.Runtime.CompilerServices;
 using System.Text;
-using ApiExtractor.Contracts;
+using PublicApiGraphEngine.Contracts;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Models;
 
@@ -45,9 +45,9 @@ public abstract class SampleLanguageContext
 
     /// <summary>
     /// Streams context for sample generation without materializing in memory.
-    /// This is the FALLBACK implementation used when API extraction is not available.
+    /// This is the FALLBACK implementation used when API graphing is not available.
     /// Loads raw source files with budget management.
-    /// Language-specific contexts should call this via base.StreamContextAsync when extraction fails.
+    /// Language-specific contexts should call this via base.StreamContextAsync when engine fails.
     /// </summary>
     public virtual async IAsyncEnumerable<string> StreamContextAsync(
         IEnumerable<string> paths,
@@ -110,7 +110,7 @@ public abstract class SampleLanguageContext
     }
 
     /// <summary>
-    /// Analyzes existing code (samples/tests) to extract API usage patterns.
+    /// Analyzes existing code (samples/tests) to graph API usage patterns.
     /// Override in language-specific contexts for accurate analysis.
     /// Returns null if usage analysis is not supported.
     /// </summary>
@@ -150,11 +150,11 @@ public abstract class SampleLanguageContext
     /// Streams context for sample generation with optional coverage analysis.
     ///
     /// Language-specific contexts OVERRIDE this to:
-    /// 1. Extract API surface using language-specific extractors (~70% token savings)
+    /// 1. Graph API surface using language-specific engines (~70% token savings)
     /// 2. Analyze coverage to show which APIs are already demonstrated
     /// 3. Use FormatWithCoverage for compact, merged output
     ///
-    /// If API extraction fails, they call base.StreamContextAsync which falls back to
+    /// If API graphing fails, they call base.StreamContextAsync which falls back to
     /// streaming raw source files and samples.
     /// </summary>
     public virtual async IAsyncEnumerable<string> StreamContextAsync(
@@ -164,7 +164,7 @@ public abstract class SampleLanguageContext
         int totalBudget = SampleConstants.DefaultContextCharacters,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // FALLBACK: stream raw source code when API extraction is not available
+        // FALLBACK: stream raw source code when API graphing is not available
         await foreach (var chunk in StreamContextAsync([sourcePath], config, totalBudget, ct))
         {
             yield return chunk;

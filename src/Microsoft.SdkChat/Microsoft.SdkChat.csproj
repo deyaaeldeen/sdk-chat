@@ -33,15 +33,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- ACP SDK (local project reference - will become NuGet when extracted) -->
+    <!-- ACP SDK (local project reference - will become NuGet when graphed) -->
     <ProjectReference Include="..\AgentClientProtocol.Sdk\AgentClientProtocol.Sdk.csproj" />
 
-    <!-- API Extractors for efficient context extraction -->
-    <ProjectReference Include="..\ApiExtractor.DotNet\ApiExtractor.DotNet.csproj" />
-    <ProjectReference Include="..\ApiExtractor.Python\ApiExtractor.Python.csproj" />
-    <ProjectReference Include="..\ApiExtractor.Java\ApiExtractor.Java.csproj" />
-    <ProjectReference Include="..\ApiExtractor.Go\ApiExtractor.Go.csproj" />
-    <ProjectReference Include="..\ApiExtractor.TypeScript\ApiExtractor.TypeScript.csproj" />
+    <!-- Public API Graph Engines for efficient context graphing -->
+    <ProjectReference Include="..\PublicApiGraphEngine.DotNet\PublicApiGraphEngine.DotNet.csproj" />
+    <ProjectReference Include="..\PublicApiGraphEngine.Python\PublicApiGraphEngine.Python.csproj" />
+    <ProjectReference Include="..\PublicApiGraphEngine.Java\PublicApiGraphEngine.Java.csproj" />
+    <ProjectReference Include="..\PublicApiGraphEngine.Go\PublicApiGraphEngine.Go.csproj" />
+    <ProjectReference Include="..\PublicApiGraphEngine.TypeScript\PublicApiGraphEngine.TypeScript.csproj" />
   </ItemGroup>
 
   <ItemGroup>

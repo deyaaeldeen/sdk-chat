@@ -14,7 +14,7 @@ SDK Chat - CLI tool for generating SDK code samples using AI. .NET 10, C#.
 # Build dev container
 docker build -t sdk-chat-dev .
 
-# Run tests (recommended - ensures all extractors work)
+# Run tests (recommended - ensures all engines work)
 docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev
 
 # Interactive development shell
@@ -35,12 +35,12 @@ docker run --rm -u $(id -u):$(id -g) -v "$(pwd):/workspace" sdk-chat-dev dotnet 
 |-------|------------|--------|
 | `sdk-chat-dev` | `Dockerfile` | Development, testing |
 | `sdk-chat-demo` | `demo/Dockerfile` | VHS demo recording |
-| `api-extractor-{lang}` | `extractors/{lang}/Dockerfile` | Per-language API extractor fallback |
+| `public-api-graph-engine-{lang}` | `engines/{lang}/Dockerfile` | Per-language Public API Graph Engine fallback |
 
 ### Running
 
 The CLI and MCP server run natively on the host via `dotnet run`.
-Docker is only used as a fallback for language extractors when the runtime isn't installed.
+Docker is only used as a fallback for language engines when the runtime isn't installed.
 
 ```bash
 # Run directly
@@ -53,7 +53,7 @@ dotnet run --project src/Microsoft.SdkChat -- package samples generate /path/to/
 src/                        # Source code
   Microsoft.SdkChat/        # Main CLI (entry point: Program.cs)
   AgentClientProtocol.Sdk/  # ACP protocol library
-  ApiExtractor.*/           # Language-specific API extractors
+  PublicApiGraphEngine.*/           # Language-specific Public API Graph Engines
 tests/                      # Test projects (xUnit)
 demo/                       # Demo recording
 ```
@@ -119,7 +119,7 @@ Commands follow entity-based structure: `package <entity> <action>`
 package source detect <path>     # Detect source folder + language
 package samples detect <path>    # Detect samples folder
 package samples generate <path>  # Generate samples (AI-powered)
-package api extract <path>       # Extract public API surface
+package api graph <path>         # Build public API graph
 package api coverage <path>      # Analyze coverage gaps
 ```
 

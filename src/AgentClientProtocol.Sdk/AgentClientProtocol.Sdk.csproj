@@ -23,7 +23,7 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     
-    <!-- Package metadata for future NuGet extraction -->
+    <!-- Package metadata for future NuGet publishing -->
     <PackageId>AgentClientProtocol.Sdk</PackageId>
     <Version>0.1.0</Version>
     <Authors>Microsoft</Authors>
