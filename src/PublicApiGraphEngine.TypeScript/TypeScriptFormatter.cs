@@ -588,10 +588,11 @@ public static class TypeScriptFormatter
                     }
                 }
 
-                // Type aliases
+                // Type aliases (skip self-referential re-exports like "type X = X")
                 foreach (var t in dep.Types ?? [])
                 {
                     if (sb.Length >= maxLength) break;
+                    if (IsSelfReferentialAlias(t)) continue;
                     var typeStr = FormatTypeAlias(t, exportKeyword: false);
                     if (sb.Length + typeStr.Length <= maxLength)
                     {
@@ -786,5 +787,23 @@ public static class TypeScriptFormatter
                 result.Add(item);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Detects self-referential type aliases (e.g., "type X = X" or "type X = X&lt;T&gt;")
+    /// produced when a dependency re-exports a type from a transitive dependency.
+    /// </summary>
+    private static bool IsSelfReferentialAlias(TypeAliasInfo t)
+    {
+        if (string.IsNullOrWhiteSpace(t.Type)) return false;
+        var type = t.Type.AsSpan().Trim();
+        // Exact match: type Foo = Foo
+        if (type.Equals(t.Name, StringComparison.Ordinal)) return true;
+        // Generic match: type Foo = Foo<T>
+        if (type.StartsWith(t.Name, StringComparison.Ordinal)
+            && type.Length > t.Name.Length
+            && type[t.Name.Length] == '<')
+            return true;
+        return false;
     }
 }
