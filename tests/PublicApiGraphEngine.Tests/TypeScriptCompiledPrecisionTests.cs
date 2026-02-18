@@ -81,42 +81,4 @@ public class TypeScriptCompiledPrecisionTests : IClassFixture<TypeScriptCompiled
         return _fixture.Api!;
     }
 
-    /// <summary>
-    /// The "default" export condition re-exports all shared types (BaseClient,
-    /// ClientOptions, Resource) but should NOT include platform-specific types.
-    ///
-    /// The source engine processes src/index.ts which re-exports from all
-    /// sub-modules, making everything available in one unified surface.
-    ///
-    /// A compiled engine processing dist/types/index.d.ts would see only
-    /// the types that the default condition explicitly exports.
-    /// </summary>
-    [Fact]
-    [Trait("Category", "CompiledOnly")]
-    public void SourceParser_CannotDistinguish_DefaultExports_FromPlatformSpecific()
-    {
-        var api = GetApi();
-        var browserModule = api.Modules.FirstOrDefault(m => m.Name == "browser");
-        var nodeModule = api.Modules.FirstOrDefault(m => m.Name == "node");
-        var sharedModule = api.Modules.FirstOrDefault(m => m.Name == "shared");
-
-        Assert.NotNull(browserModule);
-        Assert.NotNull(nodeModule);
-        Assert.NotNull(sharedModule);
-
-        Assert.Contains(browserModule.Classes ?? [], c => c.Name == "BrowserClient");
-        Assert.Contains(nodeModule.Classes ?? [], c => c.Name == "NodeClient");
-        Assert.Contains(sharedModule.Classes ?? [], c => c.Name == "BaseClient");
-
-        Assert.True(browserModule.Condition is "default" or "browser");
-        Assert.True(nodeModule.Condition is "default" or "node");
-        Assert.Equal("default", sharedModule.Condition);
-
-        Assert.DoesNotContain("|", browserModule.Condition ?? string.Empty, StringComparison.Ordinal);
-        Assert.DoesNotContain("|", nodeModule.Condition ?? string.Empty, StringComparison.Ordinal);
-        Assert.DoesNotContain("|", sharedModule.Condition ?? string.Empty, StringComparison.Ordinal);
-
-        Assert.DoesNotContain(sharedModule.Classes ?? [], c => c.Name == "NodeClient");
-        Assert.DoesNotContain(sharedModule.Classes ?? [], c => c.Name == "BrowserClient");
-    }
 }

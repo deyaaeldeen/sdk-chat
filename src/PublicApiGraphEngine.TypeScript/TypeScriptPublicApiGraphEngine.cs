@@ -98,33 +98,33 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// </summary>
     private async Task<(ApiIndex? Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
-        string? tsconfigPath = input is EngineInput.TypeScriptProject ts ? ts.TsconfigPath : null;
         string? packageJsonPath = input is EngineInput.TypeScriptProject tsPkg ? tsPkg.PackageJsonPath : null;
         var rootPath = ProcessSandbox.ValidateRootPath(input.RootDirectory);
         List<ApiDiagnostic> engineInputDiagnostics = [];
 
-        string? dtsRoot = null;
-        if (!string.IsNullOrWhiteSpace(tsconfigPath))
+        // Discover package.json if not explicitly provided
+        if (string.IsNullOrWhiteSpace(packageJsonPath))
         {
-            dtsRoot = await ResolveDtsOutputDirectoryAsync(tsconfigPath!, ct).ConfigureAwait(false);
-            if (dtsRoot is null)
+            var candidate = Path.Combine(rootPath, "package.json");
+            if (File.Exists(candidate))
+                packageJsonPath = candidate;
+        }
+
+        // Resolve .d.ts output directory from package.json exports/types
+        string? dtsRoot = null;
+        if (!string.IsNullOrWhiteSpace(packageJsonPath))
+        {
+            dtsRoot = ResolveDtsOutputFromPackageJson(packageJsonPath!);
+        }
+
+        if (dtsRoot is not null)
+        {
+            engineInputDiagnostics.Add(new ApiDiagnostic
             {
-                engineInputDiagnostics.Add(new ApiDiagnostic
-                {
-                    Id = "ENGINE_INPUT",
-                    Level = DiagnosticLevel.Warning,
-                    Text = $"TypeScript artifact mode requested, but .d.ts output could not be resolved from '{tsconfigPath}'. Falling back to source analysis."
-                });
-            }
-            else
-            {
-                engineInputDiagnostics.Add(new ApiDiagnostic
-                {
-                    Id = "ENGINE_INPUT",
-                    Level = DiagnosticLevel.Info,
-                    Text = $"Using compiled artifacts: declaration files in {dtsRoot}"
-                });
-            }
+                Id = "ENGINE_INPUT",
+                Level = DiagnosticLevel.Info,
+                Text = $"Using compiled artifacts: declaration files in {dtsRoot}"
+            });
         }
 
         var availability = _availability.GetAvailability();
@@ -451,43 +451,82 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
         return args;
     }
 
-    private static async Task<string?> ResolveDtsOutputDirectoryAsync(string tsconfigPath, CancellationToken ct)
+    /// <summary>
+    /// Resolves the .d.ts output directory from package.json's "types", "typings",
+    /// or "exports" field. Returns the directory containing the declaration files,
+    /// or null if no compiled declarations are found.
+    /// </summary>
+    internal static string? ResolveDtsOutputFromPackageJson(string packageJsonPath)
     {
-        if (!File.Exists(tsconfigPath))
+        if (!File.Exists(packageJsonPath))
             return null;
 
-        var result = await ProcessSandbox.ExecuteAsync(
-            "tsc",
-            ["-p", tsconfigPath, "--showConfig"],
-            timeout: TimeSpan.FromSeconds(15),
-            cancellationToken: ct).ConfigureAwait(false);
+        try
+        {
+            var content = File.ReadAllText(packageJsonPath);
+            using var doc = JsonDocument.Parse(content, new JsonDocumentOptions
+            {
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip,
+            });
+            var root = doc.RootElement;
+            var packageDir = Path.GetDirectoryName(packageJsonPath);
+            if (string.IsNullOrWhiteSpace(packageDir))
+                return null;
 
-        if (!result.Success)
+            // Try in order: exports["."].import.types, exports["."].types, types, typings
+            string? typesPath = null;
+
+            if (root.TryGetProperty("exports", out var exports) && exports.ValueKind == JsonValueKind.Object)
+            {
+                if (exports.TryGetProperty(".", out var dotExport) && dotExport.ValueKind == JsonValueKind.Object)
+                {
+                    // exports["."].import.types (ESM types — preferred)
+                    if (dotExport.TryGetProperty("import", out var importExport) && importExport.ValueKind == JsonValueKind.Object
+                        && importExport.TryGetProperty("types", out var importTypes) && importTypes.ValueKind == JsonValueKind.String)
+                    {
+                        typesPath = importTypes.GetString();
+                    }
+                    // exports["."].types (direct types)
+                    else if (dotExport.TryGetProperty("types", out var dotTypes) && dotTypes.ValueKind == JsonValueKind.String)
+                    {
+                        typesPath = dotTypes.GetString();
+                    }
+                    // exports["."].require.types (CJS types)
+                    else if (dotExport.TryGetProperty("require", out var requireExport) && requireExport.ValueKind == JsonValueKind.Object
+                        && requireExport.TryGetProperty("types", out var requireTypes) && requireTypes.ValueKind == JsonValueKind.String)
+                    {
+                        typesPath = requireTypes.GetString();
+                    }
+                }
+            }
+
+            // Fall back to top-level types/typings
+            if (string.IsNullOrWhiteSpace(typesPath))
+            {
+                if (root.TryGetProperty("types", out var types) && types.ValueKind == JsonValueKind.String)
+                    typesPath = types.GetString();
+                else if (root.TryGetProperty("typings", out var typings) && typings.ValueKind == JsonValueKind.String)
+                    typesPath = typings.GetString();
+            }
+
+            if (string.IsNullOrWhiteSpace(typesPath))
+                return null;
+
+            var fullTypesPath = Path.GetFullPath(Path.Combine(packageDir, typesPath!));
+            if (!File.Exists(fullTypesPath))
+                return null;
+
+            var dtsDir = Path.GetDirectoryName(fullTypesPath);
+            if (string.IsNullOrWhiteSpace(dtsDir) || !Directory.Exists(dtsDir))
+                return null;
+
+            return dtsDir;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
             return null;
-
-        using var doc = JsonDocument.Parse(result.StandardOutput);
-        if (!doc.RootElement.TryGetProperty("compilerOptions", out var compilerOptions))
-            return null;
-
-        string? outputDir = null;
-        if (compilerOptions.TryGetProperty("declarationDir", out var declarationDir) && declarationDir.ValueKind == JsonValueKind.String)
-            outputDir = declarationDir.GetString();
-        else if (compilerOptions.TryGetProperty("outDir", out var outDir) && outDir.ValueKind == JsonValueKind.String)
-            outputDir = outDir.GetString();
-
-        if (string.IsNullOrWhiteSpace(outputDir))
-            return null;
-
-        var tsconfigDirectory = Path.GetDirectoryName(tsconfigPath);
-        if (string.IsNullOrWhiteSpace(tsconfigDirectory))
-            return null;
-
-        var resolvedDirectory = Path.GetFullPath(Path.Combine(tsconfigDirectory, outputDir));
-        if (!Directory.Exists(resolvedDirectory))
-            return null;
-
-        var hasDeclarations = Directory.EnumerateFiles(resolvedDirectory, "*.d.ts", SearchOption.AllDirectories).Any();
-        return hasDeclarations ? resolvedDirectory : null;
+        }
     }
 
     internal static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)
