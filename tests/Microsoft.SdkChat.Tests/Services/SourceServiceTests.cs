@@ -144,4 +144,32 @@ public class SourceServiceTests : PackageInfoTestBase
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => Service.DetectSourceFolderAsync(TestRoot, ct: cts.Token));
     }
+
+    [Fact]
+    public async Task DetectSourceFolderAsync_TypeScript_PrefersRootOverSamplesSubproject()
+    {
+        // Arrange - Root has a tsconfig.json + package.json with src/ containing fewer files
+        File.WriteAllText(Path.Combine(TestRoot, "package.json"), """{"name":"@test/sdk"}""");
+        File.WriteAllText(Path.Combine(TestRoot, "tsconfig.json"), """{"references":[]}""");
+        var rootSrc = Path.Combine(TestRoot, "src");
+        Directory.CreateDirectory(rootSrc);
+        for (int i = 0; i < 5; i++)
+            File.WriteAllText(Path.Combine(rootSrc, $"file{i}.ts"), $"export const x{i} = {i};");
+
+        // samples/ subdirectory has its own tsconfig with MORE .ts files
+        var sampleDir = Path.Combine(TestRoot, "samples", "v2-beta", "typescript");
+        var sampleSrc = Path.Combine(sampleDir, "src");
+        Directory.CreateDirectory(sampleSrc);
+        File.WriteAllText(Path.Combine(sampleDir, "tsconfig.json"), """{"include":["./src"]}""");
+        for (int i = 0; i < 20; i++)
+            File.WriteAllText(Path.Combine(sampleSrc, $"sample{i}.ts"), $"async function main{i}() {{}}");
+
+        // Act
+        var result = await Service.DetectSourceFolderAsync(TestRoot);
+
+        // Assert - Should pick root src/, not samples/v2-beta/typescript/src
+        Assert.True(result.IsValid);
+        Assert.Equal("TypeScript", result.Language);
+        Assert.Equal(rootSrc, result.SourceFolder);
+    }
 }

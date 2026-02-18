@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using PublicApiGraphEngine.Contracts;
 using PublicApiGraphEngine.DotNet;
@@ -451,7 +452,9 @@ public sealed class PackageInfoService : IPackageInfoService
                 SdkLanguage.DotNet when fileName.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) =>
                     new EngineInput.DotNetProject(sdkInfo.BuildFilePath),
                 SdkLanguage.TypeScript or SdkLanguage.JavaScript when fileName.Equals("tsconfig.json", StringComparison.OrdinalIgnoreCase) =>
-                    new EngineInput.TypeScriptProject(sdkInfo.BuildFilePath, null),
+                    IsProjectReferencesOnlyTsconfig(sdkInfo.BuildFilePath)
+                        ? new EngineInput.SourceDirectory(sdkInfo.SourceFolder)
+                        : new EngineInput.TypeScriptProject(sdkInfo.BuildFilePath, null),
                 SdkLanguage.TypeScript or SdkLanguage.JavaScript when fileName.Equals("package.json", StringComparison.OrdinalIgnoreCase) =>
                     new EngineInput.TypeScriptProject(null, sdkInfo.BuildFilePath),
                 SdkLanguage.Java when fileName.Equals("pom.xml", StringComparison.OrdinalIgnoreCase) =>
@@ -463,6 +466,43 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
         return new EngineInput.SourceDirectory(sdkInfo.SourceFolder);
+    }
+
+    /// <summary>
+    /// Detects whether a tsconfig.json is a project-references root that doesn't compile
+    /// source directly (has "references" array and "files": [] with no "include").
+    /// Such configs should not be passed to the engine as artifact inputs.
+    /// </summary>
+    private static bool IsProjectReferencesOnlyTsconfig(string tsconfigPath)
+    {
+        try
+        {
+            var content = File.ReadAllText(tsconfigPath);
+            using var doc = JsonDocument.Parse(content, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+            var root = doc.RootElement;
+
+            var hasReferences = root.TryGetProperty("references", out var refs)
+                && refs.ValueKind == JsonValueKind.Array
+                && refs.GetArrayLength() > 0;
+
+            if (!hasReferences)
+                return false;
+
+            // "files": [] means this config compiles nothing directly
+            var hasEmptyFiles = root.TryGetProperty("files", out var files)
+                && files.ValueKind == JsonValueKind.Array
+                && files.GetArrayLength() == 0;
+
+            var hasInclude = root.TryGetProperty("include", out var include)
+                && include.ValueKind == JsonValueKind.Array
+                && include.GetArrayLength() > 0;
+
+            return hasEmptyFiles && !hasInclude;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
     }
 
     public async Task<CoverageBatchResult> AnalyzeCoverageMonorepoAsync(

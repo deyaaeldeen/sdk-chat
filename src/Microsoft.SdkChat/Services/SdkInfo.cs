@@ -581,8 +581,11 @@ public class SdkInfo
             return (root, null, null, null, null, null);
         }
 
-        // Step 3: Rank projects by source file count (main project has most code)
-        var mainProject = projects.MaxBy(p => p.FileCount);
+        // Step 3: Rank projects, preferring root-level projects over those nested under
+        // samples/test/docs directories (which are auxiliary, not the main SDK source).
+        // Only fall back to nested projects when no root-level project has source files.
+        var rootProjects = projects.Where(p => !IsNestedUnderNonSourceAncestor(p.Marker.ProjectRoot, root)).ToList();
+        var mainProject = (rootProjects.Count > 0 ? rootProjects : projects).MaxBy(p => p.FileCount);
 
         return (
             mainProject.SourceFolder,
@@ -1689,6 +1692,47 @@ public class SdkInfo
             or ".github" or ".vscode" or ".idea" or ".vs"
             or "scripts" or "tools" or "ci" or ".ci"
             or "generated" or "auto-generated";
+    }
+
+    /// <summary>
+    /// Determines whether <paramref name="projectRoot"/> is nested under a non-source
+    /// ancestor directory (samples, examples, test, docs, demo, etc.) relative to
+    /// <paramref name="scanRoot"/>.
+    /// Used to deprioritize build markers found inside sample/test/doc trees
+    /// so that the main SDK project is preferred during source folder detection.
+    /// </summary>
+    private static bool IsNestedUnderNonSourceAncestor(string projectRoot, string scanRoot)
+    {
+        var normalizedProject = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(scanRoot));
+
+        if (string.Equals(normalizedProject, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Walk the relative path segments between scanRoot and projectRoot
+        var relative = Path.GetRelativePath(normalizedRoot, normalizedProject);
+        foreach (var segment in relative.Split(Path.DirectorySeparatorChar))
+        {
+            if (IsSamplesOrAuxiliaryFolder(segment))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Folder names that indicate auxiliary (non-primary-source) content.
+    /// Build markers found under these directories are deprioritized during
+    /// source folder detection.
+    /// </summary>
+    private static bool IsSamplesOrAuxiliaryFolder(string folderName)
+    {
+        return folderName is "samples" or "sample" or "samples-dev"
+            or "examples" or "example"
+            or "demo" or "demos"
+            or "test" or "tests" or "spec" or "specs" or "__tests__"
+            or "docs" or "doc" or "documentation"
+            or "quickstarts" or "tutorials";
     }
 
     /// <summary>
