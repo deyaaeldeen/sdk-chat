@@ -186,27 +186,6 @@ public static class TypeScriptFormatter
         sb.AppendLine("// Graphed by PublicApiGraphEngine.TypeScript");
         sb.AppendLine();
 
-        // Emit import statements for dependency types
-        if (index.Dependencies is not null && index.Dependencies.Count > 0)
-        {
-            foreach (var dep in index.Dependencies)
-            {
-                if (dep.IsNode) continue;
-                List<string> importNames = [];
-                foreach (var iface in dep.Interfaces ?? []) importNames.Add(iface.Name);
-                foreach (var cls in dep.Classes ?? []) importNames.Add(cls.Name);
-                foreach (var e in dep.Enums ?? []) importNames.Add(e.Name);
-                foreach (var t in dep.Types ?? [])
-                {
-                    if (!IsSelfReferentialAlias(t))
-                        importNames.Add(t.Name);
-                }
-                if (importNames.Count > 0)
-                    sb.AppendLine($"import {{ {string.Join(", ", importNames)} }} from \"{dep.Package}\";");
-            }
-            sb.AppendLine();
-        }
-
         // Get all classes, interfaces, and enums for prioritization
         var allClasses = index.Modules.SelectMany(m => m.Classes ?? []).ToList();
         var allInterfaces = index.Modules.SelectMany(m => m.Interfaces ?? []).ToList();
@@ -443,6 +422,7 @@ public static class TypeScriptFormatter
                 {
                     if (sb.Length >= maxLength) break;
                     if (includedTypeNames.Contains(ta.Name)) continue;
+                    if (IsSelfReferentialAlias(ta)) continue;
                     var typeStr = FormatTypeAlias(ta);
                     if (sb.Length + typeStr.Length <= maxLength) { sb.Append(typeStr); includedTypeNames.Add(ta.Name); includedItems++; }
                 }
@@ -504,7 +484,7 @@ public static class TypeScriptFormatter
                         continue;
                     }
 
-                    if (typesByName.TryGetValue(depName, out var typeDef))
+                    if (typesByName.TryGetValue(depName, out var typeDef) && !IsSelfReferentialAlias(typeDef))
                     {
                         var typeStr = FormatTypeAlias(typeDef);
                         if (sb.Length + typeStr.Length <= maxLength)
@@ -558,57 +538,52 @@ public static class TypeScriptFormatter
             }
         }
 
-        // Include dependency types as declare module blocks for valid .d.ts
+        // Include dependency types as top-level declarations
         if (index.Dependencies is not null && index.Dependencies.Count > 0 && sb.Length < maxLength)
         {
             sb.AppendLine();
+            sb.AppendLine("// ============================================================================");
+            sb.AppendLine("// Dependencies");
+            sb.AppendLine("// ============================================================================");
 
             foreach (var dep in index.Dependencies)
             {
                 if (sb.Length >= maxLength) break;
                 if (dep.IsNode) continue;
 
-                // Collect all type strings for this dependency
-                var depTypes = new StringBuilder();
+                var hasContent = (dep.Interfaces?.Count ?? 0) + (dep.Classes?.Count ?? 0)
+                    + (dep.Enums?.Count ?? 0) + (dep.Types?.Where(t => !IsSelfReferentialAlias(t)).Count() ?? 0) > 0;
+                if (!hasContent) continue;
+
+                sb.AppendLine();
+                sb.AppendLine($"// From: {dep.Package}");
+                sb.AppendLine();
+
                 foreach (var iface in dep.Interfaces ?? [])
                 {
-                    if (sb.Length + depTypes.Length >= maxLength) break;
-                    depTypes.Append(FormatInterface(iface, exportKeyword: false));
-                    includedItems++;
+                    if (sb.Length >= maxLength) break;
+                    var ifaceStr = FormatInterface(iface, exportKeyword: false);
+                    if (sb.Length + ifaceStr.Length <= maxLength) { sb.Append(ifaceStr); includedItems++; }
                 }
                 foreach (var cls in dep.Classes ?? [])
                 {
-                    if (sb.Length + depTypes.Length >= maxLength) break;
-                    depTypes.Append(FormatClass(cls, exportKeyword: false));
-                    includedItems++;
+                    if (sb.Length >= maxLength) break;
+                    var clsStr = FormatClass(cls, exportKeyword: false);
+                    if (sb.Length + clsStr.Length <= maxLength) { sb.Append(clsStr); includedItems++; }
                 }
                 foreach (var e in dep.Enums ?? [])
                 {
-                    if (sb.Length + depTypes.Length >= maxLength) break;
-                    depTypes.Append(FormatEnum(e, exportKeyword: false));
-                    includedItems++;
+                    if (sb.Length >= maxLength) break;
+                    var enumStr = FormatEnum(e, exportKeyword: false);
+                    if (sb.Length + enumStr.Length <= maxLength) { sb.Append(enumStr); includedItems++; }
                 }
                 foreach (var t in dep.Types ?? [])
                 {
-                    if (sb.Length + depTypes.Length >= maxLength) break;
+                    if (sb.Length >= maxLength) break;
                     if (IsSelfReferentialAlias(t)) continue;
-                    depTypes.Append(FormatTypeAlias(t, exportKeyword: false));
-                    includedItems++;
+                    var typeStr = FormatTypeAlias(t, exportKeyword: false);
+                    if (sb.Length + typeStr.Length <= maxLength) { sb.Append(typeStr); includedItems++; }
                 }
-
-                if (depTypes.Length == 0) continue;
-
-                sb.AppendLine($"declare module \"{dep.Package}\" {{");
-                // Indent each line
-                foreach (var line in depTypes.ToString().TrimEnd().Split('\n'))
-                {
-                    if (string.IsNullOrWhiteSpace(line))
-                        sb.AppendLine();
-                    else
-                        sb.AppendLine($"    {line}");
-                }
-                sb.AppendLine("}");
-                sb.AppendLine();
             }
         }
 
@@ -669,7 +644,7 @@ public static class TypeScriptFormatter
         var ext = !string.IsNullOrEmpty(cls.Extends) ? $" extends {cls.Extends}" : "";
         var impl = cls.Implements?.Count > 0 ? $" implements {string.Join(", ", cls.Implements)}" : "";
         var typeParams = !string.IsNullOrEmpty(cls.TypeParams) ? $"<{cls.TypeParams}>" : "";
-        var declare = exportKeyword ? "export declare " : "export ";
+        var declare = exportKeyword ? "export declare " : "declare ";
         sb.AppendLine($"{declare}class {cls.Name}{typeParams}{ext}{impl} {{");
 
         foreach (var prop in cls.Properties ?? [])
@@ -716,7 +691,7 @@ public static class TypeScriptFormatter
             sb.AppendLine($"/** {iface.Doc} */");
         var ext = iface.Extends?.Count > 0 ? $" extends {string.Join(", ", iface.Extends)}" : "";
         var typeParams = !string.IsNullOrEmpty(iface.TypeParams) ? $"<{iface.TypeParams}>" : "";
-        var declare = exportKeyword ? "export declare " : "export ";
+        var declare = exportKeyword ? "export declare " : "declare ";
         sb.AppendLine($"{declare}interface {iface.Name}{typeParams}{ext} {{");
 
         foreach (var prop in iface.Properties ?? [])
@@ -748,7 +723,7 @@ public static class TypeScriptFormatter
             sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(e.DeprecatedMessage) ? "" : $" {e.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(e.Doc))
             sb.AppendLine($"/** {e.Doc} */");
-        var declare = exportKeyword ? "export declare " : "export ";
+        var declare = exportKeyword ? "export declare " : "declare ";
         sb.AppendLine($"{declare}enum {e.Name} {{");
         if (e.Values is not null)
             sb.AppendLine($"    {string.Join(", ", e.Values)}");
@@ -764,8 +739,9 @@ public static class TypeScriptFormatter
             sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(t.DeprecatedMessage) ? "" : $" {t.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(t.Doc))
             sb.AppendLine($"/** {t.Doc} */");
-        var declare = exportKeyword ? "export declare " : "export ";
-        sb.AppendLine($"{declare}type {t.Name} = {t.Type};");
+        var declare = exportKeyword ? "export declare " : "declare ";
+        var typeValue = t.Type == "unresolved" ? "unknown" : t.Type;
+        sb.AppendLine($"{declare}type {t.Name} = {typeValue};");
         sb.AppendLine();
         return sb.ToString();
     }

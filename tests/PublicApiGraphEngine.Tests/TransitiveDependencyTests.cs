@@ -208,7 +208,7 @@ public class TransitiveDependencyTests
 
         var stubs = api.ToStubs();
 
-        Assert.Contains("declare module", stubs);
+        Assert.Contains("Dependencies", stubs);
         Assert.Contains("@example/core-rest-pipeline", stubs);
         Assert.Contains("PipelinePolicy", stubs);
     }
