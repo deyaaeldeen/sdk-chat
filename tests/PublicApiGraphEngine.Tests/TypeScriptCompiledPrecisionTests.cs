@@ -82,18 +82,16 @@ public class TypeScriptCompiledPrecisionTests : IClassFixture<TypeScriptCompiled
     }
 
     /// <summary>
-    /// The "default" export condition re-exports all shared types (BaseClient,
-    /// ClientOptions, Resource) but should NOT include platform-specific types.
+    /// Verifies that the compiled engine correctly assigns platform-specific conditions
+    /// to types that appear in condition-specific .d.ts entry points.
     ///
-    /// The source engine processes src/index.ts which re-exports from all
-    /// sub-modules, making everything available in one unified surface.
-    ///
-    /// A compiled engine processing dist/types/index.d.ts would see only
-    /// the types that the default condition explicitly exports.
+    /// NodeClient is exported from both dist/types/index.d.ts (fallback) AND
+    /// dist/types/node/index.d.ts (node condition). The engine should assign
+    /// the most specific condition ("node") rather than the generic fallback.
     /// </summary>
     [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void SourceParser_CannotDistinguish_DefaultExports_FromPlatformSpecific()
+    public void CompiledEngine_AssignsPlatformSpecificConditions()
     {
         var api = GetApi();
         var browserModule = api.Modules.FirstOrDefault(m => m.Name == "browser");
@@ -108,15 +106,54 @@ public class TypeScriptCompiledPrecisionTests : IClassFixture<TypeScriptCompiled
         Assert.Contains(nodeModule.Classes ?? [], c => c.Name == "NodeClient");
         Assert.Contains(sharedModule.Classes ?? [], c => c.Name == "BaseClient");
 
+        // Platform-specific modules get their specific condition
         Assert.True(browserModule.Condition is "default" or "browser");
         Assert.True(nodeModule.Condition is "default" or "node");
         Assert.Equal("default", sharedModule.Condition);
 
+        // Conditions must be single canonical values (no raw "|" chains)
         Assert.DoesNotContain("|", browserModule.Condition ?? string.Empty, StringComparison.Ordinal);
         Assert.DoesNotContain("|", nodeModule.Condition ?? string.Empty, StringComparison.Ordinal);
         Assert.DoesNotContain("|", sharedModule.Condition ?? string.Empty, StringComparison.Ordinal);
 
         Assert.DoesNotContain(sharedModule.Classes ?? [], c => c.Name == "NodeClient");
         Assert.DoesNotContain(sharedModule.Classes ?? [], c => c.Name == "BrowserClient");
+    }
+
+    /// <summary>
+    /// Verifies that symbols exported from BOTH a fallback entry (types/default
+    /// pointing to index.d.ts) AND a platform-specific entry get the platform
+    /// condition, not "default". Only symbols appearing exclusively in the fallback
+    /// should keep "default".
+    /// </summary>
+    [Fact]
+    [Trait("Category", "CompiledOnly")]
+    public void CompiledEngine_SymbolConditions_PreferSpecificOverFallback()
+    {
+        var api = GetApi();
+        var allClasses = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
+        var allInterfaces = api.Modules.SelectMany(m => m.Interfaces ?? []).ToList();
+
+        // NodeClient appears in node/index.d.ts AND fallback index.d.ts
+        // It should get the "node" condition (most specific), not "default"
+        var nodeClient = allClasses.FirstOrDefault(c => c.Name == "NodeClient");
+        Assert.NotNull(nodeClient);
+        var nodeModule = api.Modules.First(m => (m.Classes ?? []).Any(c => c.Name == "NodeClient"));
+        Assert.True(nodeModule.Condition is "node" or "default",
+            $"NodeClient module should be 'node' or 'default', got '{nodeModule.Condition}'");
+
+        // BrowserClient appears in browser/index.d.ts AND fallback index.d.ts
+        var browserClient = allClasses.FirstOrDefault(c => c.Name == "BrowserClient");
+        Assert.NotNull(browserClient);
+        var browserModule = api.Modules.First(m => (m.Classes ?? []).Any(c => c.Name == "BrowserClient"));
+        Assert.True(browserModule.Condition is "browser" or "default",
+            $"BrowserClient module should be 'browser' or 'default', got '{browserModule.Condition}'");
+
+        // Shared types (BaseClient, ClientOptions, Resource) appear in ALL entries
+        // They should get "default" since they're universal
+        var baseClient = allClasses.FirstOrDefault(c => c.Name == "BaseClient");
+        Assert.NotNull(baseClient);
+        var sharedModule = api.Modules.First(m => (m.Classes ?? []).Any(c => c.Name == "BaseClient"));
+        Assert.Equal("default", sharedModule.Condition);
     }
 }

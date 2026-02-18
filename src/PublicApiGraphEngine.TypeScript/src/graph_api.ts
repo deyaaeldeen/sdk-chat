@@ -1476,20 +1476,39 @@ interface EngineOptions {
 /**
  * Graphs exported symbol names from entry point files.
  * Returns a map from symbol name to its export info (path and optional re-export source).
- * If a symbol is exported from multiple subpaths, the root export "." takes priority.
+ *
+ * When a symbol appears in multiple entry points with different conditions (e.g., both
+ * in the "default" fallback index.d.ts AND in node/index.d.ts), we prefer the MOST
+ * SPECIFIC condition. The fallback/default entry typically re-exports everything and
+ * shouldn't mask platform-specific conditions.
  */
 function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): Map<string, ExportedSymbolInfo> {
-    // Map from symbol name to export info (priority: "." > other subpaths)
-    const exportedSymbols = new Map<string, ExportedSymbolInfo>();
+    // Collect ALL conditions per symbol, then select the best one
+    const symbolConditions = new Map<string, ExportedSymbolInfo[]>();
 
-    // Sort entries so "." comes first (gets priority when same symbol exported multiple times)
+    // Identify fallback entry files — files that appear under "types" or "default"
+    // conditions at the root export. These typically re-export everything and
+    // shouldn't be treated as the authoritative condition for a symbol.
+    const fallbackFiles = new Set<string>();
+    for (const entry of entryEntries) {
+        const norm = normalizeCondition(entry.condition);
+        if (norm === "default" || norm === "types") {
+            fallbackFiles.add(path.resolve(entry.filePath));
+        }
+    }
+
+    // Sort entries: platform-specific conditions first, so they're recorded before fallbacks.
+    // Within the same specificity level, use stable sort by exportPath then condition.
     const sortedEntries = [...entryEntries].sort((a, b) => {
-        if (a.exportPath === ".") return -1;
-        if (b.exportPath === ".") return 1;
+        // exportPath "." gets priority over subpaths
+        if (a.exportPath === "." && b.exportPath !== ".") return -1;
+        if (b.exportPath === "." && a.exportPath !== ".") return 1;
         const exportPathCmp = a.exportPath.localeCompare(b.exportPath);
         if (exportPathCmp !== 0) return exportPathCmp;
 
-        const conditionCmp = getConditionPriority(a.condition) - getConditionPriority(b.condition);
+        // Higher condition priority number = more specific (node=4, browser=5 > default=0)
+        // Process more specific conditions first so they take precedence
+        const conditionCmp = getConditionPriority(b.condition) - getConditionPriority(a.condition);
         if (conditionCmp !== 0) return conditionCmp;
 
         return a.condition.localeCompare(b.condition);
@@ -1499,12 +1518,12 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
         const sourceFile = project.getSourceFile(entry.filePath);
         if (!sourceFile) continue;
 
-        // Get directly exported declarations (these are local, not re-exports)
+        const info: ExportedSymbolInfo = { exportPath: entry.exportPath, condition: entry.condition };
+
+        // Get directly exported declarations
         for (const decl of sourceFile.getExportedDeclarations().keys()) {
-            // Only set if not already set (preserves "." priority)
-            if (!exportedSymbols.has(decl)) {
-                exportedSymbols.set(decl, { exportPath: entry.exportPath, condition: entry.condition });
-            }
+            if (!symbolConditions.has(decl)) symbolConditions.set(decl, []);
+            symbolConditions.get(decl)!.push(info);
         }
 
         // Check export statements for re-exports from external packages
@@ -1515,26 +1534,48 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
             const namedExports = exportDecl.getNamedExports();
             for (const namedExport of namedExports) {
                 const name = namedExport.getAliasNode()?.getText() ?? namedExport.getName();
-                if (!exportedSymbols.has(name)) {
-                    exportedSymbols.set(name, {
-                        exportPath: entry.exportPath,
-                        condition: entry.condition,
-                        reExportedFrom: isExternalPackage ? moduleSpecifier : undefined
-                    });
-                }
+                const reExportInfo: ExportedSymbolInfo = {
+                    exportPath: entry.exportPath,
+                    condition: entry.condition,
+                    reExportedFrom: isExternalPackage ? moduleSpecifier : undefined,
+                };
+                if (!symbolConditions.has(name)) symbolConditions.set(name, []);
+                symbolConditions.get(name)!.push(reExportInfo);
             }
 
-            // Handle `export * from "external-package"` - we can't enumerate these easily
-            // without resolving the external package, so we'll mark them when we see them used
+            // Handle `export * from "external-package"`
             if (exportDecl.isNamespaceExport() && isExternalPackage) {
-                // Store a marker for namespace re-exports that we'll use during type marking
-                exportedSymbols.set(`__namespace_reexport__${moduleSpecifier}`, {
+                const markerName = `__namespace_reexport__${moduleSpecifier}`;
+                if (!symbolConditions.has(markerName)) symbolConditions.set(markerName, []);
+                symbolConditions.get(markerName)!.push({
                     exportPath: entry.exportPath,
                     condition: entry.condition,
                     reExportedFrom: moduleSpecifier
                 });
             }
         }
+    }
+
+    // Select the best condition for each symbol:
+    // - If a symbol appears in BOTH a fallback entry AND a platform-specific entry,
+    //   prefer the platform-specific condition (it's more informative).
+    // - If a symbol appears ONLY in fallback entries, use "default".
+    // - For re-exports, preserve the first match's reExportedFrom.
+    const exportedSymbols = new Map<string, ExportedSymbolInfo>();
+    for (const [name, infos] of symbolConditions) {
+        const specificInfos = infos.filter(info => {
+            const norm = normalizeCondition(info.condition);
+            return norm !== "default" && norm !== "types";
+        });
+
+        // Pick the best: specific condition if available, otherwise fallback
+        const best = specificInfos.length > 0
+            ? specificInfos.sort((a, b) =>
+                getConditionPriority(a.condition) - getConditionPriority(b.condition))[0]
+            : infos.sort((a, b) =>
+                getConditionPriority(a.condition) - getConditionPriority(b.condition))[0];
+
+        exportedSymbols.set(name, best);
     }
 
     return exportedSymbols;
@@ -1636,8 +1677,11 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
 
         const module = extractModule(sourceFile, moduleName);
         if (module) {
-            // Set module condition+exportPath once from entryEntries by file path,
-            // picking the lowest-priority (most "default") condition for this file.
+            // Set module condition+exportPath from entryEntries by file path.
+            // Pick the most general (lowest-priority) condition for the module itself,
+            // since a module appearing in multiple conditions serves all of them.
+            // Individual symbols within the module get their most specific condition
+            // via extractExportedSymbols.
             const resolvedFilePath = path.resolve(sourceFile.getFilePath());
             const matchingEntry = entryEntries
                 .filter(e => path.resolve(e.filePath) === resolvedFilePath)
