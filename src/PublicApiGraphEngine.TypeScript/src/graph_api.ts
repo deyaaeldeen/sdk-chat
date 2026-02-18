@@ -2261,87 +2261,122 @@ export function formatStubs(api: ApiIndex): string {
         "",
     ];
 
+    // Group modules by condition to emit each as a separate declare module block.
+    // This prevents type collisions when multiple conditions declare the same name
+    // (e.g., AzureCliCredential in both default and browser conditions).
+    const conditionGroups = new Map<string, ModuleInfo[]>();
     for (const module of api.modules) {
-        lines.push(`// Module: ${module.name}`);
-        lines.push("");
+        const cond = module.condition ?? "(unconditioned)";
+        if (!conditionGroups.has(cond)) conditionGroups.set(cond, []);
+        conditionGroups.get(cond)!.push(module);
+    }
 
-        // Functions
-        for (const fn of module.functions || []) {
-            if (fn.doc) lines.push(`/** ${fn.doc} */`);
-            const async = fn.async ? "async " : "";
-            const ret = fn.ret ? `: ${fn.ret}` : "";
-            lines.push(`export ${async}function ${fn.name}(${fn.sig})${ret};`);
+    // Sort conditions: "default" first, then alphabetically
+    const sortedConditions = [...conditionGroups.keys()].sort((a, b) => {
+        if (a === "default") return -1;
+        if (b === "default") return 1;
+        return a.localeCompare(b);
+    });
+
+    const needsModuleBlocks = sortedConditions.length > 1;
+
+    for (const condition of sortedConditions) {
+        const modules = conditionGroups.get(condition)!;
+
+        if (needsModuleBlocks) {
+            lines.push(`declare module "${api.package}/${condition}" {`);
             lines.push("");
         }
 
-        // Type aliases
-        for (const t of module.types || []) {
-            if (t.doc) lines.push(`/** ${t.doc} */`);
-            lines.push(`export type ${t.name} = ${t.type};`);
+        const indent = needsModuleBlocks ? "    " : "";
+
+        for (const module of modules) {
+            lines.push(`${indent}// Module: ${module.name}`);
             lines.push("");
+
+            // Functions
+            for (const fn of module.functions || []) {
+                if (fn.doc) lines.push(`${indent}/** ${fn.doc} */`);
+                const async = fn.async ? "async " : "";
+                const ret = fn.ret ? `: ${fn.ret}` : "";
+                lines.push(`${indent}export ${async}function ${fn.name}(${fn.sig})${ret};`);
+                lines.push("");
+            }
+
+            // Type aliases
+            for (const t of module.types || []) {
+                if (t.doc) lines.push(`${indent}/** ${t.doc} */`);
+                lines.push(`${indent}export type ${t.name} = ${t.type};`);
+                lines.push("");
+            }
+
+            // Enums
+            for (const e of module.enums || []) {
+                if (e.doc) lines.push(`${indent}/** ${e.doc} */`);
+                lines.push(`${indent}export enum ${e.name} {`);
+                lines.push(`${indent}    ${e.values.join(", ")}`);
+                lines.push(`${indent}}`);
+                lines.push("");
+            }
+
+            // Interfaces
+            for (const iface of module.interfaces || []) {
+                if (iface.doc) lines.push(`${indent}/** ${iface.doc} */`);
+                const ext = iface.extends?.length ? ` extends ${iface.extends.join(", ")}` : "";
+                const typeParams = iface.typeParams ? `<${iface.typeParams}>` : "";
+                lines.push(`${indent}export interface ${iface.name}${typeParams}${ext} {`);
+
+                for (const prop of iface.properties || []) {
+                    const opt = prop.optional ? "?" : "";
+                    const ro = prop.readonly ? "readonly " : "";
+                    lines.push(`${indent}    ${ro}${prop.name}${opt}: ${prop.type};`);
+                }
+
+                for (const m of iface.methods || []) {
+                    const async = m.async ? "async " : "";
+                    const ret = m.ret ? `: ${m.ret}` : "";
+                    lines.push(`${indent}    ${async}${m.name}(${m.sig})${ret};`);
+                }
+
+                lines.push(`${indent}}`);
+                lines.push("");
+            }
+
+            // Classes
+            for (const cls of module.classes || []) {
+                if (cls.doc) lines.push(`${indent}/** ${cls.doc} */`);
+                const ext = cls.extends ? ` extends ${cls.extends}` : "";
+                const impl = cls.implements?.length ? ` implements ${cls.implements.join(", ")}` : "";
+                const typeParams = cls.typeParams ? `<${cls.typeParams}>` : "";
+                lines.push(`${indent}export class ${cls.name}${typeParams}${ext}${impl} {`);
+
+                for (const prop of cls.properties || []) {
+                    const opt = prop.optional ? "?" : "";
+                    const ro = prop.readonly ? "readonly " : "";
+                    lines.push(`${indent}    ${ro}${prop.name}${opt}: ${prop.type};`);
+                }
+
+                for (const ctor of cls.constructors || []) {
+                    lines.push(`${indent}    constructor(${ctor.sig});`);
+                }
+
+                for (const m of cls.methods || []) {
+                    const async = m.async ? "async " : "";
+                    const stat = m.static ? "static " : "";
+                    const ret = m.ret ? `: ${m.ret}` : "";
+                    lines.push(`${indent}    ${stat}${async}${m.name}(${m.sig})${ret};`);
+                }
+
+                if (!cls.properties?.length && !cls.constructors?.length && !cls.methods?.length) {
+                    lines.push(`${indent}    // empty`);
+                }
+
+                lines.push(`${indent}}`);
+                lines.push("");
+            }
         }
 
-        // Enums
-        for (const e of module.enums || []) {
-            if (e.doc) lines.push(`/** ${e.doc} */`);
-            lines.push(`export enum ${e.name} {`);
-            lines.push(`    ${e.values.join(", ")}`);
-            lines.push("}");
-            lines.push("");
-        }
-
-        // Interfaces
-        for (const iface of module.interfaces || []) {
-            if (iface.doc) lines.push(`/** ${iface.doc} */`);
-            const ext = iface.extends?.length ? ` extends ${iface.extends.join(", ")}` : "";
-            const typeParams = iface.typeParams ? `<${iface.typeParams}>` : "";
-            lines.push(`export interface ${iface.name}${typeParams}${ext} {`);
-
-            for (const prop of iface.properties || []) {
-                const opt = prop.optional ? "?" : "";
-                const ro = prop.readonly ? "readonly " : "";
-                lines.push(`    ${ro}${prop.name}${opt}: ${prop.type};`);
-            }
-
-            for (const m of iface.methods || []) {
-                const async = m.async ? "async " : "";
-                const ret = m.ret ? `: ${m.ret}` : "";
-                lines.push(`    ${async}${m.name}(${m.sig})${ret};`);
-            }
-
-            lines.push("}");
-            lines.push("");
-        }
-
-        // Classes
-        for (const cls of module.classes || []) {
-            if (cls.doc) lines.push(`/** ${cls.doc} */`);
-            const ext = cls.extends ? ` extends ${cls.extends}` : "";
-            const impl = cls.implements?.length ? ` implements ${cls.implements.join(", ")}` : "";
-            const typeParams = cls.typeParams ? `<${cls.typeParams}>` : "";
-            lines.push(`export class ${cls.name}${typeParams}${ext}${impl} {`);
-
-            for (const prop of cls.properties || []) {
-                const opt = prop.optional ? "?" : "";
-                const ro = prop.readonly ? "readonly " : "";
-                lines.push(`    ${ro}${prop.name}${opt}: ${prop.type};`);
-            }
-
-            for (const ctor of cls.constructors || []) {
-                lines.push(`    constructor(${ctor.sig});`);
-            }
-
-            for (const m of cls.methods || []) {
-                const async = m.async ? "async " : "";
-                const stat = m.static ? "static " : "";
-                const ret = m.ret ? `: ${m.ret}` : "";
-                lines.push(`    ${stat}${async}${m.name}(${m.sig})${ret};`);
-            }
-
-            if (!cls.properties?.length && !cls.constructors?.length && !cls.methods?.length) {
-                lines.push("    // empty");
-            }
-
+        if (needsModuleBlocks) {
             lines.push("}");
             lines.push("");
         }
