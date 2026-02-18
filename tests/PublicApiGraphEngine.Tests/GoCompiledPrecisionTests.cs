@@ -43,9 +43,9 @@ public class GoCompiledPrecisionTests : IClassFixture<GoCompiledFixture>
     /// A compiled engine would load the package's export data and correctly classify
     /// RoundTripper and Handler as interfaces, and TransportConfig as a struct.
     /// </summary>
-    [Fact(Skip = "Requires compiled artifacts")]
+    [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void SourceParser_CannotClassify_ExternalDependencyTypes()
+    public void CompiledEnrichment_Classifies_ExternalDependencyTypes()
     {
         var api = GetApi();
 
@@ -53,17 +53,11 @@ public class GoCompiledPrecisionTests : IClassFixture<GoCompiledFixture>
             d.Package.Contains("httputil", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(dep);
 
-        // RoundTripper is an interface in the external package (named after
-        // the net/http.RoundTripper interface pattern). The source parser
-        // cannot determine this — it puts all external types in Types[].
-        // A compiled engine reading the package's export data would
-        // classify it correctly in Interfaces[].
         Assert.NotNull(dep.Interfaces);
-        Assert.Contains(dep.Interfaces, i => i.Name == "RoundTripper");
-
-        // TransportConfig is a struct in the external package.
-        // Source parser also puts it in Types[] (unclassified).
         Assert.NotNull(dep.Structs);
+
+        Assert.Contains(dep.Interfaces, i => i.Name == "RoundTripper");
+        Assert.Contains(dep.Interfaces, i => i.Name == "Handler");
         Assert.Contains(dep.Structs, s => s.Name == "TransportConfig");
     }
 
@@ -76,9 +70,9 @@ public class GoCompiledPrecisionTests : IClassFixture<GoCompiledFixture>
     /// A compiled engine loading httputil's export data would see RoundTripper's
     /// method set and promote those methods to ServiceTransport.
     /// </summary>
-    [Fact(Skip = "Requires compiled artifacts")]
+    [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void SourceParser_CannotEnumerate_PromotedMethods_FromExternalEmbed()
+    public void CompiledEnrichment_Enumerates_PromotedMethods_FromExternalEmbed()
     {
         var api = GetApi();
         var structs = api.Packages?.SelectMany(p => p.Structs ?? []).ToList();
@@ -91,17 +85,12 @@ public class GoCompiledPrecisionTests : IClassFixture<GoCompiledFixture>
         Assert.Contains(transport.Embeds, e =>
             e.Contains("RoundTripper", StringComparison.Ordinal));
 
-        // But ServiceTransport has no locally-defined methods, only the embedding.
-        // The Go engine associates constructor functions (New* returning this type)
-        // as struct methods, but cannot enumerate the ACTUAL promoted methods
-        // from the external RoundTripper interface.
-        // A compiled engine would promote RoundTripper's methods (e.g., RoundTrip)
-        // to ServiceTransport, in addition to any constructors.
-        var promotedMethods = (transport.Methods ?? [])
+        // Promoted methods from embedded external interfaces are materialized.
+        var nonConstructorMethods = (transport.Methods ?? [])
             .Where(m => !m.Name.StartsWith("New", StringComparison.Ordinal))
             .ToList();
-
-        Assert.NotEmpty(promotedMethods);
+        Assert.NotEmpty(nonConstructorMethods);
+        Assert.Contains(nonConstructorMethods, m => m.Name == "RoundTrip");
     }
 
     /// <summary>
@@ -113,9 +102,9 @@ public class GoCompiledPrecisionTests : IClassFixture<GoCompiledFixture>
     /// A compiled engine using go/types would resolve the full method set
     /// including promoted methods from the embedded stdlib type.
     /// </summary>
-    [Fact(Skip = "Requires compiled artifacts")]
+    [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void SourceParser_CannotEnumerate_PromotedMethods_FromStdlibEmbed()
+    public void CompiledEnrichment_Resolves_PromotedMethods_FromStdlibEmbed()
     {
         var api = GetApi();
         var structs = api.Packages?.SelectMany(p => p.Structs ?? []).ToList();
@@ -128,9 +117,8 @@ public class GoCompiledPrecisionTests : IClassFixture<GoCompiledFixture>
         Assert.Contains("GetResource", methods);
         Assert.Contains("ListResources", methods);
 
-        // Client also embeds *http.Client, which provides Do(), Get(), etc.
-        // The source parser cannot enumerate these promoted methods.
-        // A compiled engine would include them in the method set.
+        // With go/types enrichment, embedded stdlib methods are materialized
+        // into this struct's method list.
         Assert.Contains("Do", methods);
     }
 }

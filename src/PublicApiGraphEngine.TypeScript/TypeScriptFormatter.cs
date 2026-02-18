@@ -255,6 +255,17 @@ public static class TypeScriptFormatter
 
                 sb.AppendLine($"// ============================================================================");
                 sb.AppendLine($"// import {{ ... }} from \"{importPath}\"");
+                var moduleConditions = index.Modules
+                    .Where(module => string.Equals(module.ExportPath, exportPath, StringComparison.Ordinal))
+                    .Select(module => module.Condition)
+                    .Where(condition => !string.IsNullOrWhiteSpace(condition))
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(condition => condition, StringComparer.Ordinal)
+                    .ToList();
+                if (moduleConditions.Count > 0)
+                {
+                    sb.AppendLine($"// Export conditions: {string.Join(", ", moduleConditions)}");
+                }
                 sb.AppendLine($"// ============================================================================");
                 sb.AppendLine();
 

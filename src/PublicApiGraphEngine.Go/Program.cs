@@ -26,7 +26,7 @@ if (!engine.IsAvailable())
     return 1;
 }
 
-var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(options.Path, ct: CancellationToken.None);
+var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(new EngineInput.SourceDirectory(options.Path), ct: CancellationToken.None);
 
 if (result is EngineResult<ApiIndex>.Failure failure)
 {

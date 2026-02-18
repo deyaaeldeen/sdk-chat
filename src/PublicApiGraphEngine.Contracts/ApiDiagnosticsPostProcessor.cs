@@ -11,6 +11,18 @@ namespace PublicApiGraphEngine.Contracts;
 /// </summary>
 public static partial class ApiDiagnosticsPostProcessor
 {
+    /// <summary>
+    /// Prepends engine-input diagnostics to a list of existing diagnostics.
+    /// Returns a new list if prepending is needed, or the original list if there is nothing to prepend.
+    /// </summary>
+    public static IReadOnlyList<ApiDiagnostic> PrependDiagnostics(
+        IReadOnlyList<ApiDiagnostic> prefix,
+        IReadOnlyList<ApiDiagnostic> diagnostics)
+    {
+        if (prefix.Count == 0) return diagnostics;
+        return [..prefix, ..diagnostics];
+    }
+
     public static IReadOnlyList<ApiDiagnostic> Build(
         IApiIndex index,
         IReadOnlyList<ApiDiagnostic>? upstreamDiagnostics = null)

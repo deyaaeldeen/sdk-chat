@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.SdkChat.Services;
 using Microsoft.SdkChat.Telemetry;
 using ModelContextProtocol.Server;
+using PublicApiGraphEngine.Contracts;
 
 namespace Microsoft.SdkChat.Mcp;
 
@@ -30,6 +31,12 @@ public class ApiMcpTools
         [Description("Force language instead of auto-detection. Values: dotnet, python, java, javascript, typescript, go.")] string? language = null,
         [Description("Output format: 'stubs' (default) for readable signatures, 'json' for structured data.")] string? format = null,
         [Description("Optional path to cross-language metadata JSON file.")] string? crossLanguageMetadata = null,
+        [Description("Optional C# project file path (.csproj) for artifact mode.")] string? csprojPath = null,
+        [Description("Optional TypeScript tsconfig.json path for artifact mode.")] string? tsconfigPath = null,
+        [Description("Optional TypeScript package.json path for export conditions.")] string? packageJsonPath = null,
+        [Description("Optional Maven pom.xml path for Java artifact mode.")] string? pomPath = null,
+        [Description("Optional Gradle build file path for Java artifact mode.")] string? gradlePath = null,
+        [Description("Optional Python import package name for inspect mode.")] string? importName = null,
         CancellationToken cancellationToken = default)
     {
         using var activity = SdkChatTelemetry.StartMcpTool("graph_api");
@@ -37,7 +44,17 @@ public class ApiMcpTools
         try
         {
             var asJson = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase);
-            var result = await _service.GraphPublicApiAsync(packagePath, language, asJson, crossLanguageMetadata, cancellationToken).ConfigureAwait(false);
+            var artifactOptions = new ArtifactOptions
+            {
+                CsprojPath = csprojPath,
+                TsconfigPath = tsconfigPath,
+                PackageJsonPath = packageJsonPath,
+                PomPath = pomPath,
+                GradlePath = gradlePath,
+                ImportName = importName,
+            };
+
+            var result = await _service.GraphPublicApiAsync(packagePath, language, asJson, crossLanguageMetadata, artifactOptions, cancellationToken).ConfigureAwait(false);
 
             if (!result.Success)
             {

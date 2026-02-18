@@ -524,7 +524,7 @@ public class ApiModelImmutabilityTests
         Assert.Contains(lines, l => l.Contains("type engineContext struct"));
 
         // Verify newEngineContext function exists
-        Assert.Contains(lines, l => l.Contains("func newEngineContext()"));
+        Assert.Contains(lines, l => l.Contains("func newEngineContext("));
     }
 
     #endregion

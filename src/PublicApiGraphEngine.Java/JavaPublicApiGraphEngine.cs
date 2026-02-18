@@ -51,15 +51,15 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     public string ToStubs(ApiIndex index) => JavaFormatter.Format(index);
 
     /// <inheritdoc />
-    async Task<EngineResult<ApiIndex>> IPublicApiGraphEngine<ApiIndex>.GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
+    async Task<EngineResult<ApiIndex>> IPublicApiGraphEngine<ApiIndex>.GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         if (!IsAvailable())
             return EngineResult<ApiIndex>.CreateFailure(UnavailableReason ?? "JBang not available");
 
-        using var activity = EngineTelemetry.StartGraphing(Language, rootPath);
+        using var activity = EngineTelemetry.StartGraphing(Language, input.RootDirectory);
         try
         {
-            var (result, diagnostics) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+            var (result, diagnostics) = await ExtractCoreAsync(input, crossLanguageMap, ct).ConfigureAwait(false);
             if (result is not null)
             {
                 EngineTelemetry.RecordResult(activity, true, result.Packages.Count);
@@ -80,27 +80,64 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// Prefers pre-compiled binary from build, falls back to JBang runtime.
     /// </summary>
     public Task<ApiIndex> GraphAsync(string rootPath, CancellationToken ct = default)
-        => GraphAsync(rootPath, null, ct);
+        => GraphAsync(new EngineInput.SourceDirectory(rootPath), null, ct);
 
-    public async Task<ApiIndex> GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
+    public Task<ApiIndex> GraphAsync(EngineInput input, CancellationToken ct = default)
+        => GraphAsync(input, null, ct);
+
+    public async Task<ApiIndex> GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
     {
-        var (index, _) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+        var (index, _) = await ExtractCoreAsync(input, crossLanguageMap, ct).ConfigureAwait(false);
         return index ?? throw new InvalidOperationException("Java engine returned no API surface.");
     }
 
     /// <summary>
     /// Shared engine logic that returns both the API index and any stderr warnings.
     /// </summary>
-    private async Task<(ApiIndex? Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
+    private async Task<(ApiIndex? Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
-        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
+        string? pomPath = input is EngineInput.JavaMavenProject maven ? maven.PomPath : null;
+        string? gradlePath = input is EngineInput.JavaGradleProject gradle ? gradle.GradlePath : null;
+        var rootPath = ProcessSandbox.ValidateRootPath(input.RootDirectory);
+        List<ApiDiagnostic> engineInputDiagnostics = [];
+
+        string? classesDir = null;
+        if (!string.IsNullOrWhiteSpace(pomPath))
+        {
+            classesDir = await ResolveMavenClassesDirectoryAsync(pomPath!, ct).ConfigureAwait(false);
+        }
+        else if (!string.IsNullOrWhiteSpace(gradlePath))
+        {
+            classesDir = await ResolveGradleClassesDirectoryAsync(gradlePath!, ct).ConfigureAwait(false);
+        }
+
+        if (!string.IsNullOrWhiteSpace(classesDir))
+        {
+            engineInputDiagnostics.Add(new ApiDiagnostic
+            {
+                Id = "ENGINE_INPUT",
+                Level = DiagnosticLevel.Info,
+                Text = $"Using compiled artifacts: class files in {classesDir}"
+            });
+        }
+        else if (!string.IsNullOrWhiteSpace(pomPath) || !string.IsNullOrWhiteSpace(gradlePath))
+        {
+            var buildFile = pomPath ?? gradlePath;
+            engineInputDiagnostics.Add(new ApiDiagnostic
+            {
+                Id = "ENGINE_INPUT",
+                Level = DiagnosticLevel.Warning,
+                Text = $"Java artifact mode requested, but no compiled classes were found for '{buildFile}'. Falling back to source analysis."
+            });
+        }
+
         var availability = _availability.GetAvailability();
 
         // Docker mode: fall back to buffered engine call
         if (availability.Mode == EngineMode.Docker)
         {
-            var result = await RunEngineAsync("--json", rootPath, ct).ConfigureAwait(false);
-            var diag = ParseStderrDiagnostics(result.StandardError);
+            var result = await RunEngineAsync("--json", rootPath, classesDir, ct).ConfigureAwait(false);
+            var diag = ApiDiagnosticsPostProcessor.PrependDiagnostics(engineInputDiagnostics, ParseStderrDiagnostics(result.StandardError));
 
             if (string.IsNullOrWhiteSpace(result.StandardOutput))
                 return (null, diag);
@@ -118,12 +155,11 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
         }
 
         // Native/Runtime mode: stream stdout directly to JSON deserializer
-        await using var streamResult = await RunEngineStreamAsync(rootPath, ct).ConfigureAwait(false);
+        await using var streamResult = await RunEngineStreamAsync(rootPath, classesDir, ct).ConfigureAwait(false);
 
         if (streamResult.StandardOutputStream is null)
         {
-            var diagnostics = ParseStderrDiagnostics(streamResult.StandardError);
-            return (null, diagnostics);
+            return (null, ApiDiagnosticsPostProcessor.PrependDiagnostics(engineInputDiagnostics, ParseStderrDiagnostics(streamResult.StandardError)));
         }
 
         var index = await JsonSerializer.DeserializeAsync(
@@ -144,22 +180,23 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 
         if (index is null) return (null, stderrDiagnostics);
 
-        var finalized = FinalizeIndex(index, crossLanguageMap, stderrDiagnostics);
+        var finalized = FinalizeIndex(index, crossLanguageMap, ApiDiagnosticsPostProcessor.PrependDiagnostics(engineInputDiagnostics, stderrDiagnostics));
         return (finalized, finalized.Diagnostics);
     }
 
     /// <summary>
     /// Runs the engine with streaming stdout for JSON deserialization.
     /// </summary>
-    private async Task<StreamingProcessResult> RunEngineStreamAsync(string rootPath, CancellationToken ct)
+    private async Task<StreamingProcessResult> RunEngineStreamAsync(string rootPath, string? classesDir, CancellationToken ct)
     {
         var availability = _availability.GetAvailability();
+        var args = BuildEngineArgs(rootPath, "--json", classesDir);
 
         if (availability.Mode == EngineMode.NativeBinary)
         {
             return await ProcessSandbox.ExecuteWithStreamAsync(
                 availability.ExecutablePath!,
-                [rootPath, "--json"],
+                args,
                 cancellationToken: ct).ConfigureAwait(false);
         }
 
@@ -170,7 +207,7 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 
         return await ProcessSandbox.ExecuteWithStreamAsync(
             availability.ExecutablePath!,
-            [scriptPath, rootPath, "--json"],
+            ["--quiet", scriptPath, ..args],
             cancellationToken: ct).ConfigureAwait(false);
     }
 
@@ -264,7 +301,7 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsJavaAsync(string rootPath, CancellationToken ct = default)
     {
-        var result = await RunEngineAsync("--stub", rootPath, ct).ConfigureAwait(false);
+        var result = await RunEngineAsync("--stub", rootPath, null, ct).ConfigureAwait(false);
         return result.StandardOutput;
     }
 
@@ -272,16 +309,17 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// Runs the Java engine with the given output flag, dispatching to the correct
     /// execution mode (NativeBinary, RuntimeInterpreter, or Docker).
     /// </summary>
-    private async Task<ProcessResult> RunEngineAsync(string outputFlag, string rootPath, CancellationToken ct)
+    private async Task<ProcessResult> RunEngineAsync(string outputFlag, string rootPath, string? classesDir, CancellationToken ct)
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = _availability.GetAvailability();
+        var args = BuildEngineArgs(rootPath, outputFlag, classesDir);
 
         if (availability.Mode == EngineMode.NativeBinary)
         {
             var result = await ProcessSandbox.ExecuteAsync(
                 availability.ExecutablePath!,
-                [rootPath, outputFlag],
+                args,
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
@@ -301,7 +339,7 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
             var dockerResult = await DockerSandbox.ExecuteAsync(
                 availability.DockerImageName!,
                 rootPath,
-                [rootPath, outputFlag],
+                [..args],
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
@@ -326,7 +364,7 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 
         var jbangResult = await ProcessSandbox.ExecuteAsync(
             availability.ExecutablePath!,
-            [scriptPath, rootPath, outputFlag],
+            ["--quiet", scriptPath, ..args],
             cancellationToken: ct
         ).ConfigureAwait(false);
 
@@ -339,6 +377,139 @@ public class JavaPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
         }
 
         return jbangResult;
+    }
+
+    private static IReadOnlyList<string> BuildEngineArgs(string rootPath, string outputFlag, string? classesDir)
+    {
+        List<string> args = [rootPath, outputFlag];
+        if (!string.IsNullOrWhiteSpace(classesDir))
+        {
+            args.Add("--mode");
+            args.Add("compiled");
+            args.Add("--classes-dir");
+            args.Add(classesDir);
+        }
+        return args;
+    }
+
+    private static async Task<string?> ResolveMavenClassesDirectoryAsync(string pomPath, CancellationToken ct)
+    {
+        if (!File.Exists(pomPath))
+            return null;
+
+        var result = await ProcessSandbox.ExecuteAsync(
+            "mvn",
+            ["help:evaluate", "-Dexpression=project.build.outputDirectory", "-q", "-DforceStdout", "-f", pomPath],
+            timeout: TimeSpan.FromSeconds(30),
+            cancellationToken: ct).ConfigureAwait(false);
+
+        if (!result.Success)
+            return null;
+
+        var output = result.StandardOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault();
+
+        if (string.IsNullOrWhiteSpace(output) || !Directory.Exists(output))
+            return null;
+
+        return Directory.EnumerateFiles(output, "*.class", SearchOption.AllDirectories).Any() ? output : null;
+    }
+
+    private static async Task<string?> ResolveGradleClassesDirectoryAsync(string gradlePath, CancellationToken ct)
+    {
+        if (!File.Exists(gradlePath))
+            return null;
+
+        var gradleDirectory = Path.GetDirectoryName(gradlePath);
+        if (string.IsNullOrWhiteSpace(gradleDirectory))
+            return null;
+
+        var gradleExecutable = File.Exists(Path.Combine(gradleDirectory, "gradlew"))
+            ? Path.Combine(gradleDirectory, "gradlew")
+            : "gradle";
+
+        var initScriptPath = Path.Combine(Path.GetTempPath(), $"sdkchat-gradle-init-{Guid.NewGuid():N}.gradle");
+
+        try
+        {
+            // Use FileMode.CreateNew to avoid TOCTOU — fails if file already exists.
+            const string initScript = """
+allprojects {
+    tasks.register('sdkChatPrintMainClassesDirs') {
+        doLast {
+            def sourceSetsExt = project.extensions.findByName('sourceSets')
+            if (sourceSetsExt == null) {
+                return
+            }
+
+            def mainSourceSet = sourceSetsExt.findByName('main')
+            if (mainSourceSet == null) {
+                return
+            }
+
+            println mainSourceSet.output.classesDirs.files.collect { it.absolutePath }.join(File.pathSeparator)
+        }
+    }
+}
+""";
+            await using (var fs = new FileStream(initScriptPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            await using (var writer = new StreamWriter(fs))
+            {
+                await writer.WriteAsync(initScript).ConfigureAwait(false);
+            }
+
+            // Register cleanup on cancellation so the temp file is removed even if
+            // the awaited process is cancelled before reaching the finally block.
+            await using var ctRegistration = ct.Register(() => TryDeleteFile(initScriptPath));
+
+            var result = await ProcessSandbox.ExecuteAsync(
+                gradleExecutable,
+                ["-q", "-I", initScriptPath, "-b", gradlePath, "sdkChatPrintMainClassesDirs"],
+                workingDirectory: gradleDirectory,
+                timeout: TimeSpan.FromSeconds(45),
+                cancellationToken: ct).ConfigureAwait(false);
+
+            if (!result.Success)
+                return null;
+
+            var outputLines = result.StandardOutput
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var lastLine = outputLines.LastOrDefault();
+            if (string.IsNullOrWhiteSpace(lastLine))
+                return null;
+
+            var candidates = lastLine
+                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(Directory.Exists);
+
+            foreach (var candidate in candidates)
+            {
+                if (Directory.EnumerateFiles(candidate, "*.class", SearchOption.AllDirectories).Any())
+                    return candidate;
+            }
+
+            return null;
+        }
+        finally
+        {
+            TryDeleteFile(initScriptPath);
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static string GetScriptPath()

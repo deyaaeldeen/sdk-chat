@@ -3,10 +3,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/doc"
+	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -16,6 +18,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -1122,7 +1125,7 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 	packages := make(map[string]*PackageApi)
 
 	// Create a fresh engine context for this engine run
-	ctx := newEngineContext()
+	ctx := newEngineContext(absPath)
 
 	// Find all Go packages
 	fset := token.NewFileSet()
@@ -1142,7 +1145,8 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 		// Skip internal, vendor, etc
 		relDir, _ := filepath.Rel(absPath, dir)
 		if strings.Contains(relDir, "internal") || strings.Contains(relDir, "vendor") ||
-			strings.Contains(relDir, "testdata") || strings.Contains(relDir, "examples") {
+			strings.Contains(relDir, "testdata") || strings.Contains(relDir, "examples") ||
+			strings.Contains(relDir, "testdeps") {
 			continue
 		}
 
@@ -1168,6 +1172,7 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 			docPkg := doc.New(astPkg, dir, doc.AllDecls)
 
 			pkgApi := extractPkg(ctx, docPkg, fset)
+			enrichPackageWithTypeChecker(ctx, fset, pkgName, astPkg, pkgApi)
 			pkgApi.Name = relDir
 			if pkgApi.Name == "" || pkgApi.Name == "." {
 				pkgApi.Name = pkgName
@@ -1179,6 +1184,11 @@ func extractPackage(rootPath string) (*ApiIndex, error) {
 				packages[pkgApi.Name] = pkgApi
 			}
 		}
+	}
+
+	enrichExternalPackagesFromSources(ctx)
+	for _, pkgApi := range packages {
+		applyEmbeddedMethodPromotion(ctx, pkgApi)
 	}
 
 	// Mark entry points: types in the root package are the primary entry points
@@ -1375,14 +1385,20 @@ func (c *TypeReferenceCollector) GetExternalRefs() map[string]bool {
 // engineContext holds per-engine mutable state, eliminating global variables.
 // A fresh context is created for each extractPackage call.
 type engineContext struct {
-	typeCollector *TypeReferenceCollector
-	importMap     map[string]string
+	typeCollector      *TypeReferenceCollector
+	importMap          map[string]string
+	externalTypeKinds  map[string]string
+	externalTypeMethods map[string][]FuncApi
+	projectRoot        string
 }
 
-func newEngineContext() *engineContext {
+func newEngineContext(projectRoot string) *engineContext {
 	return &engineContext{
-		typeCollector: NewTypeReferenceCollector(),
-		importMap:     make(map[string]string),
+		typeCollector:       NewTypeReferenceCollector(),
+		importMap:           make(map[string]string),
+		externalTypeKinds:   make(map[string]string),
+		externalTypeMethods: make(map[string][]FuncApi),
+		projectRoot:         projectRoot,
 	}
 }
 
@@ -1463,8 +1479,11 @@ func resolveTransitiveDependencies(ctx *engineContext) []DependencyInfo {
 				qualifiedName = pkgPath + "." + t
 			}
 
-			if ctx.typeCollector.IsKnownInterface(qualifiedName) {
+			kind := ctx.externalTypeKinds[pkgPath+"."+t]
+			if kind == "interface" || ctx.typeCollector.IsKnownInterface(qualifiedName) {
 				dep.Interfaces = append(dep.Interfaces, IfaceApi{Name: t})
+			} else if kind == "struct" {
+				dep.Structs = append(dep.Structs, StructApi{Name: t})
 			} else {
 				dep.Types = append(dep.Types, TypeApi{Name: t})
 			}
@@ -1630,6 +1649,450 @@ func extractPkg(ctx *engineContext, pkg *doc.Package, fset *token.FileSet) *Pack
 	}
 
 	return api
+}
+
+func enrichPackageWithTypeChecker(ctx *engineContext, fset *token.FileSet, pkgName string, astPkg *ast.Package, api *PackageApi) {
+	if ctx == nil || fset == nil || astPkg == nil || api == nil {
+		return
+	}
+
+	files := make([]*ast.File, 0, len(astPkg.Files))
+	fileNames := make([]string, 0, len(astPkg.Files))
+	for fileName := range astPkg.Files {
+		fileNames = append(fileNames, fileName)
+	}
+	sort.Strings(fileNames)
+	for _, fileName := range fileNames {
+		files = append(files, astPkg.Files[fileName])
+	}
+
+	config := types.Config{
+		Importer: importer.Default(),
+		Error:    func(error) {},
+	}
+
+	typedPkg, err := config.Check(pkgName, fset, files, nil)
+	if err != nil && typedPkg == nil {
+		return
+	}
+	if typedPkg == nil {
+		return
+	}
+
+	importsByPath := make(map[string]*types.Package)
+	for _, imported := range typedPkg.Imports() {
+		importsByPath[imported.Path()] = imported
+	}
+
+	for _, structInfo := range api.Structs {
+		obj := typedPkg.Scope().Lookup(structInfo.Name)
+		typeName, ok := obj.(*types.TypeName)
+		if !ok {
+			continue
+		}
+		named, ok := typeName.Type().(*types.Named)
+		if !ok {
+			continue
+		}
+
+		methodSet := types.NewMethodSet(types.NewPointer(named))
+		for methodIndex := 0; methodIndex < methodSet.Len(); methodIndex++ {
+			selection := methodSet.At(methodIndex)
+			methodObj, ok := selection.Obj().(*types.Func)
+			if !ok || !methodObj.Exported() {
+				continue
+			}
+
+			signature, ok := methodObj.Type().(*types.Signature)
+			if !ok {
+				continue
+			}
+
+			params, results, sig, ret := signatureToApiShapes(signature)
+			method := FuncApi{
+				Name:     methodObj.Name(),
+				IsMethod: true,
+				Receiver: structInfo.Name,
+				Params:   params,
+				Results:  results,
+				Sig:      sig,
+				Ret:      ret,
+			}
+
+			for structIndex := range api.Structs {
+				if api.Structs[structIndex].Name != structInfo.Name {
+					continue
+				}
+				if !goMethodExists(api.Structs[structIndex].Methods, method) {
+					api.Structs[structIndex].Methods = append(api.Structs[structIndex].Methods, method)
+				}
+				break
+			}
+		}
+	}
+
+	refs := ctx.typeCollector.GetExternalRefs()
+	for typeName := range refs {
+		parts := strings.SplitN(typeName, ".", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		alias, symbol := parts[0], parts[1]
+		importPath, ok := ctx.importMap[alias]
+		if !ok {
+			continue
+		}
+
+		importedPkg, ok := importsByPath[importPath]
+		if !ok {
+			continue
+		}
+
+		obj := importedPkg.Scope().Lookup(symbol)
+		if obj == nil {
+			continue
+		}
+
+		underlying := obj.Type().Underlying()
+		switch underlying.(type) {
+		case *types.Interface:
+			ctx.externalTypeKinds[importPath+"."+symbol] = "interface"
+		case *types.Struct:
+			ctx.externalTypeKinds[importPath+"."+symbol] = "struct"
+		}
+	}
+}
+
+func signatureToApiShapes(sig *types.Signature) ([]ParameterInfo, []ResultInfo, string, string) {
+	qualifier := func(pkg *types.Package) string {
+		if pkg == nil {
+			return ""
+		}
+		return pkg.Name()
+	}
+
+	params := []ParameterInfo{}
+	paramParts := []string{}
+	if sig.Params() != nil {
+		for i := 0; i < sig.Params().Len(); i++ {
+			param := sig.Params().At(i)
+			typeName := types.TypeString(param.Type(), qualifier)
+			isVariadic := sig.Variadic() && i == sig.Params().Len()-1
+			if isVariadic {
+				typeName = strings.Replace(typeName, "[]", "...", 1)
+			}
+
+			params = append(params, ParameterInfo{
+				Name:       param.Name(),
+				Type:       typeName,
+				IsVariadic: isVariadic,
+			})
+			paramParts = append(paramParts, typeName)
+		}
+	}
+
+	results := []ResultInfo{}
+	resultParts := []string{}
+	if sig.Results() != nil {
+		for i := 0; i < sig.Results().Len(); i++ {
+			result := sig.Results().At(i)
+			typeName := types.TypeString(result.Type(), qualifier)
+			results = append(results, ResultInfo{Name: result.Name(), Type: typeName})
+			resultParts = append(resultParts, typeName)
+		}
+	}
+
+	sigText := strings.Join(paramParts, ", ")
+	retText := strings.Join(resultParts, ", ")
+	return params, results, sigText, retText
+}
+
+func goMethodExists(existing []FuncApi, candidate FuncApi) bool {
+	for _, method := range existing {
+		if method.Name == candidate.Name && method.Sig == candidate.Sig && method.Ret == candidate.Ret {
+			return true
+		}
+	}
+	return false
+}
+
+func enrichExternalPackagesFromSources(ctx *engineContext) {
+	if ctx == nil || len(ctx.importMap) == 0 {
+		return
+	}
+
+	uniqueImportPaths := make(map[string]bool)
+	for _, importPath := range ctx.importMap {
+		if importPath == "" || isStdlibPackage(importPath) {
+			continue
+		}
+		uniqueImportPaths[importPath] = true
+	}
+
+	for importPath := range uniqueImportPaths {
+		dir := resolveGoPackageDir(ctx.projectRoot, importPath)
+		if dir == "" {
+			continue
+		}
+
+		enrichExternalPackageFromDir(ctx, importPath, dir)
+	}
+}
+
+func resolveGoPackageDir(projectRoot string, importPath string) string {
+	if projectRoot == "" || importPath == "" {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "list", "-f", "{{.Dir}}", importPath)
+	cmd.Dir = projectRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(out))
+}
+
+func enrichExternalPackageFromDir(ctx *engineContext, importPath string, dir string) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+		name := fi.Name()
+		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+	}, parser.ParseComments)
+	if err != nil || len(pkgs) == 0 {
+		return
+	}
+
+	for _, astPkg := range pkgs {
+		docPkg := doc.New(astPkg, dir, doc.AllDecls)
+
+		exportedStructs := make(map[string]bool)
+		exportedInterfaces := make(map[string]bool)
+
+		for _, t := range docPkg.Types {
+			if !isExported(t.Name) {
+				continue
+			}
+
+			for _, spec := range t.Decl.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok || !isExported(ts.Name.Name) {
+					continue
+				}
+
+				typeKey := importPath + "." + ts.Name.Name
+				switch typed := ts.Type.(type) {
+				case *ast.InterfaceType:
+					ctx.externalTypeKinds[typeKey] = "interface"
+					exportedInterfaces[ts.Name.Name] = true
+					ctx.externalTypeMethods[typeKey] = append(ctx.externalTypeMethods[typeKey], extractInterfaceMethods(typed)...)
+				case *ast.StructType:
+					ctx.externalTypeKinds[typeKey] = "struct"
+					exportedStructs[ts.Name.Name] = true
+				}
+			}
+		}
+
+		for _, t := range docPkg.Types {
+			if !isExported(t.Name) || !exportedStructs[t.Name] {
+				continue
+			}
+
+			typeKey := importPath + "." + t.Name
+			for _, method := range t.Methods {
+				if !isExported(method.Name) {
+					continue
+				}
+				fn := extractFuncShallow(method.Decl, method.Doc)
+				fn.IsMethod = true
+				fn.Receiver = t.Name
+				if !goMethodExists(ctx.externalTypeMethods[typeKey], fn) {
+					ctx.externalTypeMethods[typeKey] = append(ctx.externalTypeMethods[typeKey], fn)
+				}
+			}
+		}
+	}
+}
+
+func extractInterfaceMethods(it *ast.InterfaceType) []FuncApi {
+	if it == nil || it.Methods == nil {
+		return nil
+	}
+
+	methods := []FuncApi{}
+	for _, field := range it.Methods.List {
+		if len(field.Names) == 0 {
+			continue
+		}
+		for _, name := range field.Names {
+			if !isExported(name.Name) {
+				continue
+			}
+			ft, ok := field.Type.(*ast.FuncType)
+			if !ok {
+				continue
+			}
+			methods = append(methods, FuncApi{
+				Name:    name.Name,
+				Params:  extractParamInfos(ft.Params),
+				Results: engineResultInfos(ft.Results),
+				Sig:     formatParams(ft.Params),
+				Ret:     formatResults(ft.Results),
+			})
+		}
+	}
+
+	return methods
+}
+
+func extractFuncShallow(decl *ast.FuncDecl, docStr string) FuncApi {
+	f := FuncApi{
+		Name:       decl.Name.Name,
+		Params:     extractParamInfos(decl.Type.Params),
+		Results:    engineResultInfos(decl.Type.Results),
+		Sig:        formatParams(decl.Type.Params),
+		Ret:        formatResults(decl.Type.Results),
+		Doc:        firstLine(docStr),
+		TypeParams: extractTypeParams(decl.Type.TypeParams),
+	}
+	if isDeprecated, deprecatedMsg := deprecationFromDoc(f.Doc); isDeprecated {
+		f.IsDeprecated = true
+		f.DeprecatedMsg = deprecatedMsg
+	}
+
+	if decl.Recv != nil && len(decl.Recv.List) > 0 {
+		f.IsMethod = true
+		f.Receiver = formatExpr(decl.Recv.List[0].Type)
+	}
+
+	return f
+}
+
+func applyEmbeddedMethodPromotion(ctx *engineContext, api *PackageApi) {
+	if api == nil || len(api.Structs) == 0 {
+		return
+	}
+
+	structMethods := make(map[string][]FuncApi)
+	for _, st := range api.Structs {
+		promotable := make([]FuncApi, 0, len(st.Methods))
+		for _, method := range st.Methods {
+			if method.IsMethod {
+				promotable = append(promotable, method)
+			}
+		}
+		structMethods[st.Name] = promotable
+	}
+
+	interfaceMethods := make(map[string][]FuncApi)
+	for _, iface := range api.Interfaces {
+		interfaceMethods[iface.Name] = iface.Methods
+	}
+
+	for index := range api.Structs {
+		st := &api.Structs[index]
+		if len(st.Embeds) == 0 {
+			continue
+		}
+
+		existing := make(map[string]bool)
+		for _, method := range st.Methods {
+			existing[method.Name+"|"+method.Sig+"|"+method.Ret] = true
+		}
+
+		for _, embed := range st.Embeds {
+			embeddedName := normalizeEmbeddedTypeName(embed)
+			if embeddedName == "" || embeddedName == st.Name {
+				continue
+			}
+
+			if methods, ok := structMethods[embeddedName]; ok {
+				for _, method := range methods {
+					key := method.Name + "|" + method.Sig + "|" + method.Ret
+					if existing[key] {
+						continue
+					}
+					st.Methods = append(st.Methods, method)
+					existing[key] = true
+				}
+			}
+
+			if methods, ok := interfaceMethods[embeddedName]; ok {
+				for _, method := range methods {
+					key := method.Name + "|" + method.Sig + "|" + method.Ret
+					if existing[key] {
+						continue
+					}
+					st.Methods = append(st.Methods, method)
+					existing[key] = true
+				}
+			}
+
+			if ctx != nil {
+				externalKey := externalTypeLookupKey(ctx, embed)
+				if methods, ok := ctx.externalTypeMethods[externalKey]; ok {
+					for _, method := range methods {
+						key := method.Name + "|" + method.Sig + "|" + method.Ret
+						if existing[key] {
+							continue
+						}
+						st.Methods = append(st.Methods, method)
+						existing[key] = true
+					}
+				}
+			}
+		}
+	}
+}
+
+func externalTypeLookupKey(ctx *engineContext, embed string) string {
+	if ctx == nil {
+		return ""
+	}
+
+	trimmed := strings.TrimSpace(embed)
+	for strings.HasPrefix(trimmed, "*") {
+		trimmed = strings.TrimPrefix(trimmed, "*")
+	}
+
+	if idx := strings.Index(trimmed, "["); idx >= 0 {
+		trimmed = trimmed[:idx]
+	}
+
+	parts := strings.SplitN(trimmed, ".", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+
+	alias, typeName := parts[0], parts[1]
+	importPath := ctx.importMap[alias]
+	if importPath == "" {
+		return ""
+	}
+
+	return importPath + "." + typeName
+}
+
+func normalizeEmbeddedTypeName(embed string) string {
+	trimmed := strings.TrimSpace(embed)
+	for strings.HasPrefix(trimmed, "*") {
+		trimmed = strings.TrimPrefix(trimmed, "*")
+	}
+
+	if idx := strings.Index(trimmed, "["); idx >= 0 {
+		trimmed = trimmed[:idx]
+	}
+
+	if idx := strings.LastIndex(trimmed, "."); idx >= 0 {
+		trimmed = trimmed[idx+1:]
+	}
+
+	return strings.TrimSpace(trimmed)
 }
 
 func extractStruct(ctx *engineContext, t *doc.Type, st *ast.StructType) StructApi {

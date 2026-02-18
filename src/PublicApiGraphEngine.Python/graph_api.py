@@ -6,12 +6,16 @@ Outputs JSON with classes, methods, functions, and their signatures.
 
 import ast
 import collections
+import importlib
+import inspect
 import json
 import sys
 import os
 import re
+import types
 from pathlib import Path
 from typing import Any
+import typing
 
 # Try to import TOML parser (prefer stdlib tomllib in 3.11+, fallback to tomli)
 try:
@@ -1626,6 +1630,300 @@ def detect_patterns_ast(tree: ast.AST, patterns: set[str]) -> None:
             break
 
 
+def _iter_annotation_runtime_types(annotation: Any) -> list[Any]:
+    """Flatten a typing annotation into runtime type objects where possible."""
+    if annotation is inspect.Parameter.empty or annotation is None:
+        return []
+
+    if isinstance(annotation, str):
+        return []
+
+    origin = typing.get_origin(annotation)
+    if origin is not None:
+        collected: list[Any] = []
+        collected.extend(_iter_annotation_runtime_types(origin))
+        for arg in typing.get_args(annotation):
+            collected.extend(_iter_annotation_runtime_types(arg))
+        return collected
+
+    return [annotation]
+
+
+def _qualify_string_annotation(annotation: str, import_map: dict[str, str] | None = None) -> str:
+    if not import_map:
+        return annotation
+
+    def _replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        module_name = import_map.get(token)
+        if not module_name:
+            return token
+        return f"{module_name}.{token}"
+
+    return re.sub(r"\b[A-Za-z_]\w*\b", _replace, annotation)
+
+
+def _annotation_to_string(annotation: Any, import_map: dict[str, str] | None = None) -> str:
+    if annotation is inspect.Parameter.empty:
+        return "Any"
+    if isinstance(annotation, str):
+        return _qualify_string_annotation(annotation, import_map)
+
+    origin = typing.get_origin(annotation)
+    if origin is not None:
+        args = typing.get_args(annotation)
+
+        if origin in (typing.Union, types.UnionType):
+            if not args:
+                return "Any"
+            rendered = [_annotation_to_string(arg, import_map) for arg in args]
+            return " | ".join(rendered)
+
+        origin_name = _annotation_to_string(origin, import_map)
+        if args:
+            rendered_args = ", ".join(_annotation_to_string(arg, import_map) for arg in args)
+            return f"{origin_name}[{rendered_args}]"
+        return origin_name
+
+    try:
+        qualname = getattr(annotation, "__qualname__", getattr(annotation, "__name__", None))
+        if not qualname:
+            return str(annotation).replace("typing.", "")
+
+        module_name = getattr(annotation, "__module__", None)
+        if not module_name or module_name in ("builtins", "typing", "collections.abc"):
+            return qualname
+
+        return f"{module_name}.{qualname}"
+    except Exception:
+        return "Any"
+
+
+def _module_root(name: str) -> str:
+    return name.split(".")[0]
+
+
+def _build_runtime_import_map(module: Any) -> dict[str, str]:
+    """Build simple-name -> module-path map from a module's source file imports."""
+    module_file = getattr(module, "__file__", None)
+    if not module_file:
+        return {}
+
+    module_path = Path(module_file)
+    if not module_path.exists() or module_path.suffix != ".py":
+        return {}
+
+    try:
+        source = module_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+    except Exception:
+        return {}
+
+    import_map: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if not node.module or node.module == "__future__":
+                continue
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local_name = alias.asname or alias.name
+                import_map[local_name] = node.module
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                local_name = alias.asname or alias.name.split(".")[0]
+                import_map[local_name] = alias.name
+
+    return import_map
+
+
+def extract_package_inspect(import_name: str) -> dict[str, Any]:
+    module = importlib.import_module(import_name)
+    package_root = _module_root(import_name)
+    runtime_import_map = _build_runtime_import_map(module)
+
+    exported_names = getattr(module, "__all__", None)
+    if not exported_names:
+        # When __all__ is absent, filter dir(module) to only include objects that
+        # were defined in this package (not re-exported stdlib/third-party symbols).
+        exported_names = []
+        for name in dir(module):
+            if name.startswith("_"):
+                continue
+            obj = getattr(module, name, None)
+            if obj is None:
+                continue
+            obj_module = getattr(obj, "__module__", None)
+            if obj_module is not None and not obj_module.startswith(package_root):
+                continue
+            exported_names.append(name)
+
+    classes: list[dict[str, Any]] = []
+    functions: list[dict[str, Any]] = []
+    dependencies: dict[str, dict[str, Any]] = {}
+
+    def track_dependency(type_obj: Any) -> None:
+        if isinstance(type_obj, str):
+            for token in re.findall(r"\b[A-Za-z_]\w*\b", type_obj):
+                mod = runtime_import_map.get(token)
+                if not mod:
+                    continue
+                root = _module_root(mod)
+                if root in ("builtins", "typing", package_root):
+                    continue
+                if root not in dependencies:
+                    dependencies[root] = {"package": root, "classes": [], "functions": []}
+                if not any(c.get("name") == token for c in dependencies[root]["classes"]):
+                    dependencies[root]["classes"].append({"name": token})
+            return
+
+        for runtime_type in _iter_annotation_runtime_types(type_obj):
+            mod = getattr(runtime_type, "__module__", None)
+            if not mod:
+                continue
+            root = _module_root(mod)
+            if root in ("builtins", "typing", package_root):
+                continue
+            if root not in dependencies:
+                dependencies[root] = {"package": root, "classes": [], "functions": []}
+            name = getattr(runtime_type, "__name__", None)
+            if name and not any(c.get("name") == name for c in dependencies[root]["classes"]):
+                dependencies[root]["classes"].append({"name": name})
+
+    for name in exported_names:
+        try:
+            obj = getattr(module, name)
+        except Exception:
+            continue
+
+        if inspect.isclass(obj):
+            method_infos: list[dict[str, Any]] = []
+            property_infos: list[dict[str, Any]] = []
+
+            for method_name, method_obj in inspect.getmembers(obj):
+                if method_name.startswith("_"):
+                    continue
+
+                if isinstance(getattr(obj, method_name, None), property):
+                    property_infos.append({
+                        "name": method_name,
+                        "type": "Any",
+                        "doc": inspect.getdoc(method_obj),
+                    })
+                    continue
+
+                if not (inspect.isfunction(method_obj) or inspect.ismethod(method_obj) or inspect.ismethoddescriptor(method_obj)):
+                    continue
+
+                try:
+                    signature = inspect.signature(method_obj)
+                except (TypeError, ValueError):
+                    continue
+
+                try:
+                    hints = typing.get_type_hints(method_obj)
+                except Exception:
+                    hints = {}
+
+                params: list[dict[str, Any]] = []
+                for parameter in signature.parameters.values():
+                    annotation = hints.get(parameter.name, parameter.annotation)
+                    annotation_name = _annotation_to_string(annotation, runtime_import_map)
+                    track_dependency(annotation)
+                    default = None
+                    if parameter.default is not inspect.Parameter.empty:
+                        default = repr(parameter.default)
+                    params.append({
+                        "name": parameter.name,
+                        "type": annotation_name,
+                        "default": default,
+                        "kind": str(parameter.kind).split(".")[-1].lower(),
+                    })
+
+                return_annotation = hints.get("return", signature.return_annotation)
+                track_dependency(return_annotation)
+                return_type = _annotation_to_string(return_annotation, runtime_import_map)
+                param_sig = ", ".join(f"{p['name']}: {p['type']}" for p in params)
+                method_infos.append({
+                    "name": method_name,
+                    "sig": f"{method_name}({param_sig}) -> {return_type}",
+                    "params": params,
+                    "doc": inspect.getdoc(method_obj),
+                    "ret": return_type,
+                    "async": inspect.iscoroutinefunction(method_obj),
+                })
+
+            base = None
+            if obj.__base__ and obj.__base__ is not object:
+                base = f"{obj.__base__.__module__}.{obj.__base__.__name__}" if getattr(obj.__base__, "__module__", None) else obj.__base__.__name__
+                track_dependency(obj.__base__)
+
+            classes.append({
+                "name": name,
+                "base": base,
+                "doc": inspect.getdoc(obj),
+                "methods": method_infos,
+                "properties": property_infos,
+                "entryPoint": True,
+            })
+        elif inspect.isfunction(obj):
+            try:
+                signature = inspect.signature(obj)
+            except (TypeError, ValueError):
+                continue
+
+            try:
+                hints = typing.get_type_hints(obj)
+            except Exception:
+                hints = {}
+
+            func_params: list[dict[str, Any]] = []
+            for parameter in signature.parameters.values():
+                annotation = hints.get(parameter.name, parameter.annotation)
+                track_dependency(annotation)
+                annotation_name = _annotation_to_string(annotation, runtime_import_map)
+                default = None
+                if parameter.default is not inspect.Parameter.empty:
+                    default = repr(parameter.default)
+                func_params.append({
+                    "name": parameter.name,
+                    "type": annotation_name,
+                    "default": default,
+                    "kind": str(parameter.kind).split(".")[-1].lower(),
+                })
+
+            return_annotation = hints.get("return", signature.return_annotation)
+            track_dependency(return_annotation)
+            return_type = _annotation_to_string(return_annotation, runtime_import_map)
+            param_sig = ", ".join(f"{p['name']}: {p['type']}" for p in func_params)
+            functions.append({
+                "name": name,
+                "sig": f"{name}({param_sig}) -> {return_type}",
+                "params": func_params,
+                "doc": inspect.getdoc(obj),
+                "ret": return_type,
+                "async": inspect.iscoroutinefunction(obj),
+                "entryPoint": True,
+            })
+
+    dependencies_list = list(dependencies.values())
+    for dep in dependencies_list:
+        if not dep["classes"]:
+            dep.pop("classes", None)
+        if not dep["functions"]:
+            dep.pop("functions", None)
+
+    return {
+        "package": import_name,
+        "modules": [{
+            "name": import_name,
+            "classes": classes,
+            "functions": functions,
+        }],
+        "dependencies": dependencies_list if dependencies_list else None,
+    }
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python graph_api.py <path> [--json] [--stub] [--usage <api_json> <samples_path>]", file=sys.stderr)
@@ -1652,11 +1950,32 @@ if __name__ == "__main__":
         print(json.dumps(usage, indent=2))
         sys.exit(0)
 
+    mode = "ast"
+    import_name = None
+    if "--mode" in sys.argv:
+        mode_idx = sys.argv.index("--mode")
+        if len(sys.argv) > mode_idx + 1:
+            mode = sys.argv[mode_idx + 1].strip().lower()
+    if "--import-name" in sys.argv:
+        import_name_idx = sys.argv.index("--import-name")
+        if len(sys.argv) > import_name_idx + 1:
+            import_name = sys.argv[import_name_idx + 1].strip()
+
     root = Path(sys.argv[1]).resolve()
     output_json = "--json" in sys.argv
     output_stub = "--stub" in sys.argv or not output_json
 
-    api = extract_package(root)
+    if mode == "inspect":
+        if not import_name:
+            print("--mode inspect requires --import-name <package>", file=sys.stderr)
+            sys.exit(1)
+        try:
+            api = extract_package_inspect(import_name)
+        except Exception as ex:
+            print(f"inspect mode failed: {ex}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        api = extract_package(root)
 
     if output_json:
         print(json.dumps(api, indent=2))

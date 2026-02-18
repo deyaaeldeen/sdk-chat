@@ -27,7 +27,7 @@ public partial class CSharpPublicApiGraphEngine
     private static volatile IReadOnlyList<MetadataReference>? s_cachedMetadataReferences;
 
     /// <summary>
-    /// Returns the metadata references loaded during the last <see cref="GraphAsync(string, CrossLanguageMap?, CancellationToken)"/> call,
+    /// Returns the metadata references loaded during the last <see cref="GraphAsync(EngineInput, CrossLanguageMap?, CancellationToken)"/> call,
     /// or <c>null</c> if engine has not run yet. Includes runtime assemblies and NuGet
     /// package DLLs, giving the usage analyzer full type resolution for SDK types.
     /// </summary>

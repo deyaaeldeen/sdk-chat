@@ -72,6 +72,7 @@ public static class ProcessSandbox
         string fileName,
         IEnumerable<string>? arguments = null,
         string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environmentVariables = null,
         TimeSpan? timeout = null,
         string? stdinData = null,
         CancellationToken cancellationToken = default)
@@ -98,6 +99,14 @@ public static class ProcessSandbox
         if (!string.IsNullOrEmpty(workingDirectory))
         {
             psi.WorkingDirectory = workingDirectory;
+        }
+
+        if (environmentVariables is not null)
+        {
+            foreach (var (key, value) in environmentVariables)
+            {
+                psi.Environment[key] = value;
+            }
         }
 
         // Use ArgumentList for proper escaping - prevents injection
@@ -263,6 +272,7 @@ public static class ProcessSandbox
         string fileName,
         IEnumerable<string>? arguments = null,
         string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environmentVariables = null,
         TimeSpan? timeout = null,
         string? stdinData = null,
         CancellationToken cancellationToken = default)
@@ -287,6 +297,14 @@ public static class ProcessSandbox
         if (!string.IsNullOrEmpty(workingDirectory))
         {
             psi.WorkingDirectory = workingDirectory;
+        }
+
+        if (environmentVariables is not null)
+        {
+            foreach (var (key, value) in environmentVariables)
+            {
+                psi.Environment[key] = value;
+            }
         }
 
         if (arguments is not null)

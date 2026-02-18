@@ -3,7 +3,9 @@
 
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 using PublicApiGraphEngine.Contracts;
@@ -51,11 +53,11 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
     public string ToStubs(ApiIndex index) => CSharpFormatter.Format(index);
 
     /// <inheritdoc />
-    async Task<EngineResult<ApiIndex>> IPublicApiGraphEngine<ApiIndex>.GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
+    async Task<EngineResult<ApiIndex>> IPublicApiGraphEngine<ApiIndex>.GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         try
         {
-            var result = await GraphAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+            var result = await GraphAsync(input, crossLanguageMap, ct).ConfigureAwait(false);
             return EngineResult<ApiIndex>.CreateSuccess(result, result.Diagnostics);
         }
         catch (Exception ex)
@@ -65,11 +67,26 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
     }
 
     public Task<ApiIndex> GraphAsync(string rootPath, CancellationToken ct = default)
-        => GraphAsync(rootPath, null, ct);
+        => GraphAsync(new EngineInput.SourceDirectory(rootPath), null, ct);
 
-    public async Task<ApiIndex> GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
+    public Task<ApiIndex> GraphAsync(EngineInput input, CancellationToken ct = default)
+        => GraphAsync(input, null, ct);
+
+    public async Task<ApiIndex> GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
     {
-        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
+        string? csprojPath = input is EngineInput.DotNetProject dotNetProject ? dotNetProject.CsprojPath : null;
+        var rootPath = ProcessSandbox.ValidateRootPath(csprojPath is not null
+            ? (Path.GetDirectoryName(csprojPath) ?? csprojPath)
+            : input.RootDirectory);
+        List<ApiDiagnostic> engineInputDiagnostics = [];
+
+        if (!string.IsNullOrWhiteSpace(csprojPath))
+        {
+            var compiled = await TryGraphFromCompiledArtifactsAsync(csprojPath, crossLanguageMap, engineInputDiagnostics, ct).ConfigureAwait(false);
+            if (compiled is not null)
+                return compiled;
+        }
+
         var files = Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories)
             .Where(f =>
             {
@@ -155,7 +172,7 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
             apiIndex = ApplyCrossLanguageIds(apiIndex, crossLanguageMap);
         }
 
-        var diagnostics = ApiDiagnosticsPostProcessor.Build(apiIndex);
+        var diagnostics = ApiDiagnosticsPostProcessor.Build(apiIndex, engineInputDiagnostics);
         return apiIndex with { Diagnostics = diagnostics };
     }
 
@@ -905,6 +922,422 @@ public partial class CSharpPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex
         var csproj = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault()
                   ?? Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
         return csproj != null ? Path.GetFileNameWithoutExtension(csproj) : Path.GetFileName(rootPath);
+    }
+
+    private async Task<ApiIndex?> TryGraphFromCompiledArtifactsAsync(
+        string csprojPath,
+        CrossLanguageMap? crossLanguageMap,
+        List<ApiDiagnostic> diagnostics,
+        CancellationToken ct)
+    {
+        if (!File.Exists(csprojPath))
+        {
+            diagnostics.Add(new ApiDiagnostic
+            {
+                Id = "ENGINE_INPUT",
+                Level = DiagnosticLevel.Warning,
+                Text = $"C# artifact mode requested, but csproj file was not found: {csprojPath}. Falling back to source analysis."
+            });
+            return null;
+        }
+
+        var targetDll = await ResolveTargetDllPathAsync(csprojPath, ct).ConfigureAwait(false);
+        if (targetDll is null)
+        {
+            diagnostics.Add(new ApiDiagnostic
+            {
+                Id = "ENGINE_INPUT",
+                Level = DiagnosticLevel.Warning,
+                Text = $"Failed to resolve C# build output from '{csprojPath}'. Falling back to source analysis."
+            });
+            return null;
+        }
+
+        if (!File.Exists(targetDll))
+        {
+            diagnostics.Add(new ApiDiagnostic
+            {
+                Id = "ENGINE_INPUT",
+                Level = DiagnosticLevel.Warning,
+                Text = $"Resolved DLL does not exist: {targetDll}. Falling back to source analysis. Run: dotnet build {csprojPath}"
+            });
+            return null;
+        }
+
+        var (compilation, targetReference) = CreateMetadataCompilation(targetDll);
+        var assembly = compilation.GetAssemblyOrModuleSymbol(targetReference) as IAssemblySymbol;
+        if (assembly is null)
+        {
+            diagnostics.Add(new ApiDiagnostic
+            {
+                Id = "ENGINE_INPUT",
+                Level = DiagnosticLevel.Warning,
+                Text = $"Failed to load assembly metadata from '{targetDll}'. Falling back to source analysis."
+            });
+            return null;
+        }
+
+        Dictionary<string, List<TypeInfo>> typesByNamespace = new(StringComparer.Ordinal);
+        Dictionary<string, Dictionary<string, ITypeSymbol>> dependencyTypes = new(StringComparer.Ordinal);
+
+        WalkNamespace(assembly.GlobalNamespace, assembly, typesByNamespace, dependencyTypes);
+
+        var namespaces = typesByNamespace
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => new NamespaceInfo
+            {
+                Name = pair.Key,
+                Types = pair.Value.OrderBy(type => type.Name, StringComparer.Ordinal).ToList()
+            })
+            .ToList();
+
+        var dependencies = BuildDependenciesFromSymbols(dependencyTypes);
+        var packageName = Path.GetFileNameWithoutExtension(csprojPath);
+
+        var apiIndex = new ApiIndex
+        {
+            Package = packageName,
+            Namespaces = namespaces,
+            Dependencies = dependencies,
+        };
+
+        if (crossLanguageMap is not null)
+        {
+            apiIndex = ApplyCrossLanguageIds(apiIndex, crossLanguageMap);
+        }
+
+        diagnostics.Add(new ApiDiagnostic
+        {
+            Id = "ENGINE_INPUT",
+            Level = DiagnosticLevel.Info,
+            Text = $"Using compiled artifacts: DLL at {targetDll}"
+        });
+
+        var postProcessed = ApiDiagnosticsPostProcessor.Build(apiIndex, diagnostics);
+        return apiIndex with { Diagnostics = postProcessed };
+    }
+
+    private static async Task<string?> ResolveTargetDllPathAsync(string csprojPath, CancellationToken ct)
+    {
+        var msbuildResult = await ProcessSandbox.ExecuteAsync(
+            "dotnet",
+            ["msbuild", csprojPath, "-getProperty:TargetPath", "-target:GetTargetPath"],
+            timeout: TimeSpan.FromSeconds(30),
+            cancellationToken: ct).ConfigureAwait(false);
+
+        if (!msbuildResult.Success)
+            return null;
+
+        var firstLine = msbuildResult.StandardOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.EndsWith(".dll", StringComparison.OrdinalIgnoreCase));
+
+        return string.IsNullOrWhiteSpace(firstLine) ? null : firstLine;
+    }
+
+    private static (CSharpCompilation Compilation, MetadataReference TargetReference) CreateMetadataCompilation(string targetDllPath)
+    {
+        var projectRoot = Path.GetDirectoryName(targetDllPath) ?? AppContext.BaseDirectory;
+        var references = LoadMetadataReferences(projectRoot).ToList();
+        var targetReference = MetadataReference.CreateFromFile(targetDllPath);
+        references.Add(targetReference);
+
+        var compilation = CSharpCompilation.Create(
+            Path.GetFileNameWithoutExtension(targetDllPath),
+            syntaxTrees: [],
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                .WithNullableContextOptions(NullableContextOptions.Enable));
+
+        return (compilation, targetReference);
+    }
+
+    private static void WalkNamespace(
+        INamespaceSymbol namespaceSymbol,
+        IAssemblySymbol rootAssembly,
+        Dictionary<string, List<TypeInfo>> typesByNamespace,
+        Dictionary<string, Dictionary<string, ITypeSymbol>> dependencyTypes)
+    {
+        foreach (var childNamespace in namespaceSymbol.GetNamespaceMembers())
+        {
+            WalkNamespace(childNamespace, rootAssembly, typesByNamespace, dependencyTypes);
+        }
+
+        foreach (var type in namespaceSymbol.GetTypeMembers())
+        {
+            CollectType(type, rootAssembly, typesByNamespace, dependencyTypes);
+        }
+    }
+
+    private static void CollectType(
+        INamedTypeSymbol typeSymbol,
+        IAssemblySymbol rootAssembly,
+        Dictionary<string, List<TypeInfo>> typesByNamespace,
+        Dictionary<string, Dictionary<string, ITypeSymbol>> dependencyTypes)
+    {
+        if (typeSymbol.DeclaredAccessibility != Accessibility.Public)
+            return;
+
+        var namespaceName = typeSymbol.ContainingNamespace?.IsGlobalNamespace == false
+            ? typeSymbol.ContainingNamespace.ToDisplayString()
+            : "";
+
+        var typeName = typeSymbol.Name + (typeSymbol.TypeParameters.Length > 0
+            ? $"<{string.Join(",", typeSymbol.TypeParameters.Select(parameter => parameter.Name))}>"
+            : "");
+
+        var typeId = BuildTypeId(namespaceName, typeName);
+        var members = CollectMembers(typeSymbol, rootAssembly, dependencyTypes, typeId);
+        var enumValues = typeSymbol.TypeKind == TypeKind.Enum
+            ? typeSymbol.GetMembers().OfType<IFieldSymbol>().Where(field => field.HasConstantValue && !field.IsImplicitlyDeclared).Select(field => field.Name).ToList()
+            : null;
+
+        var typeInfo = new TypeInfo
+        {
+            Name = typeName,
+            Id = typeId,
+            Kind = GetTypeKindFromSymbol(typeSymbol),
+            Base = typeSymbol.BaseType is null || typeSymbol.BaseType.SpecialType == SpecialType.System_Object
+                ? null
+                : typeSymbol.BaseType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+            Interfaces = typeSymbol.Interfaces.Length == 0
+                ? null
+                : typeSymbol.Interfaces.Select(iface => iface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)).OrderBy(name => name, StringComparer.Ordinal).ToList(),
+            Doc = ExtractSummaryFromDocXml(typeSymbol.GetDocumentationCommentXml()),
+            IsDeprecated = HasObsoleteAttribute(typeSymbol) ? true : null,
+            Members = members.Count == 0 ? null : members,
+            Values = enumValues is { Count: > 0 } ? enumValues : null,
+        };
+
+        if (!typesByNamespace.TryGetValue(namespaceName, out var typeList))
+        {
+            typeList = [];
+            typesByNamespace[namespaceName] = typeList;
+        }
+
+        typeList.Add(typeInfo);
+
+        foreach (var nested in typeSymbol.GetTypeMembers())
+        {
+            CollectType(nested, rootAssembly, typesByNamespace, dependencyTypes);
+        }
+    }
+
+    private static List<MemberInfo> CollectMembers(
+        INamedTypeSymbol typeSymbol,
+        IAssemblySymbol rootAssembly,
+        Dictionary<string, Dictionary<string, ITypeSymbol>> dependencyTypes,
+        string typeId)
+    {
+        List<MemberInfo> members = [];
+
+        foreach (var symbol in typeSymbol.GetMembers())
+        {
+            if (symbol.DeclaredAccessibility != Accessibility.Public || symbol.IsImplicitlyDeclared)
+                continue;
+
+            switch (symbol)
+            {
+                case IMethodSymbol method when method.MethodKind == MethodKind.Constructor:
+                    members.Add(new MemberInfo
+                    {
+                        Name = method.ContainingType.Name,
+                        Kind = "ctor",
+                        Signature = $"({FormatMethodParameters(method)})",
+                        Params = CreateParameters(method.Parameters),
+                        Doc = ExtractSummaryFromDocXml(method.GetDocumentationCommentXml()),
+                        Id = $"{typeId}.{method.ContainingType.Name}",
+                        IsDeprecated = HasObsoleteAttribute(method) ? true : null,
+                    });
+                    TrackDependencies(method, rootAssembly, dependencyTypes);
+                    break;
+
+                case IMethodSymbol method when method.MethodKind == MethodKind.Ordinary:
+                    members.Add(new MemberInfo
+                    {
+                        Name = method.Name,
+                        Kind = "method",
+                        Signature = $"{method.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {method.Name}({FormatMethodParameters(method)})",
+                        Params = CreateParameters(method.Parameters),
+                        Results = [new ResultInfo { Type = method.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) }],
+                        Doc = ExtractSummaryFromDocXml(method.GetDocumentationCommentXml()),
+                        IsStatic = method.IsStatic ? true : null,
+                        IsAsync = IsAsyncReturnType(method.ReturnType) ? true : null,
+                        Id = $"{typeId}.{method.Name}",
+                        IsDeprecated = HasObsoleteAttribute(method) ? true : null,
+                    });
+                    TrackDependencies(method, rootAssembly, dependencyTypes);
+                    break;
+
+                case IPropertySymbol property:
+                    members.Add(new MemberInfo
+                    {
+                        Name = property.Name,
+                        Kind = "property",
+                        Signature = $"{property.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {property.Name}",
+                        Doc = ExtractSummaryFromDocXml(property.GetDocumentationCommentXml()),
+                        IsStatic = property.IsStatic ? true : null,
+                        Id = $"{typeId}.{property.Name}",
+                        IsDeprecated = HasObsoleteAttribute(property) ? true : null,
+                    });
+                    TrackTypeDependency(property.Type, rootAssembly, dependencyTypes);
+                    break;
+
+                case IFieldSymbol field:
+                    members.Add(new MemberInfo
+                    {
+                        Name = field.Name,
+                        Kind = field.IsConst ? "const" : "field",
+                        Signature = $"{field.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {field.Name}",
+                        Doc = ExtractSummaryFromDocXml(field.GetDocumentationCommentXml()),
+                        IsStatic = field.IsStatic ? true : null,
+                        Id = $"{typeId}.{field.Name}",
+                        IsDeprecated = HasObsoleteAttribute(field) ? true : null,
+                    });
+                    TrackTypeDependency(field.Type, rootAssembly, dependencyTypes);
+                    break;
+
+                case IEventSymbol eventSymbol:
+                    members.Add(new MemberInfo
+                    {
+                        Name = eventSymbol.Name,
+                        Kind = "event",
+                        Signature = $"event {eventSymbol.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {eventSymbol.Name}",
+                        Doc = ExtractSummaryFromDocXml(eventSymbol.GetDocumentationCommentXml()),
+                        Id = $"{typeId}.{eventSymbol.Name}",
+                        IsDeprecated = HasObsoleteAttribute(eventSymbol) ? true : null,
+                    });
+                    TrackTypeDependency(eventSymbol.Type, rootAssembly, dependencyTypes);
+                    break;
+            }
+        }
+
+        return members;
+    }
+
+    private static IReadOnlyList<ParameterInfo>? CreateParameters(ImmutableArray<IParameterSymbol> parameters)
+    {
+        if (parameters.Length == 0)
+            return null;
+
+        return parameters.Select(parameter => new ParameterInfo
+        {
+            Name = parameter.Name,
+            Type = parameter.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+            Default = parameter.HasExplicitDefaultValue ? parameter.ExplicitDefaultValue?.ToString() : null,
+            Modifier = parameter.RefKind switch
+            {
+                RefKind.In => "in",
+                RefKind.Out => "out",
+                RefKind.Ref => "ref",
+                _ => null
+            }
+        }).ToList();
+    }
+
+    private static string FormatMethodParameters(IMethodSymbol method)
+        => string.Join(", ", method.Parameters.Select(parameter =>
+            $"{parameter.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {parameter.Name}"));
+
+    private static bool IsAsyncReturnType(ITypeSymbol returnType)
+    {
+        var displayName = returnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        return displayName.StartsWith("global::System.Threading.Tasks.Task", StringComparison.Ordinal)
+            || displayName.StartsWith("global::System.Threading.Tasks.ValueTask", StringComparison.Ordinal)
+            || displayName.StartsWith("global::System.Collections.Generic.IAsyncEnumerable", StringComparison.Ordinal);
+    }
+
+    private static bool HasObsoleteAttribute(ISymbol symbol)
+        => symbol.GetAttributes().Any(attribute =>
+            attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                == "global::System.ObsoleteAttribute");
+
+    private static string? ExtractSummaryFromDocXml(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+            return null;
+
+        var start = xml.IndexOf("<summary>", StringComparison.OrdinalIgnoreCase);
+        var end = xml.IndexOf("</summary>", StringComparison.OrdinalIgnoreCase);
+        if (start < 0 || end < 0 || end <= start)
+            return null;
+
+        var content = xml[(start + "<summary>".Length)..end];
+        content = XmlTagPattern().Replace(content, " ").Trim();
+        content = string.Join(" ", content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return string.IsNullOrWhiteSpace(content) ? null : content.Length > 150 ? content[..147] + "..." : content;
+    }
+
+    [GeneratedRegex("<.*?>", RegexOptions.None)]
+    private static partial Regex XmlTagPattern();
+
+    private static void TrackDependencies(
+        IMethodSymbol method,
+        IAssemblySymbol rootAssembly,
+        Dictionary<string, Dictionary<string, ITypeSymbol>> dependencyTypes)
+    {
+        TrackTypeDependency(method.ReturnType, rootAssembly, dependencyTypes);
+        foreach (var parameter in method.Parameters)
+        {
+            TrackTypeDependency(parameter.Type, rootAssembly, dependencyTypes);
+        }
+    }
+
+    private static void TrackTypeDependency(
+        ITypeSymbol typeSymbol,
+        IAssemblySymbol rootAssembly,
+        Dictionary<string, Dictionary<string, ITypeSymbol>> dependencyTypes)
+    {
+        if (typeSymbol is INamedTypeSymbol namedType && namedType.TypeArguments.Length > 0)
+        {
+            foreach (var typeArgument in namedType.TypeArguments)
+            {
+                TrackTypeDependency(typeArgument, rootAssembly, dependencyTypes);
+            }
+        }
+
+        if (typeSymbol.TypeKind == TypeKind.Array && typeSymbol is IArrayTypeSymbol arrayType)
+        {
+            TrackTypeDependency(arrayType.ElementType, rootAssembly, dependencyTypes);
+            return;
+        }
+
+        var assemblyName = typeSymbol.ContainingAssembly?.Name;
+        if (string.IsNullOrWhiteSpace(assemblyName) || assemblyName == rootAssembly.Name)
+            return;
+
+        if (!dependencyTypes.TryGetValue(assemblyName, out var assemblyTypes))
+        {
+            assemblyTypes = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal);
+            dependencyTypes[assemblyName] = assemblyTypes;
+        }
+
+        var displayName = typeSymbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        assemblyTypes.TryAdd(displayName, typeSymbol);
+    }
+
+    private static IReadOnlyList<DependencyInfo>? BuildDependenciesFromSymbols(
+        Dictionary<string, Dictionary<string, ITypeSymbol>> dependencyTypes)
+    {
+        if (dependencyTypes.Count == 0)
+            return null;
+
+        return dependencyTypes
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => new DependencyInfo
+            {
+                Package = pair.Key,
+                IsStdlib = IsSystemAssembly(pair.Key),
+                Types = pair.Value
+                    .OrderBy(typePair => typePair.Key, StringComparer.Ordinal)
+                    .Select(typePair => new TypeInfo
+                    {
+                        Name = typePair.Key,
+                        Kind = GetTypeKindFromSymbol(typePair.Value),
+                        ReExportedFrom = pair.Key,
+                    }).ToList()
+            })
+            .ToList();
     }
 
     /// <summary>

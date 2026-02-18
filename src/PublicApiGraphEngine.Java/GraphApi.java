@@ -1,6 +1,8 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //DEPS com.github.javaparser:javaparser-core:3.26.3
 //DEPS com.google.code.gson:gson:2.10.1
+//DEPS org.ow2.asm:asm:9.7
+//DEPS org.ow2.asm:asm-util:9.7
 //NATIVE_OPTIONS -O3 --no-fallback --initialize-at-build-time=com.github.javaparser,GraphApi --initialize-at-run-time=
 
 import com.github.javaparser.*;
@@ -13,7 +15,17 @@ import com.github.javaparser.ast.comments.*;
 import com.github.javaparser.ast.visitor.*;
 import com.github.javaparser.ast.nodeTypes.*;
 import com.google.gson.*;
+import org.objectweb.asm.AnnotationVisitor;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.FieldVisitor;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.signature.SignatureReader;
+import org.objectweb.asm.signature.SignatureVisitor;
+import org.objectweb.asm.util.TraceSignatureVisitor;
 import java.io.*;
+import java.lang.reflect.Modifier;
 import java.net.URI;
 import java.nio.file.*;
 import java.util.*;
@@ -25,7 +37,7 @@ public class GraphApi {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
-            System.err.println("Usage: jbang GraphApi.java <path> [--json] [--stub] [--pretty]");
+            System.err.println("Usage: jbang GraphApi.java <path> [--json] [--stub] [--pretty] [--mode <source|compiled>] [--classes-dir <path>]");
             System.err.println("       jbang GraphApi.java --usage <api_json_file> <samples_path>");
             System.exit(1);
         }
@@ -44,14 +56,559 @@ public class GraphApi {
         boolean outputJson = Arrays.asList(args).contains("--json");
         boolean outputStub = Arrays.asList(args).contains("--stub") || !outputJson;
         boolean pretty = Arrays.asList(args).contains("--pretty");
+        String mode = getArgValue(args, "--mode", "source");
+        String classesDirValue = getArgValue(args, "--classes-dir", null);
 
-        Map<String, Object> api = extractPackage(root);
+        Map<String, Object> api;
+        if ("compiled".equalsIgnoreCase(mode)) {
+            if (classesDirValue == null || classesDirValue.isBlank()) {
+                throw new IllegalArgumentException("--mode compiled requires --classes-dir <path>");
+            }
+            Path classesDir = Paths.get(classesDirValue).toAbsolutePath();
+            api = extractPackageFromClasses(root, classesDir);
+        } else {
+            api = extractPackage(root);
+        }
 
         if (outputJson) {
             System.out.println(pretty ? prettyGson.toJson(api) : gson.toJson(api));
         } else {
             System.out.println(formatStubs(api));
         }
+    }
+
+    private static String getArgValue(String[] args, String key, String defaultValue) {
+        for (int i = 0; i < args.length - 1; i++) {
+            if (args[i].equals(key)) {
+                return args[i + 1];
+            }
+        }
+        return defaultValue;
+    }
+
+    static Map<String, Object> extractPackageFromClasses(Path root, Path classesDir) throws Exception {
+        if (!Files.isDirectory(classesDir)) {
+            throw new IllegalArgumentException("Classes directory not found: " + classesDir);
+        }
+
+        String packageName = detectPackageName(root);
+
+        Map<String, Map<String, Object>> packageMap = new TreeMap<>();
+
+        List<Path> classFiles;
+        try (var stream = Files.walk(classesDir)) {
+            classFiles = stream
+                .filter(p -> p.toString().endsWith(".class"))
+                .filter(p -> !p.getFileName().toString().equals("module-info.class"))
+                .collect(Collectors.toList());
+        }
+
+        for (Path classFile : classFiles) {
+            byte[] bytes;
+            try {
+                bytes = Files.readAllBytes(classFile);
+            } catch (IOException ex) {
+                continue;
+            }
+
+            CompiledClassInfo clazz = readCompiledClass(bytes);
+            if (clazz == null || !clazz.isPublic) {
+                continue;
+            }
+
+            // Skip anonymous and synthetic inner classes (e.g. Foo$1, Foo$2)
+            // whose simple name is purely numeric after stripping outer class prefix.
+            if (clazz.simpleName.isEmpty() || Character.isDigit(clazz.simpleName.charAt(0))) {
+                continue;
+            }
+
+            String pkg = clazz.packageName;
+            packageMap.computeIfAbsent(pkg, k -> {
+                Map<String, Object> pkgInfo = new LinkedHashMap<>();
+                pkgInfo.put("name", k);
+                pkgInfo.put("classes", new ArrayList<Map<String, Object>>());
+                pkgInfo.put("interfaces", new ArrayList<Map<String, Object>>());
+                pkgInfo.put("enums", new ArrayList<Map<String, Object>>());
+                pkgInfo.put("annotations", new ArrayList<Map<String, Object>>());
+                return pkgInfo;
+            });
+
+            Map<String, Object> typeInfo = new LinkedHashMap<>();
+            typeInfo.put("name", clazz.simpleName);
+
+            if (clazz.superName != null && !clazz.superName.equals("Object") && clazz.kind == CompiledClassKind.CLASS) {
+                typeInfo.put("extends", clazz.superName);
+            }
+
+            if (!clazz.interfaces.isEmpty()) {
+                typeInfo.put("implements", clazz.interfaces);
+            }
+
+            if (!clazz.constructors.isEmpty()) typeInfo.put("constructors", clazz.constructors);
+            if (!clazz.methods.isEmpty()) typeInfo.put("methods", clazz.methods);
+            if (!clazz.fields.isEmpty()) typeInfo.put("fields", clazz.fields);
+            if (clazz.deprecated) typeInfo.put("deprecated", true);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> pkgInfo = packageMap.get(pkg);
+
+            if (clazz.kind == CompiledClassKind.ANNOTATION) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> list = (List<Map<String, Object>>) pkgInfo.get("annotations");
+                list.add(typeInfo);
+            } else if (clazz.kind == CompiledClassKind.ENUM) {
+                if (!clazz.enumValues.isEmpty()) {
+                    typeInfo.put("values", clazz.enumValues);
+                }
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> list = (List<Map<String, Object>>) pkgInfo.get("enums");
+                list.add(typeInfo);
+            } else if (clazz.kind == CompiledClassKind.INTERFACE) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> list = (List<Map<String, Object>>) pkgInfo.get("interfaces");
+                list.add(typeInfo);
+            } else {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> list = (List<Map<String, Object>>) pkgInfo.get("classes");
+                list.add(typeInfo);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("package", packageName);
+        result.put("packages", new ArrayList<>(packageMap.values()));
+        return result;
+    }
+
+    private enum CompiledClassKind {
+        CLASS,
+        INTERFACE,
+        ENUM,
+        ANNOTATION
+    }
+
+    private static final class CompiledClassInfo {
+        String packageName = "";
+        String simpleName = "";
+        String superName;
+        boolean isPublic;
+        boolean deprecated;
+        CompiledClassKind kind = CompiledClassKind.CLASS;
+        List<String> interfaces = new ArrayList<>();
+        List<String> enumValues = new ArrayList<>();
+        List<Map<String, Object>> constructors = new ArrayList<>();
+        List<Map<String, Object>> methods = new ArrayList<>();
+        List<Map<String, Object>> fields = new ArrayList<>();
+    }
+
+    private static final class MethodSignatureData {
+        List<String> parameterTypes = new ArrayList<>();
+        String returnType;
+    }
+
+    private static final class ClassSignatureData {
+        String superType;
+        List<String> interfaces = new ArrayList<>();
+    }
+
+    private static CompiledClassInfo readCompiledClass(byte[] bytes) {
+        CompiledClassInfo info = new CompiledClassInfo();
+
+        ClassReader reader;
+        try {
+            reader = new ClassReader(bytes);
+        } catch (Exception ex) {
+            return null;
+        }
+
+        reader.accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+                info.isPublic = (access & Opcodes.ACC_PUBLIC) != 0;
+                info.deprecated = (access & Opcodes.ACC_DEPRECATED) != 0;
+
+                String className = internalNameToTypeName(name);
+                info.packageName = packageOf(className);
+                info.simpleName = simpleNameOf(className);
+
+                if ((access & Opcodes.ACC_ANNOTATION) != 0) {
+                    info.kind = CompiledClassKind.ANNOTATION;
+                } else if ((access & Opcodes.ACC_ENUM) != 0) {
+                    info.kind = CompiledClassKind.ENUM;
+                } else if ((access & Opcodes.ACC_INTERFACE) != 0) {
+                    info.kind = CompiledClassKind.INTERFACE;
+                } else {
+                    info.kind = CompiledClassKind.CLASS;
+                }
+
+                if (superName != null) {
+                    info.superName = internalNameToTypeName(superName);
+                }
+
+                if (interfaces != null) {
+                    for (String iface : interfaces) {
+                        info.interfaces.add(internalNameToTypeName(iface));
+                    }
+                }
+
+                if (signature != null && !signature.isBlank()) {
+                    ClassSignatureData classSig = parseClassSignature(signature);
+                    if (classSig != null) {
+                        if (classSig.superType != null && !classSig.superType.isBlank()) {
+                            info.superName = classSig.superType;
+                        }
+                        if (!classSig.interfaces.isEmpty()) {
+                            info.interfaces = classSig.interfaces;
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                if ("Ljava/lang/Deprecated;".equals(descriptor)) {
+                    info.deprecated = true;
+                }
+                return null;
+            }
+
+            @Override
+            public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
+                if ((access & Opcodes.ACC_PUBLIC) == 0 || (access & Opcodes.ACC_SYNTHETIC) != 0) {
+                    return null;
+                }
+
+                if ((access & Opcodes.ACC_ENUM) != 0 && info.kind == CompiledClassKind.ENUM) {
+                    info.enumValues.add(name);
+                    return null;
+                }
+
+                Map<String, Object> fieldInfo = new LinkedHashMap<>();
+                fieldInfo.put("name", name);
+                String fieldType = signatureToReadableType(signature);
+                if (fieldType == null || fieldType.isBlank()) {
+                    fieldType = descriptorToTypeName(descriptor);
+                }
+                fieldInfo.put("type", fieldType);
+                if ((access & Opcodes.ACC_STATIC) != 0) {
+                    fieldInfo.put("static", true);
+                }
+
+                final boolean[] deprecated = new boolean[] { (access & Opcodes.ACC_DEPRECATED) != 0 };
+                info.fields.add(fieldInfo);
+
+                return new FieldVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if ("Ljava/lang/Deprecated;".equals(annotationDescriptor)) {
+                            deprecated[0] = true;
+                        }
+                        return null;
+                    }
+
+                    @Override
+                    public void visitEnd() {
+                        if (deprecated[0]) {
+                            fieldInfo.put("deprecated", true);
+                        }
+                    }
+                };
+            }
+
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+                if ((access & Opcodes.ACC_PUBLIC) == 0 || (access & Opcodes.ACC_SYNTHETIC) != 0 || (access & Opcodes.ACC_BRIDGE) != 0) {
+                    return null;
+                }
+
+                if ("<clinit>".equals(name)) {
+                    return null;
+                }
+
+                org.objectweb.asm.Type[] descriptorParamTypes = org.objectweb.asm.Type.getArgumentTypes(descriptor);
+                List<String> parameterTypeNames = Arrays.stream(descriptorParamTypes)
+                    .map(GraphApi::asmTypeToReadable)
+                    .collect(Collectors.toList());
+
+                String returnTypeName = asmTypeToReadable(org.objectweb.asm.Type.getReturnType(descriptor));
+
+                if (signature != null && !signature.isBlank()) {
+                    MethodSignatureData methodSig = parseMethodSignature(signature);
+                    if (methodSig != null) {
+                        if (!methodSig.parameterTypes.isEmpty()) {
+                            parameterTypeNames = methodSig.parameterTypes;
+                        }
+                        if (methodSig.returnType != null && !methodSig.returnType.isBlank()) {
+                            returnTypeName = methodSig.returnType;
+                        }
+                    }
+                }
+
+                List<Map<String, Object>> parameters = new ArrayList<>();
+                for (int i = 0; i < parameterTypeNames.size(); i++) {
+                    Map<String, Object> p = new LinkedHashMap<>();
+                    p.put("name", "arg" + i);
+                    p.put("type", parameterTypeNames.get(i));
+                    parameters.add(p);
+                }
+
+                String sig = String.join(", ", parameterTypeNames);
+
+                if ("<init>".equals(name)) {
+                    Map<String, Object> ctorInfo = new LinkedHashMap<>();
+                    ctorInfo.put("name", info.simpleName);
+                    ctorInfo.put("sig", sig);
+                    if (!parameters.isEmpty()) {
+                        ctorInfo.put("params", parameters);
+                    }
+
+                    final boolean[] deprecated = new boolean[] { (access & Opcodes.ACC_DEPRECATED) != 0 };
+                    info.constructors.add(ctorInfo);
+
+                    return new MethodVisitor(Opcodes.ASM9) {
+                        @Override
+                        public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                            if ("Ljava/lang/Deprecated;".equals(annotationDescriptor)) {
+                                deprecated[0] = true;
+                            }
+                            return null;
+                        }
+
+                        @Override
+                        public void visitEnd() {
+                            if (deprecated[0]) {
+                                ctorInfo.put("deprecated", true);
+                            }
+                        }
+                    };
+                }
+
+                Map<String, Object> methodInfo = new LinkedHashMap<>();
+                methodInfo.put("name", name);
+                methodInfo.put("sig", sig);
+                methodInfo.put("ret", returnTypeName);
+                if (!parameters.isEmpty()) {
+                    methodInfo.put("params", parameters);
+                }
+                if ((access & Opcodes.ACC_STATIC) != 0) {
+                    methodInfo.put("static", true);
+                }
+
+                final boolean[] deprecated = new boolean[] { (access & Opcodes.ACC_DEPRECATED) != 0 };
+                info.methods.add(methodInfo);
+
+                return new MethodVisitor(Opcodes.ASM9) {
+                    private int parameterIndex = 0;
+
+                    @Override
+                    public void visitParameter(String parameterName, int parameterAccess) {
+                        if (parameterName != null && parameterIndex < parameters.size()) {
+                            parameters.get(parameterIndex).put("name", parameterName);
+                        }
+                        parameterIndex++;
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                        if ("Ljava/lang/Deprecated;".equals(annotationDescriptor)) {
+                            deprecated[0] = true;
+                        }
+                        return null;
+                    }
+
+                    @Override
+                    public void visitEnd() {
+                        if (deprecated[0]) {
+                            methodInfo.put("deprecated", true);
+                        }
+                    }
+                };
+            }
+        }, 0);
+
+        return info;
+    }
+
+    private static String descriptorToTypeName(String descriptor) {
+        return asmTypeToReadable(org.objectweb.asm.Type.getType(descriptor));
+    }
+
+    private static String signatureToReadableType(String signature) {
+        if (signature == null || signature.isBlank()) {
+            return null;
+        }
+
+        try {
+            TraceSignatureVisitor visitor = new TraceSignatureVisitor(0);
+            new SignatureReader(signature).acceptType(visitor);
+            return normalizeSignatureText(visitor.getDeclaration());
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private static MethodSignatureData parseMethodSignature(String signature) {
+        if (signature == null || signature.isBlank()) {
+            return null;
+        }
+
+        try {
+            final List<TraceSignatureVisitor> parameterVisitors = new ArrayList<>();
+            final TraceSignatureVisitor[] returnVisitor = new TraceSignatureVisitor[1];
+
+            SignatureVisitor collector = new SignatureVisitor(Opcodes.ASM9) {
+                @Override
+                public SignatureVisitor visitParameterType() {
+                    TraceSignatureVisitor visitor = new TraceSignatureVisitor(0);
+                    parameterVisitors.add(visitor);
+                    return visitor;
+                }
+
+                @Override
+                public SignatureVisitor visitReturnType() {
+                    TraceSignatureVisitor visitor = new TraceSignatureVisitor(0);
+                    returnVisitor[0] = visitor;
+                    return visitor;
+                }
+            };
+
+            new SignatureReader(signature).accept(collector);
+
+            MethodSignatureData data = new MethodSignatureData();
+            for (TraceSignatureVisitor visitor : parameterVisitors) {
+                String type = normalizeSignatureText(visitor.getDeclaration());
+                if (type != null && !type.isBlank()) {
+                    data.parameterTypes.add(type);
+                }
+            }
+
+            if (returnVisitor[0] != null) {
+                data.returnType = normalizeSignatureText(returnVisitor[0].getDeclaration());
+            }
+
+            return data;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private static ClassSignatureData parseClassSignature(String signature) {
+        if (signature == null || signature.isBlank()) {
+            return null;
+        }
+
+        try {
+            final TraceSignatureVisitor[] superVisitor = new TraceSignatureVisitor[1];
+            final List<TraceSignatureVisitor> interfaceVisitors = new ArrayList<>();
+
+            SignatureVisitor collector = new SignatureVisitor(Opcodes.ASM9) {
+                @Override
+                public SignatureVisitor visitSuperclass() {
+                    TraceSignatureVisitor visitor = new TraceSignatureVisitor(0);
+                    superVisitor[0] = visitor;
+                    return visitor;
+                }
+
+                @Override
+                public SignatureVisitor visitInterface() {
+                    TraceSignatureVisitor visitor = new TraceSignatureVisitor(0);
+                    interfaceVisitors.add(visitor);
+                    return visitor;
+                }
+            };
+
+            new SignatureReader(signature).accept(collector);
+
+            ClassSignatureData data = new ClassSignatureData();
+            if (superVisitor[0] != null) {
+                data.superType = normalizeSignatureText(superVisitor[0].getDeclaration());
+            }
+
+            for (TraceSignatureVisitor visitor : interfaceVisitors) {
+                String iface = normalizeSignatureText(visitor.getDeclaration());
+                if (iface != null && !iface.isBlank()) {
+                    data.interfaces.add(iface);
+                }
+            }
+
+            return data;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private static String normalizeSignatureText(String text) {
+        if (text == null) {
+            return null;
+        }
+
+        String normalized = text.trim();
+        if (normalized.isEmpty()) {
+            return normalized;
+        }
+
+        normalized = normalized.replace("java.lang.", "");
+        normalized = normalized.replace('$', '.');
+        normalized = normalized.replaceAll("\\s+", " ");
+        return normalized;
+    }
+
+    private static String asmTypeToReadable(org.objectweb.asm.Type type) {
+        switch (type.getSort()) {
+            case org.objectweb.asm.Type.VOID:
+                return "void";
+            case org.objectweb.asm.Type.BOOLEAN:
+                return "boolean";
+            case org.objectweb.asm.Type.CHAR:
+                return "char";
+            case org.objectweb.asm.Type.BYTE:
+                return "byte";
+            case org.objectweb.asm.Type.SHORT:
+                return "short";
+            case org.objectweb.asm.Type.INT:
+                return "int";
+            case org.objectweb.asm.Type.FLOAT:
+                return "float";
+            case org.objectweb.asm.Type.LONG:
+                return "long";
+            case org.objectweb.asm.Type.DOUBLE:
+                return "double";
+            case org.objectweb.asm.Type.ARRAY:
+                return asmTypeToReadable(type.getElementType()) + "[]".repeat(type.getDimensions());
+            case org.objectweb.asm.Type.OBJECT:
+                return simplifyClassName(type.getClassName());
+            default:
+                return type.getClassName();
+        }
+    }
+
+    private static String internalNameToTypeName(String internalName) {
+        return simplifyClassName(internalName.replace('/', '.'));
+    }
+
+    private static String simplifyClassName(String className) {
+        if (className.startsWith("java.lang.")) {
+            return className.substring("java.lang.".length());
+        }
+        return className;
+    }
+
+    private static String packageOf(String typeName) {
+        int idx = typeName.lastIndexOf('.');
+        if (idx < 0) {
+            return "";
+        }
+        return typeName.substring(0, idx);
+    }
+
+    private static String simpleNameOf(String typeName) {
+        int dot = typeName.lastIndexOf('.');
+        String simple = dot >= 0 ? typeName.substring(dot + 1) : typeName;
+        int dollar = simple.lastIndexOf('$');
+        if (dollar >= 0 && dollar + 1 < simple.length()) {
+            simple = simple.substring(dollar + 1);
+        }
+        return simple;
     }
 
     // ===== Usage Analysis Mode =====
@@ -941,7 +1498,11 @@ public class GraphApi {
             if (type.isClassOrInterfaceType()) {
                 String name = type.asClassOrInterfaceType().getNameAsString();
                 if (!isBuiltinType(name)) {
-                    implementsRefs.add(name);
+                    implementsRefs.add(normalizeReferenceName(name));
+                    if (type.asClassOrInterfaceType().getScope().isPresent()) {
+                        String qualified = type.asClassOrInterfaceType().getScope().get() + "." + name;
+                        implementsRefs.add(normalizeReferenceName(qualified));
+                    }
                 }
             }
             collectFromType(type);
@@ -957,7 +1518,11 @@ public class GraphApi {
             if (type.isClassOrInterfaceType()) {
                 String name = type.asClassOrInterfaceType().getNameAsString();
                 if (!isBuiltinType(name)) {
-                    extendsRefs.add(name);
+                    extendsRefs.add(normalizeReferenceName(name));
+                    if (type.asClassOrInterfaceType().getScope().isPresent()) {
+                        String qualified = type.asClassOrInterfaceType().getScope().get() + "." + name;
+                        extendsRefs.add(normalizeReferenceName(qualified));
+                    }
                 }
             }
             collectFromType(type);
@@ -1045,17 +1610,52 @@ public class GraphApi {
         /**
          * Check if a base type name was seen in an {@code implements} clause,
          * meaning it is definitionally an interface.
+         * Checks both the qualified and simple-name forms.
          */
         boolean isKnownInterface(String baseName) {
-            return implementsRefs.contains(baseName);
+            return implementsRefs.contains(normalizeReferenceName(baseName))
+                || implementsRefs.contains(toSimpleName(baseName));
         }
 
         /**
          * Check if a base type name was seen in an {@code extends} clause
          * of a class, meaning it is definitionally a superclass (class, not interface).
+         * Checks both the qualified and simple-name forms.
          */
         boolean isKnownSuperclass(String baseName) {
-            return extendsRefs.contains(baseName);
+            return extendsRefs.contains(normalizeReferenceName(baseName))
+                || extendsRefs.contains(toSimpleName(baseName));
+        }
+
+        /**
+         * Strip generics and array brackets from a type name, preserving
+         * any package/scope qualifier (e.g. {@code java.util.List<String> → java.util.List}).
+         */
+        private String normalizeReferenceName(String typeName) {
+            if (typeName == null) {
+                return "";
+            }
+
+            String normalized = typeName;
+            int genericStart = normalized.indexOf('<');
+            if (genericStart >= 0) {
+                normalized = normalized.substring(0, genericStart);
+            }
+
+            normalized = normalized.replace("[]", "").trim();
+            return normalized;
+        }
+
+        /**
+         * Strip generics, array brackets, <em>and</em> package qualifier to
+         * produce a simple name (e.g. {@code java.util.List<String> → List}).
+         */
+        private String toSimpleName(String typeName) {
+            String normalized = normalizeReferenceName(typeName);
+            if (normalized.contains(".")) {
+                normalized = normalized.substring(normalized.lastIndexOf('.') + 1);
+            }
+            return normalized;
         }
 
         void clear() {
@@ -1068,6 +1668,18 @@ public class GraphApi {
 
     // Global collector (reset per engine run)
     private static final TypeReferenceCollector typeCollector = new TypeReferenceCollector();
+
+    private static final class RuntimeTypeMetadata {
+        final boolean isInterface;
+        final String kind;
+        final List<String> modifiers;
+
+        RuntimeTypeMetadata(boolean isInterface, String kind, List<String> modifiers) {
+            this.isInterface = isInterface;
+            this.kind = kind;
+            this.modifiers = modifiers;
+        }
+    }
 
     // Maps simple type names to their fully qualified package from import statements
     // This enables rigorous resolution instead of heuristic guessing
@@ -1110,9 +1722,25 @@ public class GraphApi {
                 String baseName = typeName.contains(".") ? typeName.substring(typeName.lastIndexOf('.') + 1) : typeName;
                 typeEntry.put("name", baseName);
 
-                if (typeCollector.isKnownInterface(baseName)) {
+                String fqcn = typeName.contains(".") ? typeName : (entry.getKey() + "." + baseName);
+                RuntimeTypeMetadata runtimeMetadata = tryResolveRuntimeTypeMetadata(fqcn);
+
+                if (runtimeMetadata != null) {
+                    if (runtimeMetadata.kind != null) {
+                        typeEntry.put("kind", runtimeMetadata.kind);
+                    }
+                    if (!runtimeMetadata.modifiers.isEmpty()) {
+                        typeEntry.put("modifiers", runtimeMetadata.modifiers);
+                    }
+
+                    if (runtimeMetadata.isInterface) {
+                        interfaces.add(typeEntry);
+                    } else {
+                        classes.add(typeEntry);
+                    }
+                } else if (typeCollector.isKnownInterface(typeName)) {
                     interfaces.add(typeEntry);
-                } else if (typeCollector.isKnownSuperclass(baseName)) {
+                } else if (typeCollector.isKnownSuperclass(typeName)) {
                     classes.add(typeEntry);
                 } else {
                     // Type appears only in parameter/return positions —
@@ -1134,6 +1762,50 @@ public class GraphApi {
         }
 
         return result;
+    }
+
+    /**
+     * Attempts to resolve type metadata (interface vs class, modifiers) by loading
+     * the class at runtime using {@code Class.forName}.
+     *
+     * <p><b>Limitation:</b> This only succeeds for types on the JBang/JDK classpath
+     * (e.g. {@code java.*}, {@code javax.*}, {@code jakarta.*}). Third-party SDK
+     * dependency classes will not be resolvable and will return {@code null}, falling
+     * back to heuristic classification via {@code TypeReferenceCollector}.</p>
+     *
+     * @param fqcn Fully-qualified class name to look up.
+     * @return Metadata if the class is loadable, otherwise {@code null}.
+     */
+    private static RuntimeTypeMetadata tryResolveRuntimeTypeMetadata(String fqcn) {
+        if (fqcn == null || fqcn.isBlank()) {
+            return null;
+        }
+
+        try {
+            Class<?> cls = Class.forName(fqcn, false, Thread.currentThread().getContextClassLoader());
+            int mods = cls.getModifiers();
+
+            List<String> modifierList = new ArrayList<>();
+            String modifierText = Modifier.toString(mods);
+            if (modifierText != null && !modifierText.isBlank()) {
+                modifierList.addAll(Arrays.asList(modifierText.split("\\s+")));
+            }
+
+            if (cls.isInterface()) {
+                return new RuntimeTypeMetadata(true, "interface", modifierList);
+            }
+
+            String kind = "class";
+            if (Modifier.isAbstract(mods)) {
+                kind = "abstract";
+            } else if (Modifier.isFinal(mods)) {
+                kind = "final";
+            }
+
+            return new RuntimeTypeMetadata(false, kind, modifierList);
+        } catch (ClassNotFoundException | LinkageError ex) {
+            return null;
+        }
     }
 
     /**

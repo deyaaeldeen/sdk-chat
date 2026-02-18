@@ -130,6 +130,8 @@ export interface FunctionInfo {
 
 export interface ModuleInfo {
     name: string;
+    condition?: string;
+    exportPath?: string;
     /** If this module is from a dependency, the package name */
     fromPackage?: string;
     classes?: ClassInfo[];
@@ -1100,8 +1102,8 @@ interface PackageJson {
  * Only falls back to subpath exports if root export is not found.
  * Supports: exports, types, typings, module, main, browser.
  */
-function resolveEntryPointFiles(rootPath: string): ExportEntry[] {
-    const pkgPath = path.join(rootPath, "package.json");
+function resolveEntryPointFiles(rootPath: string, options: EngineOptions): ExportEntry[] {
+    const pkgPath = options.packageJsonPath ?? path.join(rootPath, "package.json");
     if (!fs.existsSync(pkgPath)) {
         return [];
     }
@@ -1114,40 +1116,40 @@ function resolveEntryPointFiles(rootPath: string): ExportEntry[] {
         // First try root export only ("." entry)
         const rootExportPaths = extractExportPaths(pkg.exports, true);
         for (const entry of rootExportPaths) {
-            const resolved = resolveToSourceFile(rootPath, entry.filePath);
-            if (resolved) entryEntries.push({ exportPath: entry.exportPath, filePath: resolved });
+            const resolved = resolveToSourceFile(rootPath, entry.filePath, options);
+            if (resolved) entryEntries.push({ exportPath: entry.exportPath, condition: entry.condition, filePath: resolved });
         }
 
         // Also include all other exports (for subpath tracking)
         const allExportPaths = extractExportPaths(pkg.exports, false);
         for (const entry of allExportPaths) {
             // Skip if already added from root
-            if (entryEntries.some(e => e.exportPath === entry.exportPath)) continue;
-            const resolved = resolveToSourceFile(rootPath, entry.filePath);
-            if (resolved) entryEntries.push({ exportPath: entry.exportPath, filePath: resolved });
+            if (entryEntries.some(e => e.exportPath === entry.exportPath && e.condition === entry.condition)) continue;
+            const resolved = resolveToSourceFile(rootPath, entry.filePath, options);
+            if (resolved) entryEntries.push({ exportPath: entry.exportPath, condition: entry.condition, filePath: resolved });
         }
     }
 
     // 2. TypeScript types/typings (these are root exports)
     if (entryEntries.length === 0 && pkg.types) {
-        const resolved = resolveToSourceFile(rootPath, pkg.types);
-        if (resolved) entryEntries.push({ exportPath: ".", filePath: resolved });
+        const resolved = resolveToSourceFile(rootPath, pkg.types, options);
+        if (resolved) entryEntries.push({ exportPath: ".", condition: "default", filePath: resolved });
     }
     if (entryEntries.length === 0 && pkg.typings && pkg.typings !== pkg.types) {
-        const resolved = resolveToSourceFile(rootPath, pkg.typings);
-        if (resolved) entryEntries.push({ exportPath: ".", filePath: resolved });
+        const resolved = resolveToSourceFile(rootPath, pkg.typings, options);
+        if (resolved) entryEntries.push({ exportPath: ".", condition: "default", filePath: resolved });
     }
 
     // 3. ES module entry (root export)
     if (entryEntries.length === 0 && pkg.module) {
-        const resolved = resolveToSourceFile(rootPath, pkg.module);
-        if (resolved) entryEntries.push({ exportPath: ".", filePath: resolved });
+        const resolved = resolveToSourceFile(rootPath, pkg.module, options);
+        if (resolved) entryEntries.push({ exportPath: ".", condition: "default", filePath: resolved });
     }
 
     // 4. CommonJS entry (root export)
     if (entryEntries.length === 0 && pkg.main) {
-        const resolved = resolveToSourceFile(rootPath, pkg.main);
-        if (resolved) entryEntries.push({ exportPath: ".", filePath: resolved });
+        const resolved = resolveToSourceFile(rootPath, pkg.main, options);
+        if (resolved) entryEntries.push({ exportPath: ".", condition: "default", filePath: resolved });
     }
 
     // 5. Fallback to common entry points
@@ -1163,7 +1165,7 @@ function resolveEntryPointFiles(rootPath: string): ExportEntry[] {
         for (const fallback of fallbackPaths) {
             const fullPath = path.join(rootPath, fallback);
             if (fs.existsSync(fullPath)) {
-                entryEntries.push({ exportPath: ".", filePath: fullPath });
+                entryEntries.push({ exportPath: ".", condition: "default", filePath: fullPath });
                 break;
             }
         }
@@ -1178,6 +1180,8 @@ function resolveEntryPointFiles(rootPath: string): ExportEntry[] {
 interface ExportEntry {
     /** The export subpath (e.g., "." or "./client") */
     exportPath: string;
+    /** Resolved export condition context (e.g., "default", "node", "browser") */
+    condition: string;
     /** The resolved source file path */
     filePath: string;
 }
@@ -1189,42 +1193,53 @@ interface ExportEntry {
  * @param rootOnly - If true, only extract from the "." export
  * @returns Array of {exportPath, filePath} pairs
  */
-function extractExportPaths(exports: string | Record<string, unknown>, rootOnly: boolean = false): Array<{ exportPath: string; filePath: string }> {
-    const results: Array<{ exportPath: string; filePath: string }> = [];
+function extractExportPaths(exports: string | Record<string, unknown>, rootOnly: boolean = false): Array<{ exportPath: string; condition: string; filePath: string }> {
+    const results: Array<{ exportPath: string; condition: string; filePath: string }> = [];
+    const MAX_DEPTH = 10;
+    const visited = new Set<unknown>();
+
+    function visit(value: unknown, exportPath: string, conditions: string[], depth: number = 0): void {
+        if (depth > MAX_DEPTH) {
+            return;
+        }
+
+        if (typeof value === "object" && value !== null) {
+            if (visited.has(value)) {
+                return;
+            }
+            visited.add(value);
+        }
+
+        if (typeof value === "string") {
+            const rawCondition = conditions.length > 0 ? conditions.join("|") : "default";
+            const condition = normalizeCondition(rawCondition);
+            results.push({ exportPath, condition, filePath: value });
+            return;
+        }
+
+        if (typeof value !== "object" || value === null) {
+            return;
+        }
+
+        const obj = value as Record<string, unknown>;
+        const entries = Object.entries(obj);
+        for (const [key, nested] of entries) {
+            if (key.startsWith(".")) {
+                if (!rootOnly || key === ".") {
+                    visit(nested, key, conditions, depth + 1);
+                }
+                continue;
+            }
+
+            visit(nested, exportPath, [...conditions, key], depth + 1);
+        }
+    }
 
     if (typeof exports === "string") {
         // Simple string export is the root export
-        results.push({ exportPath: ".", filePath: exports });
+        results.push({ exportPath: ".", condition: "default", filePath: exports });
     } else if (typeof exports === "object" && exports !== null) {
-        // Object exports map - prioritize "." entry
-        const entries = Object.entries(exports);
-
-        // Sort to put "." first, then process
-        entries.sort(([keyA], [keyB]) => {
-            if (keyA === ".") return -1;
-            if (keyB === ".") return 1;
-            return keyA.localeCompare(keyB);
-        });
-
-        for (const [key, value] of entries) {
-            // If rootOnly, skip non-root exports
-            if (rootOnly && key !== ".") continue;
-
-            if (typeof value === "string") {
-                results.push({ exportPath: key, filePath: value });
-            } else if (typeof value === "object" && value !== null) {
-                // Nested conditions (types, import, require, default)
-                const nested = value as Record<string, unknown>;
-                // Prefer types > import > require > default
-                const priority = ["types", "import", "require", "default"];
-                for (const condKey of priority) {
-                    if (typeof nested[condKey] === "string") {
-                        results.push({ exportPath: key, filePath: nested[condKey] as string });
-                        break; // Only take one per export condition block
-                    }
-                }
-            }
-        }
+        visit(exports, ".", [], 0);
     }
 
     return results.filter((r) =>
@@ -1233,13 +1248,86 @@ function extractExportPaths(exports: string | Record<string, unknown>, rootOnly:
     );
 }
 
+function normalizeCondition(condition: string): string {
+    const chain = condition.split("|").map(c => c.trim()).filter(Boolean);
+    if (chain.length === 0) {
+        return "default";
+    }
+
+    if (chain.includes("default")) {
+        return "default";
+    }
+
+    // When "types" co-occurs with an environment condition (node, browser),
+    // prefer the environment condition so platform-specific modules retain
+    // their context instead of collapsing to a generic "types" label.
+    const environmentConditions = new Set(["node", "browser", "import", "require"]);
+    const hasTypes = chain.includes("types");
+    if (hasTypes) {
+        const envCondition = chain.find(c => environmentConditions.has(c));
+        if (envCondition) {
+            return envCondition;
+        }
+        return "types";
+    }
+
+    // Return the first recognized condition to provide a stable canonical form.
+    const recognized = new Set(["import", "require", "node", "browser", "development", "production"]);
+    for (const c of chain) {
+        if (recognized.has(c)) {
+            return c;
+        }
+    }
+
+    return chain[chain.length - 1];
+}
+
+function getConditionPriority(condition: string): number {
+    const canonical = normalizeCondition(condition);
+
+    switch (canonical) {
+        case "default": return 0;
+        case "types": return 1;
+        case "import": return 2;
+        case "require": return 3;
+        case "node": return 4;
+        case "browser": return 5;
+        case "production": return 6;
+        case "development": return 7;
+        default: return 100;
+    }
+}
+
 /**
  * Resolves a dist/output path to its corresponding source file.
  * Handles common patterns like dist/ -> src/, types/ -> src/.
  */
-function resolveToSourceFile(rootPath: string, outputPath: string): string | null {
+function resolveToSourceFile(rootPath: string, outputPath: string, options: EngineOptions): string | null {
     // Normalize path
     let filePath = outputPath.replace(/^\.\//, "");
+
+    if (options.mode === "compiled") {
+        const candidatePaths = [
+            filePath,
+            filePath.replace(/\.js$/, ".d.ts").replace(/\.mjs$/, ".d.mts").replace(/\.cjs$/, ".d.cts"),
+        ];
+
+        for (const candidate of candidatePaths) {
+            const direct = path.join(rootPath, candidate);
+            if (fs.existsSync(direct)) {
+                return direct;
+            }
+
+            if (options.dtsRoot) {
+                const fromDtsRoot = path.join(options.dtsRoot, candidate);
+                if (fs.existsSync(fromDtsRoot)) {
+                    return fromDtsRoot;
+                }
+            }
+        }
+
+        return null;
+    }
 
     // Common output-to-source mappings
     const mappings: Array<{ from: RegExp; to: string }> = [
@@ -1287,8 +1375,16 @@ function resolveToSourceFile(rootPath: string, outputPath: string): string | nul
 interface ExportedSymbolInfo {
     /** The export subpath (e.g., "." or "./client") */
     exportPath: string;
+    /** Export condition (e.g., "default", "node", "browser") */
+    condition: string;
     /** If re-exported from an external package, the package name */
     reExportedFrom?: string;
+}
+
+interface EngineOptions {
+    mode: "source" | "compiled";
+    dtsRoot?: string;
+    packageJsonPath?: string;
 }
 
 /**
@@ -1304,7 +1400,13 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
     const sortedEntries = [...entryEntries].sort((a, b) => {
         if (a.exportPath === ".") return -1;
         if (b.exportPath === ".") return 1;
-        return a.exportPath.localeCompare(b.exportPath);
+        const exportPathCmp = a.exportPath.localeCompare(b.exportPath);
+        if (exportPathCmp !== 0) return exportPathCmp;
+
+        const conditionCmp = getConditionPriority(a.condition) - getConditionPriority(b.condition);
+        if (conditionCmp !== 0) return conditionCmp;
+
+        return a.condition.localeCompare(b.condition);
     });
 
     for (const entry of sortedEntries) {
@@ -1315,7 +1417,7 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
         for (const decl of sourceFile.getExportedDeclarations().keys()) {
             // Only set if not already set (preserves "." priority)
             if (!exportedSymbols.has(decl)) {
-                exportedSymbols.set(decl, { exportPath: entry.exportPath });
+                exportedSymbols.set(decl, { exportPath: entry.exportPath, condition: entry.condition });
             }
         }
 
@@ -1330,6 +1432,7 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
                 if (!exportedSymbols.has(name)) {
                     exportedSymbols.set(name, {
                         exportPath: entry.exportPath,
+                        condition: entry.condition,
                         reExportedFrom: isExternalPackage ? moduleSpecifier : undefined
                     });
                 }
@@ -1341,6 +1444,7 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
                 // Store a marker for namespace re-exports that we'll use during type marking
                 exportedSymbols.set(`__namespace_reexport__${moduleSpecifier}`, {
                     exportPath: entry.exportPath,
+                    condition: entry.condition,
                     reExportedFrom: moduleSpecifier
                 });
             }
@@ -1354,8 +1458,8 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
 // Package Engine
 // ============================================================================
 
-function detectPackageName(rootPath: string): string {
-    const pkgPath = path.join(rootPath, "package.json");
+function detectPackageName(rootPath: string, packageJsonPath?: string): string {
+    const pkgPath = packageJsonPath ?? path.join(rootPath, "package.json");
     if (fs.existsSync(pkgPath)) {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
         return pkg.name || path.basename(rootPath);
@@ -1363,8 +1467,8 @@ function detectPackageName(rootPath: string): string {
     return path.basename(rootPath);
 }
 
-export function extractPackage(rootPath: string): ApiIndex {
-    const packageName = detectPackageName(rootPath);
+export function extractPackage(rootPath: string, options: EngineOptions = { mode: "source" }): ApiIndex {
+    const packageName = detectPackageName(rootPath, options.packageJsonPath);
 
     // Find tsconfig or create minimal config
     const tsConfigPath = path.join(rootPath, "tsconfig.json");
@@ -1387,21 +1491,25 @@ export function extractPackage(rootPath: string): ApiIndex {
 
     // Find source files
     const srcDir = path.join(rootPath, "src");
-    const sourceDir = fs.existsSync(srcDir) ? srcDir : rootPath;
+    const sourceDir = options.mode === "compiled"
+        ? (options.dtsRoot ?? rootPath)
+        : (fs.existsSync(srcDir) ? srcDir : rootPath);
 
     // Add source files
-    const patterns = [
-        path.join(sourceDir, "**/*.ts"),
-        path.join(sourceDir, "**/*.tsx"),
-        path.join(sourceDir, "**/*.mts"),
-    ];
+    const patterns = options.mode === "compiled"
+        ? [path.join(sourceDir, "**/*.d.ts"), path.join(sourceDir, "**/*.d.mts"), path.join(sourceDir, "**/*.d.cts")]
+        : [
+            path.join(sourceDir, "**/*.ts"),
+            path.join(sourceDir, "**/*.tsx"),
+            path.join(sourceDir, "**/*.mts"),
+        ];
 
     for (const pattern of patterns) {
         project.addSourceFilesAtPaths(pattern);
     }
 
     // Detect entry point files and extract exported symbols
-    const entryEntries = resolveEntryPointFiles(rootPath);
+    const entryEntries = resolveEntryPointFiles(rootPath, options);
     const entryPointSymbols = extractExportedSymbols(project, entryEntries);
 
     // Collect import declarations from all source files for import-based
@@ -1413,6 +1521,7 @@ export function extractPackage(rootPath: string): ApiIndex {
     typeCollector.collectFromImportDeclarations(sourceFilesForImports);
 
     const modules: ModuleInfo[] = [];
+    const moduleSourceFileMap: Array<[ModuleInfo, SourceFile]> = []; // for condition propagation
 
     for (const sourceFile of project.getSourceFiles()) {
         const filePath = sourceFile.getFilePath();
@@ -1440,16 +1549,31 @@ export function extractPackage(rootPath: string): ApiIndex {
 
         const module = extractModule(sourceFile, moduleName);
         if (module) {
+            // Set module condition+exportPath once from entryEntries by file path,
+            // picking the lowest-priority (most "default") condition for this file.
+            const resolvedFilePath = path.resolve(sourceFile.getFilePath());
+            const matchingEntry = entryEntries
+                .filter(e => path.resolve(e.filePath) === resolvedFilePath)
+                .sort((a, b) => getConditionPriority(a.condition) - getConditionPriority(b.condition))[0];
+            if (matchingEntry) {
+                module.condition = matchingEntry.condition;
+                module.exportPath = matchingEntry.exportPath;
+            }
+
             // Mark entry points based on package.json exports
+            const applyEntryPoint = (item: { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }, info: { exportPath: string; reExportedFrom?: string }) => {
+                item.entryPoint = true;
+                item.exportPath = info.exportPath;
+                if (info.reExportedFrom) {
+                    item.reExportedFrom = info.reExportedFrom;
+                }
+            };
+
             if (module.classes) {
                 for (const cls of module.classes) {
                     const exportInfo = entryPointSymbols.get(cls.name);
                     if (exportInfo !== undefined) {
-                        (cls as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).entryPoint = true;
-                        (cls as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).exportPath = exportInfo.exportPath;
-                        if (exportInfo.reExportedFrom) {
-                            (cls as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
-                        }
+                        applyEntryPoint(cls, exportInfo);
                     }
                 }
             }
@@ -1457,11 +1581,7 @@ export function extractPackage(rootPath: string): ApiIndex {
                 for (const iface of module.interfaces) {
                     const exportInfo = entryPointSymbols.get(iface.name);
                     if (exportInfo !== undefined) {
-                        (iface as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).entryPoint = true;
-                        (iface as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).exportPath = exportInfo.exportPath;
-                        if (exportInfo.reExportedFrom) {
-                            (iface as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
-                        }
+                        applyEntryPoint(iface, exportInfo);
                     }
                 }
             }
@@ -1469,11 +1589,7 @@ export function extractPackage(rootPath: string): ApiIndex {
                 for (const func of module.functions) {
                     const exportInfo = entryPointSymbols.get(func.name);
                     if (exportInfo !== undefined) {
-                        (func as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).entryPoint = true;
-                        (func as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).exportPath = exportInfo.exportPath;
-                        if (exportInfo.reExportedFrom) {
-                            (func as { entryPoint?: boolean; exportPath?: string; reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
-                        }
+                        applyEntryPoint(func, exportInfo);
                     }
                 }
             }
@@ -1482,7 +1598,7 @@ export function extractPackage(rootPath: string): ApiIndex {
                 for (const enumInfo of module.enums) {
                     const exportInfo = entryPointSymbols.get(enumInfo.name);
                     if (exportInfo?.reExportedFrom) {
-                        (enumInfo as { reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
+                        enumInfo.reExportedFrom = exportInfo.reExportedFrom;
                     }
                 }
             }
@@ -1490,11 +1606,42 @@ export function extractPackage(rootPath: string): ApiIndex {
                 for (const typeInfo of module.types) {
                     const exportInfo = entryPointSymbols.get(typeInfo.name);
                     if (exportInfo?.reExportedFrom) {
-                        (typeInfo as { reExportedFrom?: string }).reExportedFrom = exportInfo.reExportedFrom;
+                        typeInfo.reExportedFrom = exportInfo.reExportedFrom;
                     }
                 }
             }
             modules.push(module);
+            moduleSourceFileMap.push([module, sourceFile]);
+        }
+    }
+
+    // Second pass: propagate conditions to non-entry modules that are imported
+    // by entry point files. Assigns the most-fundamental (lowest-priority) condition
+    // inherited from direct importers that are themselves entry points.
+    // Example: shared.d.ts is imported by index.d.ts (condition "default"), so
+    // it inherits "default" even though it's not a direct entry point in exports.
+    const entryFileConditions = new Map<string, string>(); // absolute path → condition
+    for (const entry of entryEntries) {
+        const absPath = path.resolve(entry.filePath);
+        const existing = entryFileConditions.get(absPath);
+        if (!existing || getConditionPriority(entry.condition) < getConditionPriority(existing)) {
+            entryFileConditions.set(absPath, entry.condition);
+        }
+    }
+    for (const [module, sourceFile] of moduleSourceFileMap) {
+        if (module.condition !== undefined) continue;
+        let inheritedCondition: string | undefined;
+        for (const refSf of sourceFile.getReferencingSourceFiles()) {
+            const refPath = path.resolve(refSf.getFilePath());
+            const cond = entryFileConditions.get(refPath);
+            if (cond !== undefined) {
+                if (inheritedCondition === undefined || getConditionPriority(cond) < getConditionPriority(inheritedCondition)) {
+                    inheritedCondition = cond;
+                }
+            }
+        }
+        if (inheritedCondition !== undefined) {
+            module.condition = inheritedCondition;
         }
     }
 
@@ -1977,11 +2124,15 @@ Options:
     --json        Output JSON format
     --stub        Output TypeScript stub format (default)
     --pretty      Pretty-print JSON output
+    --mode <m>    Engine mode: source (default) or compiled
+    --dts-root <path>  Compiled mode root containing declaration files
+    --package-json <path>  Optional package.json path for export conditions
     --usage <api> <samples>  Analyze usage in samples against API
     --help, -h    Show this help
 
 Examples:
     graph_api ./my-package --json
+    graph_api ./my-package --json --mode compiled --dts-root ./dist/types
     graph_api ./my-package --stub
     graph_api --usage api.json ./samples
 `);
@@ -2020,9 +2171,30 @@ Examples:
     const rootPath = path.resolve(args[0]);
     const outputJson = args.includes("--json");
     const pretty = args.includes("--pretty");
+    const modeIndex = args.indexOf("--mode");
+    const dtsRootIndex = args.indexOf("--dts-root");
+    const packageJsonIndex = args.indexOf("--package-json");
+
+    const mode = modeIndex >= 0 && modeIndex + 1 < args.length ? args[modeIndex + 1] : "source";
+    const dtsRoot = dtsRootIndex >= 0 && dtsRootIndex + 1 < args.length ? path.resolve(args[dtsRootIndex + 1]) : undefined;
+    const packageJsonPath = packageJsonIndex >= 0 && packageJsonIndex + 1 < args.length ? path.resolve(args[packageJsonIndex + 1]) : undefined;
+
+    if (mode !== "source" && mode !== "compiled") {
+        console.error(`Invalid --mode value '${mode}'. Expected 'source' or 'compiled'.`);
+        process.exit(1);
+    }
+
+    if (mode === "compiled" && !dtsRoot) {
+        console.error("Compiled mode requires --dts-root <path>.");
+        process.exit(1);
+    }
 
     try {
-        const api = extractPackage(rootPath);
+        const api = extractPackage(rootPath, {
+            mode: mode as "source" | "compiled",
+            dtsRoot,
+            packageJsonPath,
+        });
 
         if (outputJson) {
             console.log(toJson(api, pretty));

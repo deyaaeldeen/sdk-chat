@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.SdkChat.Services;
+using PublicApiGraphEngine.Contracts;
 using Xunit;
 
 namespace Microsoft.SdkChat.Tests.Services;
@@ -94,6 +95,33 @@ public class MyClient { public void DoWork() { } }
         // Assert - Should succeed but find nothing (or minimal)
         Assert.True(result.Success);
         Assert.Equal("DotNet", result.Language);
+    }
+
+    [Fact]
+    public async Task GraphPublicApiAsync_WithEmptyArtifactOptions_PreservesAutoDetectedInputBehavior()
+    {
+        // Arrange
+        var srcDir = Path.Combine(TestRoot, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(TestRoot, "Test.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>");
+        File.WriteAllText(Path.Combine(srcDir, "MyClient.cs"), @"
+namespace TestSdk;
+public class MyClient
+{
+    public string GetResource(int id) => ""test"";
+}
+");
+
+        // Act
+        var result = await Service.GraphPublicApiAsync(
+            TestRoot,
+            artifactOptions: new ArtifactOptions());
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.NotNull(result.Diagnostics);
+        Assert.Contains(result.Diagnostics, d => d.Id == "ENGINE_INPUT");
+        Assert.Contains("MyClient", result.ApiSurface);
     }
 
     #endregion

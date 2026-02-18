@@ -15,10 +15,8 @@ namespace PublicApiGraphEngine.Tests;
 /// statements and can classify types seen in implements clauses as interfaces
 /// and types seen in extends clauses as classes. Types that appear only in
 /// parameter/return positions are left unresolved in the Types[] bucket.
-/// However, it cannot:
-/// 1. Classify types seen only in parameter/return positions (left as unresolved)
-/// 2. Determine if an extends target is abstract, final, or concrete
-/// 3. Enumerate members of external types from their JARs
+/// Runtime metadata enrichment now classifies loadable external types and
+/// exposes key kind metadata (interface/abstract/final/class).
 ///
 /// A compiled engine using reflection or ASM on the dependency JARs would
 /// resolve all of these.
@@ -48,23 +46,21 @@ public class JavaCompiledPrecisionTests : IClassFixture<JavaCompiledFixture>
     /// (following Java's common HTTP abstraction pattern). A compiled engine
     /// using reflection would correctly classify them.
     /// </summary>
-    [Fact(Skip = "Requires compiled artifacts")]
+    [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void SourceParser_CannotClassify_ExternalParameterTypes()
+    public void RuntimeMetadata_Resolves_ExternalParameterTypes()
     {
         var api = GetApi();
 
         var dep = api.Dependencies?.FirstOrDefault(d =>
-            d.Package.Contains("somelib", StringComparison.OrdinalIgnoreCase));
+            d.Package.Contains("java.net.http", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(dep);
 
-        // HttpRequest is defined as an interface in the external package.
-        // The source parser leaves it unresolved in Types[] because it only
-        // appears as a parameter type, not in an implements clause.
-        // A compiled engine loading the JAR would use reflection to
-        // determine the actual kind.
+        Assert.NotNull(dep.Classes);
         Assert.NotNull(dep.Interfaces);
-        Assert.Contains(dep.Interfaces, i => i.Name == "HttpRequest");
+
+        Assert.Contains(dep.Classes, t => t.Name == "HttpRequest");
+        Assert.Contains(dep.Interfaces, t => t.Name == "HttpResponse");
     }
 
     /// <summary>
@@ -78,14 +74,14 @@ public class JavaCompiledPrecisionTests : IClassFixture<JavaCompiledFixture>
     /// - Its public method set (inherited by ExtendedClient)
     /// - Its generic type parameters and bounds (if any)
     /// </summary>
-    [Fact(Skip = "Requires compiled artifacts")]
+    [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void SourceParser_CannotDetermine_ExternalSuperclassDetails()
+    public void RuntimeMetadata_Resolves_ExternalSuperclassDetails()
     {
         var api = GetApi();
 
         var dep = api.Dependencies?.FirstOrDefault(d =>
-            d.Package.Contains("somelib", StringComparison.OrdinalIgnoreCase));
+            d.Package.Contains("java.net.http", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(dep);
 
         // HttpClient should be tracked in the dependency
@@ -93,9 +89,9 @@ public class JavaCompiledPrecisionTests : IClassFixture<JavaCompiledFixture>
         var httpClient = dep.Classes.FirstOrDefault(c => c.Name == "HttpClient");
         Assert.NotNull(httpClient);
 
-        // The source parser cannot determine that HttpClient is abstract.
-        // A compiled engine would use reflection: Modifier.isAbstract(cls.getModifiers())
-        Assert.NotNull(httpClient.Kind);
-        Assert.Contains("abstract", httpClient.Kind, StringComparison.OrdinalIgnoreCase);
+        // External superclass type is detected and kind metadata is resolved.
+        Assert.NotNull(httpClient.Name);
+        Assert.Equal("HttpClient", httpClient.Name);
+        Assert.Equal("abstract", httpClient.Kind);
     }
 }

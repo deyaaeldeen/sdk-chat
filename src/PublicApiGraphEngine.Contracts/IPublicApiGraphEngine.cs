@@ -59,7 +59,7 @@ public interface IPublicApiGraphEngine
     /// <summary>
     /// Graphs the public API surface and returns a common result.
     /// </summary>
-    Task<EngineResult> GraphAsyncCore(string rootPath, CrossLanguageMap? crossLanguageMap = null, CancellationToken ct = default);
+    Task<EngineResult> GraphAsyncCore(EngineInput input, CrossLanguageMap? crossLanguageMap = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -70,9 +70,9 @@ public interface IPublicApiGraphEngine
 public interface IPublicApiGraphEngine<TIndex> : IPublicApiGraphEngine where TIndex : class, IApiIndex
 {
     /// <summary>
-    /// Graphs the public API surface from the specified directory.
+    /// Graphs the public API surface from the specified input.
     /// </summary>
-    Task<EngineResult<TIndex>> GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap = null, CancellationToken ct = default);
+    Task<EngineResult<TIndex>> GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap = null, CancellationToken ct = default);
 
     /// <summary>
     /// Formats the API index as JSON.
@@ -87,9 +87,9 @@ public interface IPublicApiGraphEngine<TIndex> : IPublicApiGraphEngine where TIn
     /// <summary>
     /// Default implementation for non-generic engine.
     /// </summary>
-    async Task<EngineResult> IPublicApiGraphEngine.GraphAsyncCore(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
+    async Task<EngineResult> IPublicApiGraphEngine.GraphAsyncCore(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
-        var result = await GraphAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+        var result = await GraphAsync(input, crossLanguageMap, ct).ConfigureAwait(false);
         return result.ToBase();
     }
 }

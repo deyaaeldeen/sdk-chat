@@ -26,7 +26,12 @@ if (!engine.IsAvailable())
     return 1;
 }
 
-var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(options.Path, ct: CancellationToken.None);
+EngineInput input = options.PomPath is not null
+    ? new EngineInput.JavaMavenProject(options.PomPath)
+    : options.GradlePath is not null
+        ? new EngineInput.JavaGradleProject(options.GradlePath)
+        : new EngineInput.SourceDirectory(options.Path);
+var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(input, ct: CancellationToken.None);
 
 if (result is EngineResult<ApiIndex>.Failure failure)
 {

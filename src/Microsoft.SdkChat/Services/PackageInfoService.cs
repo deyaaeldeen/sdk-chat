@@ -43,7 +43,7 @@ public interface IPackageInfoService
     /// <param name="asJson">If true, returns JSON format; otherwise returns language stubs.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>API graphing result with the public API surface.</returns>
-    Task<ApiGraphResult> GraphPublicApiAsync(string packagePath, string? language = null, bool asJson = false, string? crossLanguageMetadataPath = null, CancellationToken ct = default);
+    Task<ApiGraphResult> GraphPublicApiAsync(string packagePath, string? language = null, bool asJson = false, string? crossLanguageMetadataPath = null, ArtifactOptions? artifactOptions = null, CancellationToken ct = default);
 
     /// <summary>
     /// Analyzes API coverage in existing samples or tests.
@@ -117,6 +117,7 @@ public sealed class PackageInfoService : IPackageInfoService
         string? language = null,
         bool asJson = false,
         string? crossLanguageMetadataPath = null,
+        ArtifactOptions? artifactOptions = null,
         CancellationToken ct = default)
     {
         var sdkInfo = await SdkInfo.ScanAsync(packagePath, ct).ConfigureAwait(false);
@@ -136,6 +137,17 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
 
+        var useArtifactOptions = HasAnyArtifactOption(artifactOptions);
+        EngineInput engineInput;
+        ApiDiagnostic? artifactMismatchWarning = null;
+        if (useArtifactOptions)
+        {
+            (engineInput, artifactMismatchWarning) = BuildEngineInputFromArtifactOptions(artifactOptions!, effectiveLanguage.Value, sdkInfo.SourceFolder);
+        }
+        else
+        {
+            engineInput = BuildEngineInputFromSdkInfo(sdkInfo, effectiveLanguage.Value);
+        }
         var engine = CreateEngine(effectiveLanguage.Value);
         if (engine == null)
         {
@@ -163,7 +175,7 @@ public sealed class PackageInfoService : IPackageInfoService
             ? null
             : CrossLanguageMetadata.Load(crossLanguageMetadataPath);
 
-        var result = await engine.GraphAsyncCore(sdkInfo.SourceFolder, crossLanguageMap, ct).ConfigureAwait(false);
+        var result = await engine.GraphAsyncCore(engineInput, crossLanguageMap, ct).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -187,7 +199,9 @@ public sealed class PackageInfoService : IPackageInfoService
             Package = apiIndex.Package,
             ApiSurface = asJson ? apiIndex.ToJson(pretty: true) : apiIndex.ToStubs(),
             Format = asJson ? "json" : "stubs",
-            Diagnostics = result.Diagnostics.ToArray()
+            Diagnostics = artifactMismatchWarning is not null
+                ? [artifactMismatchWarning, ..result.Diagnostics]
+                : result.Diagnostics.ToArray()
         };
     }
 
@@ -238,6 +252,7 @@ public sealed class PackageInfoService : IPackageInfoService
         }
 
         var (engine, analyzer) = factory();
+        var engineInput = BuildEngineInputFromSdkInfo(sdkInfo, effectiveLanguage.Value);
 
         if (!engine.IsAvailable())
         {
@@ -249,7 +264,7 @@ public sealed class PackageInfoService : IPackageInfoService
             };
         }
 
-        var engineResult = await engine.GraphAsyncCore(sdkInfo.SourceFolder, null, ct).ConfigureAwait(false);
+        var engineResult = await engine.GraphAsyncCore(engineInput, null, ct).ConfigureAwait(false);
         if (!engineResult.IsSuccess)
         {
             var failure = (EngineResult.Failure)engineResult;
@@ -370,6 +385,9 @@ public sealed class PackageInfoService : IPackageInfoService
     /// <summary>
     /// Registry of language-specific engine and analyzer factories.
     /// Adding a new language requires only adding an entry here.
+    /// Factories (not singletons) because engines hold mutable per-run state
+    /// (e.g. Java's static typeCollector/importMap, Go's engineContext) and
+    /// concurrent calls would corrupt shared state.
     /// </summary>
     private static readonly Dictionary<SdkLanguage, Func<(IPublicApiGraphEngine Engine, IUsageAnalyzer Analyzer)>> AnalyzerRegistry = new()
     {
@@ -386,6 +404,65 @@ public sealed class PackageInfoService : IPackageInfoService
         if (AnalyzerRegistry.TryGetValue(language, out var factory))
             return factory().Engine;
         return null;
+    }
+
+    private static (EngineInput Input, ApiDiagnostic? Warning) BuildEngineInputFromArtifactOptions(ArtifactOptions opts, SdkLanguage language, string sourceFolder)
+    {
+        var input = language switch
+        {
+            SdkLanguage.DotNet when opts.CsprojPath is { } cp => new EngineInput.DotNetProject(cp),
+            SdkLanguage.TypeScript or SdkLanguage.JavaScript when opts.TsconfigPath is { } tp => new EngineInput.TypeScriptProject(tp, opts.PackageJsonPath),
+            SdkLanguage.TypeScript or SdkLanguage.JavaScript when opts.PackageJsonPath is { } pj => new EngineInput.TypeScriptProject(null, pj),
+            SdkLanguage.Java when opts.PomPath is { } pm => new EngineInput.JavaMavenProject(pm),
+            SdkLanguage.Java when opts.GradlePath is { } gp => new EngineInput.JavaGradleProject(gp),
+            SdkLanguage.Python when opts.ImportName is { } im => (EngineInput)new EngineInput.PythonPackage(im, sourceFolder),
+            _ => (EngineInput)new EngineInput.SourceDirectory(sourceFolder)
+        };
+
+        // Warn when artifact options were provided but none matched the detected language
+        ApiDiagnostic? warning = input is EngineInput.SourceDirectory
+            ? new ApiDiagnostic
+            {
+                Id = "ENGINE_INPUT",
+                Level = DiagnosticLevel.Warning,
+                Text = $"Artifact options were provided but none matched the detected language '{language}'. Falling back to source analysis."
+            }
+            : null;
+
+        return (input, warning);
+    }
+
+    private static bool HasAnyArtifactOption(ArtifactOptions? opts)
+        => opts is not null && (
+            !string.IsNullOrWhiteSpace(opts.CsprojPath)
+            || !string.IsNullOrWhiteSpace(opts.TsconfigPath)
+            || !string.IsNullOrWhiteSpace(opts.PackageJsonPath)
+            || !string.IsNullOrWhiteSpace(opts.PomPath)
+            || !string.IsNullOrWhiteSpace(opts.GradlePath)
+            || !string.IsNullOrWhiteSpace(opts.ImportName));
+
+    private static EngineInput BuildEngineInputFromSdkInfo(SdkInfo sdkInfo, SdkLanguage language)
+    {
+        if (!string.IsNullOrWhiteSpace(sdkInfo.BuildFilePath))
+        {
+            var fileName = Path.GetFileName(sdkInfo.BuildFilePath);
+            return language switch
+            {
+                SdkLanguage.DotNet when fileName.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) =>
+                    new EngineInput.DotNetProject(sdkInfo.BuildFilePath),
+                SdkLanguage.TypeScript or SdkLanguage.JavaScript when fileName.Equals("tsconfig.json", StringComparison.OrdinalIgnoreCase) =>
+                    new EngineInput.TypeScriptProject(sdkInfo.BuildFilePath, null),
+                SdkLanguage.TypeScript or SdkLanguage.JavaScript when fileName.Equals("package.json", StringComparison.OrdinalIgnoreCase) =>
+                    new EngineInput.TypeScriptProject(null, sdkInfo.BuildFilePath),
+                SdkLanguage.Java when fileName.Equals("pom.xml", StringComparison.OrdinalIgnoreCase) =>
+                    new EngineInput.JavaMavenProject(sdkInfo.BuildFilePath),
+                SdkLanguage.Java when (fileName.Equals("build.gradle", StringComparison.OrdinalIgnoreCase)
+                    || fileName.Equals("build.gradle.kts", StringComparison.OrdinalIgnoreCase)) =>
+                    new EngineInput.JavaGradleProject(sdkInfo.BuildFilePath),
+                _ => new EngineInput.SourceDirectory(sdkInfo.SourceFolder)
+            };
+        }
+        return new EngineInput.SourceDirectory(sdkInfo.SourceFolder);
     }
 
     public async Task<CoverageBatchResult> AnalyzeCoverageMonorepoAsync(

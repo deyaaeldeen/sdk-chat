@@ -156,6 +156,11 @@ public class SdkInfo
     /// <summary>Path to the source code folder.</summary>
     public string SourceFolder { get; }
 
+    /// <summary>
+    /// Path to the primary build marker used for this SDK (e.g., .csproj, pom.xml, tsconfig.json).
+    /// </summary>
+    public string? BuildFilePath { get; }
+
     /// <summary>Path to existing samples folder, if found.</summary>
     public string? SamplesFolder { get; }
 
@@ -180,6 +185,7 @@ public class SdkInfo
         string? languageName,
         string? fileExtension,
         string sourceFolder,
+        string? buildFilePath,
         string? samplesFolder,
         string defaultSamplesFolderName,
         List<string> allSamplesCandidates,
@@ -191,6 +197,7 @@ public class SdkInfo
         LanguageName = languageName;
         FileExtension = fileExtension;
         SourceFolder = sourceFolder;
+        BuildFilePath = buildFilePath;
         SamplesFolder = samplesFolder;
         SuggestedSamplesFolder = samplesFolder ?? Path.Combine(rootPath, defaultSamplesFolderName);
         AllSamplesCandidates = allSamplesCandidates.AsReadOnly();
@@ -479,7 +486,7 @@ public class SdkInfo
         try
         {
             // Detect language and source folder
-            var (sourceFolder, languageEnum, languageName, fileExt, detectedPattern) = DetectSourceFolder(root);
+            var (sourceFolder, languageEnum, languageName, fileExt, detectedPattern, buildFilePath) = DetectSourceFolder(root);
 
             // Extract library name for import-based samples detection
             string? libraryName = languageEnum.HasValue
@@ -499,6 +506,7 @@ public class SdkInfo
                 languageName: languageName,
                 fileExtension: fileExt,
                 sourceFolder: sourceFolder,
+                buildFilePath: buildFilePath,
                 samplesFolder: samplesFolder,
                 defaultSamplesFolderName: defaultSamplesName,
                 allSamplesCandidates: allCandidates,
@@ -524,6 +532,7 @@ public class SdkInfo
                 languageName: null,
                 fileExtension: null,
                 sourceFolder: root,
+                buildFilePath: null,
                 samplesFolder: null,
                 defaultSamplesFolderName: "examples",
                 allSamplesCandidates: [],
@@ -532,7 +541,7 @@ public class SdkInfo
         }
     }
 
-    private static (string SourceFolder, SdkLanguage? Language, string? LanguageName, string? FileExt, LanguageSpec? Spec) DetectSourceFolder(string root)
+    private static (string SourceFolder, SdkLanguage? Language, string? LanguageName, string? FileExt, LanguageSpec? Spec, string? BuildFilePath) DetectSourceFolder(string root)
     {
         // Step 1: Find ALL build markers in the SDK (recursive scan)
         var markers = FindAllBuildMarkers(root);
@@ -540,7 +549,7 @@ public class SdkInfo
         if (markers.Count is 0)
         {
             // No build markers found - return root with no language detected
-            return (root, null, null, null, null);
+            return (root, null, null, null, null, null);
         }
 
         // Step 2: For each marker, resolve the actual language (handle disambiguation)
@@ -569,7 +578,7 @@ public class SdkInfo
         if (projects.Count is 0)
         {
             // Build markers found but no source files - return root with no language detected
-            return (root, null, null, null, null);
+            return (root, null, null, null, null, null);
         }
 
         // Step 3: Rank projects by source file count (main project has most code)
@@ -580,7 +589,8 @@ public class SdkInfo
             mainProject.ResolvedSpec.LanguageEnum,
             mainProject.ResolvedSpec.Name,
             mainProject.ResolvedSpec.FileExtension,
-            mainProject.ResolvedSpec
+            mainProject.ResolvedSpec,
+            mainProject.Marker.BuildFilePath
         );
     }
 

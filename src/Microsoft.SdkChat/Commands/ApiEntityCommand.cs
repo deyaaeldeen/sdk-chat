@@ -4,6 +4,7 @@
 using System.CommandLine;
 using Microsoft.SdkChat.Helpers;
 using Microsoft.SdkChat.Services;
+using PublicApiGraphEngine.Contracts;
 
 namespace Microsoft.SdkChat.Commands;
 
@@ -28,21 +29,44 @@ public class ApiEntityCommand : Command
             var json = new Option<bool>("--json") { Description = "Output structured JSON (default: human-readable code stubs)" };
             var output = new Option<string?>("--output", "-o") { Description = "Write to file instead of stdout" };
             var crossLanguageMetadata = new Option<string?>("--cross-language-metadata") { Description = "Path to cross-language metadata mapping JSON" };
+            var csproj = new Option<string?>("--csproj") { Description = "C# only: explicit .csproj path for artifact mode" };
+            var tsconfig = new Option<string?>("--tsconfig") { Description = "TypeScript only: explicit tsconfig.json path for artifact mode" };
+            var packageJson = new Option<string?>("--package-json") { Description = "TypeScript only: explicit package.json path for export conditions" };
+            var pom = new Option<string?>("--pom") { Description = "Java only: explicit pom.xml path for artifact mode" };
+            var gradle = new Option<string?>("--gradle") { Description = "Java only: explicit build.gradle/build.gradle.kts path for artifact mode" };
+            var importName = new Option<string?>("--import-name") { Description = "Python only: importable package name for inspect mode" };
 
             Add(pathArg);
             Add(language);
             Add(json);
             Add(output);
             Add(crossLanguageMetadata);
+            Add(csproj);
+            Add(tsconfig);
+            Add(packageJson);
+            Add(pom);
+            Add(gradle);
+            Add(importName);
 
             this.SetAction(async (ctx, ct) =>
             {
                 var service = new PackageInfoService();
+                var artifactOptions = new ArtifactOptions
+                {
+                    CsprojPath = ctx.GetValue(csproj),
+                    TsconfigPath = ctx.GetValue(tsconfig),
+                    PackageJsonPath = ctx.GetValue(packageJson),
+                    PomPath = ctx.GetValue(pom),
+                    GradlePath = ctx.GetValue(gradle),
+                    ImportName = ctx.GetValue(importName),
+                };
+
                 var result = await service.GraphPublicApiAsync(
                     ctx.GetValue(pathArg)!,
                     ctx.GetValue(language),
                     ctx.GetValue(json),
                     ctx.GetValue(crossLanguageMetadata),
+                    artifactOptions,
                     ct);
 
                 if (!result.Success)

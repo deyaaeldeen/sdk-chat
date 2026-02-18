@@ -3,9 +3,9 @@
 
 package com.test.sdk;
 
-import com.somelib.http.HttpClient;
-import com.somelib.http.HttpRequest;
-import com.somelib.http.HttpResponse;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 
 /**
  * Client extending an external HTTP client library.
@@ -16,11 +16,13 @@ import com.somelib.http.HttpResponse;
  * - Cannot enumerate methods inherited from HttpClient
  * - Cannot classify HttpRequest/HttpResponse (interface vs class vs record)
  */
-public class ExtendedClient extends HttpClient {
+public abstract class ExtendedClient extends HttpClient {
+    private final String endpoint;
     private final String apiKey;
 
     public ExtendedClient(String endpoint, String apiKey) {
-        super(endpoint);
+        super();
+        this.endpoint = endpoint;
         this.apiKey = apiKey;
     }
 
@@ -28,7 +30,7 @@ public class ExtendedClient extends HttpClient {
      * Sends a request using external types as parameter and return.
      * HttpRequest and HttpResponse are from the external package.
      */
-    public HttpResponse sendRequest(HttpRequest request) {
+    public HttpResponse<String> sendRequest(HttpRequest request) {
         return null;
     }
 

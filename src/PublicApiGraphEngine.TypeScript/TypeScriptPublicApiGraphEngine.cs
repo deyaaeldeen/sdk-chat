@@ -53,15 +53,15 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     public string ToStubs(ApiIndex index) => TypeScriptFormatter.Format(index);
 
     /// <inheritdoc />
-    async Task<EngineResult<ApiIndex>> IPublicApiGraphEngine<ApiIndex>.GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
+    async Task<EngineResult<ApiIndex>> IPublicApiGraphEngine<ApiIndex>.GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
         if (!IsAvailable())
             return EngineResult<ApiIndex>.CreateFailure(UnavailableReason ?? "Node.js not available");
 
-        using var activity = EngineTelemetry.StartGraphing(Language, rootPath);
+        using var activity = EngineTelemetry.StartGraphing(Language, input.RootDirectory);
         try
         {
-            var (result, diagnostics) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+            var (result, diagnostics) = await ExtractCoreAsync(input, crossLanguageMap, ct).ConfigureAwait(false);
             if (result is not null)
             {
                 EngineTelemetry.RecordResult(activity, true, result.Modules.Count);
@@ -82,27 +82,58 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// Prefers pre-compiled binary from build, falls back to Node.js runtime.
     /// </summary>
     public Task<ApiIndex> GraphAsync(string rootPath, CancellationToken ct = default)
-        => GraphAsync(rootPath, null, ct);
+        => GraphAsync(new EngineInput.SourceDirectory(rootPath), null, ct);
 
-    public async Task<ApiIndex> GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
+    public Task<ApiIndex> GraphAsync(EngineInput input, CancellationToken ct = default)
+        => GraphAsync(input, null, ct);
+
+    public async Task<ApiIndex> GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
     {
-        var (index, _) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+        var (index, _) = await ExtractCoreAsync(input, crossLanguageMap, ct).ConfigureAwait(false);
         return index ?? throw new InvalidOperationException("TypeScript engine returned no API surface.");
     }
 
     /// <summary>
     /// Shared engine logic that returns both the API index and any stderr warnings.
     /// </summary>
-    private async Task<(ApiIndex? Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
+    private async Task<(ApiIndex? Index, IReadOnlyList<ApiDiagnostic> Diagnostics)> ExtractCoreAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
-        rootPath = ProcessSandbox.ValidateRootPath(rootPath);
+        string? tsconfigPath = input is EngineInput.TypeScriptProject ts ? ts.TsconfigPath : null;
+        string? packageJsonPath = input is EngineInput.TypeScriptProject tsPkg ? tsPkg.PackageJsonPath : null;
+        var rootPath = ProcessSandbox.ValidateRootPath(input.RootDirectory);
+        List<ApiDiagnostic> engineInputDiagnostics = [];
+
+        string? dtsRoot = null;
+        if (!string.IsNullOrWhiteSpace(tsconfigPath))
+        {
+            dtsRoot = await ResolveDtsOutputDirectoryAsync(tsconfigPath!, ct).ConfigureAwait(false);
+            if (dtsRoot is null)
+            {
+                engineInputDiagnostics.Add(new ApiDiagnostic
+                {
+                    Id = "ENGINE_INPUT",
+                    Level = DiagnosticLevel.Warning,
+                    Text = $"TypeScript artifact mode requested, but .d.ts output could not be resolved from '{tsconfigPath}'. Falling back to source analysis."
+                });
+            }
+            else
+            {
+                engineInputDiagnostics.Add(new ApiDiagnostic
+                {
+                    Id = "ENGINE_INPUT",
+                    Level = DiagnosticLevel.Info,
+                    Text = $"Using compiled artifacts: declaration files in {dtsRoot}"
+                });
+            }
+        }
+
         var availability = _availability.GetAvailability();
 
         // Docker mode: fall back to buffered engine call (Docker API returns string)
         if (availability.Mode == EngineMode.Docker)
         {
-            var result = await RunEngineAsync("--json", rootPath, ct).ConfigureAwait(false);
-            var diag = ParseStderrDiagnostics(result.StandardError);
+            var result = await RunEngineAsync("--json", rootPath, dtsRoot, packageJsonPath, ct).ConfigureAwait(false);
+            var diag = ApiDiagnosticsPostProcessor.PrependDiagnostics(engineInputDiagnostics, ParseStderrDiagnostics(result.StandardError));
 
             if (string.IsNullOrWhiteSpace(result.StandardOutput))
                 return (null, diag);
@@ -120,12 +151,11 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
         }
 
         // Native/Runtime mode: stream stdout directly to JSON deserializer (halves peak memory)
-        await using var streamResult = await RunEngineStreamAsync(rootPath, ct).ConfigureAwait(false);
+        await using var streamResult = await RunEngineStreamAsync(rootPath, dtsRoot, packageJsonPath, ct).ConfigureAwait(false);
 
         if (streamResult.StandardOutputStream is null)
         {
-            var diagnostics = ParseStderrDiagnostics(streamResult.StandardError);
-            return (null, diagnostics);
+            return (null, ApiDiagnosticsPostProcessor.PrependDiagnostics(engineInputDiagnostics, ParseStderrDiagnostics(streamResult.StandardError)));
         }
 
         var index = await JsonSerializer.DeserializeAsync(
@@ -146,7 +176,7 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 
         if (index is null) return (null, stderrDiagnostics);
 
-        var finalized = FinalizeIndex(index, crossLanguageMap, stderrDiagnostics);
+        var finalized = FinalizeIndex(index, crossLanguageMap, ApiDiagnosticsPostProcessor.PrependDiagnostics(engineInputDiagnostics, stderrDiagnostics));
         return (finalized, finalized.Diagnostics);
     }
 
@@ -154,15 +184,17 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// Runs the engine with streaming stdout for JSON deserialization.
     /// Used in NativeBinary and RuntimeInterpreter modes.
     /// </summary>
-    private async Task<StreamingProcessResult> RunEngineStreamAsync(string rootPath, CancellationToken ct)
+    private async Task<StreamingProcessResult> RunEngineStreamAsync(string rootPath, string? dtsRoot, string? packageJsonPath, CancellationToken ct)
     {
         var availability = _availability.GetAvailability();
+
+        var args = BuildEngineArgs(rootPath, "--json", dtsRoot, packageJsonPath);
 
         if (availability.Mode == EngineMode.NativeBinary)
         {
             return await ProcessSandbox.ExecuteWithStreamAsync(
                 availability.ExecutablePath!,
-                [rootPath, "--json"],
+                args,
                 cancellationToken: ct).ConfigureAwait(false);
         }
 
@@ -177,7 +209,7 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 
         return await ProcessSandbox.ExecuteWithStreamAsync(
             availability.ExecutablePath!,
-            [scriptPath, rootPath, "--json"],
+            [scriptPath, ..args],
             workingDirectory: scriptDir,
             cancellationToken: ct).ConfigureAwait(false);
     }
@@ -316,7 +348,7 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// </summary>
     public async Task<string> ExtractAsTypeScriptAsync(string rootPath, CancellationToken ct = default)
     {
-        var result = await RunEngineAsync("--stub", rootPath, ct).ConfigureAwait(false);
+        var result = await RunEngineAsync("--stub", rootPath, null, null, ct).ConfigureAwait(false);
         return result.StandardOutput;
     }
 
@@ -324,16 +356,17 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// Runs the TypeScript engine with the given output flag, dispatching to the correct
     /// execution mode (NativeBinary, RuntimeInterpreter, or Docker).
     /// </summary>
-    private async Task<ProcessResult> RunEngineAsync(string outputFlag, string rootPath, CancellationToken ct)
+    private async Task<ProcessResult> RunEngineAsync(string outputFlag, string rootPath, string? dtsRoot, string? packageJsonPath, CancellationToken ct)
     {
         rootPath = ProcessSandbox.ValidateRootPath(rootPath);
         var availability = _availability.GetAvailability();
+        var args = BuildEngineArgs(rootPath, outputFlag, dtsRoot, packageJsonPath);
 
         if (availability.Mode == EngineMode.NativeBinary)
         {
             var result = await ProcessSandbox.ExecuteAsync(
                 availability.ExecutablePath!,
-                [rootPath, outputFlag],
+                args,
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
@@ -353,7 +386,7 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
             var dockerResult = await DockerSandbox.ExecuteAsync(
                 availability.DockerImageName!,
                 rootPath,
-                [rootPath, outputFlag],
+                [..args],
                 cancellationToken: ct
             ).ConfigureAwait(false);
 
@@ -381,7 +414,7 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 
         var nodeResult = await ProcessSandbox.ExecuteAsync(
             availability.ExecutablePath!,
-            [scriptPath, rootPath, outputFlag],
+            [scriptPath, ..args],
             workingDirectory: scriptDir,
             cancellationToken: ct
         ).ConfigureAwait(false);
@@ -395,6 +428,66 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
         }
 
         return nodeResult;
+    }
+
+    private IReadOnlyList<string> BuildEngineArgs(string rootPath, string outputFlag, string? dtsRoot, string? packageJsonPath = null)
+    {
+        List<string> args = [rootPath, outputFlag];
+
+        if (!string.IsNullOrWhiteSpace(dtsRoot))
+        {
+            args.Add("--mode");
+            args.Add("compiled");
+            args.Add("--dts-root");
+            args.Add(dtsRoot);
+
+            if (!string.IsNullOrWhiteSpace(packageJsonPath))
+            {
+                args.Add("--package-json");
+                args.Add(packageJsonPath!);
+            }
+        }
+
+        return args;
+    }
+
+    private static async Task<string?> ResolveDtsOutputDirectoryAsync(string tsconfigPath, CancellationToken ct)
+    {
+        if (!File.Exists(tsconfigPath))
+            return null;
+
+        var result = await ProcessSandbox.ExecuteAsync(
+            "tsc",
+            ["-p", tsconfigPath, "--showConfig"],
+            timeout: TimeSpan.FromSeconds(15),
+            cancellationToken: ct).ConfigureAwait(false);
+
+        if (!result.Success)
+            return null;
+
+        using var doc = JsonDocument.Parse(result.StandardOutput);
+        if (!doc.RootElement.TryGetProperty("compilerOptions", out var compilerOptions))
+            return null;
+
+        string? outputDir = null;
+        if (compilerOptions.TryGetProperty("declarationDir", out var declarationDir) && declarationDir.ValueKind == JsonValueKind.String)
+            outputDir = declarationDir.GetString();
+        else if (compilerOptions.TryGetProperty("outDir", out var outDir) && outDir.ValueKind == JsonValueKind.String)
+            outputDir = outDir.GetString();
+
+        if (string.IsNullOrWhiteSpace(outputDir))
+            return null;
+
+        var tsconfigDirectory = Path.GetDirectoryName(tsconfigPath);
+        if (string.IsNullOrWhiteSpace(tsconfigDirectory))
+            return null;
+
+        var resolvedDirectory = Path.GetFullPath(Path.Combine(tsconfigDirectory, outputDir));
+        if (!Directory.Exists(resolvedDirectory))
+            return null;
+
+        var hasDeclarations = Directory.EnumerateFiles(resolvedDirectory, "*.d.ts", SearchOption.AllDirectories).Any();
+        return hasDeclarations ? resolvedDirectory : null;
     }
 
     internal static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)

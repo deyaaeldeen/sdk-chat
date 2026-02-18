@@ -26,6 +26,12 @@ public sealed class CliOptions
     public bool Pretty { get; private set; }
     public string? OutputFile { get; private set; }
     public bool ShowHelp { get; private set; }
+    public string? CsprojPath { get; private set; }
+    public string? TsconfigPath { get; private set; }
+    public string? PackageJsonPath { get; private set; }
+    public string? PomPath { get; private set; }
+    public string? GradlePath { get; private set; }
+    public string? ImportName { get; private set; }
 
     /// <summary>
     /// Parses command-line arguments into options.
@@ -60,6 +66,30 @@ public sealed class CliOptions
             {
                 options.OutputFile = args[++i];
             }
+            else if (arg == "--csproj" && i + 1 < args.Length)
+            {
+                options.CsprojPath = System.IO.Path.GetFullPath(args[++i]);
+            }
+            else if (arg == "--tsconfig" && i + 1 < args.Length)
+            {
+                options.TsconfigPath = System.IO.Path.GetFullPath(args[++i]);
+            }
+            else if (arg == "--package-json" && i + 1 < args.Length)
+            {
+                options.PackageJsonPath = System.IO.Path.GetFullPath(args[++i]);
+            }
+            else if (arg == "--pom" && i + 1 < args.Length)
+            {
+                options.PomPath = System.IO.Path.GetFullPath(args[++i]);
+            }
+            else if (arg == "--gradle" && i + 1 < args.Length)
+            {
+                options.GradlePath = System.IO.Path.GetFullPath(args[++i]);
+            }
+            else if (arg == "--import-name" && i + 1 < args.Length)
+            {
+                options.ImportName = args[++i];
+            }
             else if (!arg.StartsWith('-') && options.Path is null)
             {
                 options.Path = System.IO.Path.GetFullPath(arg);
@@ -87,6 +117,12 @@ public sealed class CliOptions
               --stub              Output as {language.ToLowerInvariant()} stubs (default)
               --pretty, -p        Pretty-print JSON with indentation
               -o, --output <file> Write output to file instead of stdout
+              --csproj <file>     C# only: explicit .csproj for artifact resolution
+              --tsconfig <file>   TypeScript only: explicit tsconfig.json for artifacts
+              --package-json <f>  TypeScript only: explicit package.json for exports
+              --pom <file>        Java only: explicit pom.xml for classes dir resolution
+              --gradle <file>     Java only: explicit build.gradle/build.gradle.kts
+              --import-name <n>   Python only: importable package name for inspect mode
               -h, --help          Show this help
             
             Examples:

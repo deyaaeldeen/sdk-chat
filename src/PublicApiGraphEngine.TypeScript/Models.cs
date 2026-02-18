@@ -162,6 +162,14 @@ public sealed record ModuleInfo
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
+    [JsonPropertyName("condition")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Condition { get; init; }
+
+    [JsonPropertyName("exportPath")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExportPath { get; init; }
+
     [JsonPropertyName("classes")]
     public IReadOnlyList<ClassInfo>? Classes { get; init; }
 

@@ -91,31 +91,32 @@ public class TypeScriptCompiledPrecisionTests : IClassFixture<TypeScriptCompiled
     /// A compiled engine processing dist/types/index.d.ts would see only
     /// the types that the default condition explicitly exports.
     /// </summary>
-    [Fact(Skip = "Requires compiled artifacts")]
+    [Fact]
     [Trait("Category", "CompiledOnly")]
     public void SourceParser_CannotDistinguish_DefaultExports_FromPlatformSpecific()
     {
         var api = GetApi();
-        var allClasses = api.Modules.SelectMany(m => m.Classes ?? []).ToList();
+        var browserModule = api.Modules.FirstOrDefault(m => m.Name == "browser");
+        var nodeModule = api.Modules.FirstOrDefault(m => m.Name == "node");
+        var sharedModule = api.Modules.FirstOrDefault(m => m.Name == "shared");
 
-        Assert.Contains(allClasses, c => c.Name == "NodeClient");
-        Assert.Contains(allClasses, c => c.Name == "BrowserClient");
-        Assert.Contains(allClasses, c => c.Name == "BaseClient");
+        Assert.NotNull(browserModule);
+        Assert.NotNull(nodeModule);
+        Assert.NotNull(sharedModule);
 
-        var defaultModule = api.Modules.FirstOrDefault(m =>
-            m.Name.Contains("default", StringComparison.OrdinalIgnoreCase) ||
-            m.Name == "." || m.Name == "index");
+        Assert.Contains(browserModule.Classes ?? [], c => c.Name == "BrowserClient");
+        Assert.Contains(nodeModule.Classes ?? [], c => c.Name == "NodeClient");
+        Assert.Contains(sharedModule.Classes ?? [], c => c.Name == "BaseClient");
 
-        if (defaultModule != null)
-        {
-            var defaultClasses = defaultModule.Classes ?? [];
-            Assert.Contains(defaultClasses, c => c.Name == "BaseClient");
-            Assert.DoesNotContain(defaultClasses, c => c.Name == "NodeClient");
-            Assert.DoesNotContain(defaultClasses, c => c.Name == "BrowserClient");
-        }
-        else
-        {
-            Assert.Fail("Compiled engine should produce a 'default' condition module");
-        }
+        Assert.True(browserModule.Condition is "default" or "browser");
+        Assert.True(nodeModule.Condition is "default" or "node");
+        Assert.Equal("default", sharedModule.Condition);
+
+        Assert.DoesNotContain("|", browserModule.Condition ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("|", nodeModule.Condition ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("|", sharedModule.Condition ?? string.Empty, StringComparison.Ordinal);
+
+        Assert.DoesNotContain(sharedModule.Classes ?? [], c => c.Name == "NodeClient");
+        Assert.DoesNotContain(sharedModule.Classes ?? [], c => c.Name == "BrowserClient");
     }
 }

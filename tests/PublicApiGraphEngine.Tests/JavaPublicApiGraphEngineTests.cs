@@ -570,28 +570,20 @@ public class JavaCompiledFixtureTests : IClassFixture<JavaCompiledFixture>
     }
 
     [Fact]
-    public void SourceParser_LeavesParameterOnlyTypes_AsUnresolved()
+    public void RuntimeMetadata_Classifies_ParameterOnlyExternalTypes()
     {
         var api = GetApi();
 
-        // HttpRequest and HttpResponse appear only in parameter/return positions,
-        // not in any implements or extends clause, so the source parser must leave
-        // them unresolved in Types[] rather than defaulting to Classes[].
+        // HttpRequest and HttpResponse appear only in parameter/return positions.
+        // Runtime metadata enrichment resolves them from java.net.http and
+        // classifies class vs interface accurately.
         var dep = api.Dependencies?.FirstOrDefault(d =>
-            d.Package.Contains("somelib", StringComparison.OrdinalIgnoreCase));
+            d.Package.Contains("java.net.http", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(dep);
 
-        // HttpRequest should NOT be in Classes or Interfaces — it's unresolvable from source alone
-        Assert.True(
-            dep.Classes == null || !dep.Classes.Any(c => c.Name == "HttpRequest"),
-            "HttpRequest should not be defaulted into Classes[]");
-        Assert.True(
-            dep.Interfaces == null || !dep.Interfaces.Any(i => i.Name == "HttpRequest"),
-            "HttpRequest should not be in Interfaces[] without compiled analysis");
-
-        // It should be in the unresolved Types[] bucket
-        Assert.NotNull(dep.Types);
-        Assert.Contains(dep.Types, t => t.Name == "HttpRequest");
-        Assert.Contains(dep.Types, t => t.Name == "HttpResponse");
+        Assert.NotNull(dep.Classes);
+        Assert.NotNull(dep.Interfaces);
+        Assert.Contains(dep.Classes, c => c.Name == "HttpRequest");
+        Assert.Contains(dep.Interfaces, i => i.Name == "HttpResponse");
     }
 }

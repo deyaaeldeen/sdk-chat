@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using PublicApiGraphEngine.Contracts;
 using PublicApiGraphEngine.Python;
 using Xunit;
 
@@ -45,11 +46,11 @@ public class PythonCompiledFixture : IAsyncLifetime
 /// Tests that REQUIRE compiled/runtime analysis to pass.
 /// These document the accuracy gap that a runtime-based engine will close.
 /// </summary>
-public class PythonCompiledPrecisionTests : IClassFixture<PythonCompiledFixture>
+public class PythonCompiledPrecisionTests : IClassFixture<PythonCompiledInspectFixture>
 {
-    private readonly PythonCompiledFixture _fixture;
+    private readonly PythonCompiledInspectFixture _fixture;
 
-    public PythonCompiledPrecisionTests(PythonCompiledFixture fixture)
+    public PythonCompiledPrecisionTests(PythonCompiledInspectFixture fixture)
     {
         _fixture = fixture;
     }
@@ -65,7 +66,7 @@ public class PythonCompiledPrecisionTests : IClassFixture<PythonCompiledFixture>
     /// The AST parser records "HTTPResponse" literally. A compiled engine
     /// resolves it to http.client.HTTPResponse via typing.get_type_hints().
     /// </summary>
-    [Fact(Skip = "Requires compiled artifacts")]
+    [Fact]
     [Trait("Category", "CompiledOnly")]
     public void SourceParser_CannotResolve_StringFormAnnotations()
     {
@@ -79,9 +80,39 @@ public class PythonCompiledPrecisionTests : IClassFixture<PythonCompiledFixture>
         Assert.NotNull(getResponse);
 
         Assert.NotNull(getResponse.Ret);
-        Assert.Contains("HTTPResponse", getResponse.Ret);
-
-        // Compiled engine should produce fully qualified: "http.client.HTTPResponse"
-        Assert.Contains("http.client", getResponse.Ret);
+        Assert.Contains("http.client.HTTPResponse", getResponse.Ret!, StringComparison.Ordinal);
     }
+}
+
+/// <summary>
+/// Fixture that forces Python inspect-mode for compiled precision assertions.
+/// </summary>
+public class PythonCompiledInspectFixture : IAsyncLifetime
+{
+    private static readonly string TestFixturesPath =
+        Path.Combine(AppContext.BaseDirectory, "TestFixtures", "CompiledMode", "Python");
+
+    public ApiIndex? Api { get; private set; }
+    public string? SkipReason { get; private set; }
+
+    public async ValueTask InitializeAsync()
+    {
+        var engine = new PythonPublicApiGraphEngine();
+        if (!engine.IsAvailable())
+        {
+            SkipReason = engine.UnavailableReason ?? "Python not available";
+            return;
+        }
+
+        try
+        {
+            Api = await engine.GraphAsync(new EngineInput.PythonPackage("test_compiled_pkg", TestFixturesPath, AllowRootPathImport: true));
+        }
+        catch (Exception ex)
+        {
+            SkipReason = $"Python engine failed: {ex.Message}";
+        }
+    }
+
+    public ValueTask DisposeAsync() => default;
 }

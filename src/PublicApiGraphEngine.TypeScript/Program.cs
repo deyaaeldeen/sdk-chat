@@ -26,7 +26,10 @@ if (!engine.IsAvailable())
     return 1;
 }
 
-var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(options.Path, ct: CancellationToken.None);
+EngineInput input = (options.TsconfigPath ?? options.PackageJsonPath) is not null
+    ? new EngineInput.TypeScriptProject(options.TsconfigPath, options.PackageJsonPath)
+    : new EngineInput.SourceDirectory(options.Path);
+var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(input, ct: CancellationToken.None);
 
 if (result is EngineResult<ApiIndex>.Failure failure)
 {

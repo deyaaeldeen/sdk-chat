@@ -19,7 +19,10 @@ if (!Directory.Exists(options.Path))
 }
 
 var engine = new CSharpPublicApiGraphEngine();
-var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(options.Path, ct: CancellationToken.None);
+EngineInput input = options.CsprojPath is not null
+    ? new EngineInput.DotNetProject(options.CsprojPath)
+    : new EngineInput.SourceDirectory(options.Path);
+var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(input, ct: CancellationToken.None);
 
 if (result is EngineResult<ApiIndex>.Failure failure)
 {

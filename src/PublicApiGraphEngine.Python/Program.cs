@@ -26,7 +26,10 @@ if (!engine.IsAvailable())
     return 1;
 }
 
-var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(options.Path, ct: CancellationToken.None);
+EngineInput input = options.ImportName is not null
+    ? new EngineInput.PythonPackage(options.ImportName, options.Path)
+    : new EngineInput.SourceDirectory(options.Path);
+var result = await ((IPublicApiGraphEngine<ApiIndex>)engine).GraphAsync(input, ct: CancellationToken.None);
 
 if (result is EngineResult<ApiIndex>.Failure failure)
 {

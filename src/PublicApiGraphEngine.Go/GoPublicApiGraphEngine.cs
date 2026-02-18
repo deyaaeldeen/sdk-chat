@@ -57,8 +57,9 @@ public class GoPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     public string ToStubs(ApiIndex index) => GoFormatter.Format(index);
 
     /// <inheritdoc />
-    async Task<EngineResult<ApiIndex>> IPublicApiGraphEngine<ApiIndex>.GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
+    async Task<EngineResult<ApiIndex>> IPublicApiGraphEngine<ApiIndex>.GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct)
     {
+        var rootPath = input.RootDirectory;
         if (!IsAvailable())
             return EngineResult<ApiIndex>.CreateFailure(UnavailableReason ?? "Go not available");
 
@@ -86,11 +87,11 @@ public class GoPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     /// Prefers pre-compiled binary from build, falls back to runtime compilation.
     /// </summary>
     public Task<ApiIndex> GraphAsync(string rootPath, CancellationToken ct = default)
-        => GraphAsync(rootPath, null, ct);
+        => GraphAsync(new EngineInput.SourceDirectory(rootPath), null, ct);
 
-    public async Task<ApiIndex> GraphAsync(string rootPath, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
+    public async Task<ApiIndex> GraphAsync(EngineInput input, CrossLanguageMap? crossLanguageMap, CancellationToken ct = default)
     {
-        var (index, _) = await ExtractCoreAsync(rootPath, crossLanguageMap, ct).ConfigureAwait(false);
+        var (index, _) = await ExtractCoreAsync(input.RootDirectory, crossLanguageMap, ct).ConfigureAwait(false);
         return index ?? throw new InvalidOperationException("Go engine returned no API surface.");
     }
 
