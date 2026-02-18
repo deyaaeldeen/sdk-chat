@@ -282,108 +282,40 @@ public static class TypeScriptFormatter
         int includedItems = 0;
         HashSet<string> includedTypeNames = [];
 
-        // Format by export path sections if we have multiple paths
-        if (sortedExportPaths.Count > 1)
+        // Unified rendering: group types by (exportPath, conditionSet)
+        // This handles subpaths, conditions, or both simultaneously
+        bool hasSubpaths = sortedExportPaths.Count > 1;
+        bool needsSections = hasSubpaths || hasMultipleConditions;
+
+        if (needsSections)
         {
-            foreach (var exportPath in sortedExportPaths)
-            {
-                if (sb.Length >= maxLength) break;
-
-                var importPath = exportPath == "."
-                    ? index.Package
-                    : $"{index.Package}/{(exportPath.StartsWith("./", StringComparison.Ordinal) ? exportPath[2..] : exportPath)}";
-
-                sb.AppendLine($"// ============================================================================");
-                sb.AppendLine($"// import {{ ... }} from \"{importPath}\"");
-                var moduleConditions = index.Modules
-                    .Where(module => string.Equals(module.ExportPath, exportPath, StringComparison.Ordinal))
-                    .Select(module => module.Condition)
-                    .Where(condition => !string.IsNullOrWhiteSpace(condition))
-                    .Distinct(StringComparer.Ordinal)
-                    .OrderBy(condition => condition, StringComparer.Ordinal)
-                    .ToList();
-                if (moduleConditions.Count > 0)
-                {
-                    sb.AppendLine($"// Export conditions: {string.Join(", ", moduleConditions)}");
-                }
-                sb.AppendLine($"// ============================================================================");
-                sb.AppendLine();
-
-                // Get classes for this export path
-                var pathClasses = allClasses.Where(c => c.ExportPath == exportPath).ToList();
-                var prioritizedClasses = GetPrioritizedClasses(pathClasses, typeDeps);
-
-                foreach (var cls in prioritizedClasses)
-                {
-                    if (sb.Length >= maxLength) break;
-                    if (includedTypeNames.Contains(cls.Name)) continue;
-
-                    var classStr = FormatClass(cls);
-                    if (sb.Length + classStr.Length > maxLength - 100 && includedItems > 0)
-                        break;
-
-                    sb.Append(classStr);
-                    includedTypeNames.Add(cls.Name);
-                    includedItems++;
-                }
-
-                // Get interfaces for this export path
-                foreach (var iface in allInterfaces.Where(i => i.ExportPath == exportPath))
-                {
-                    if (sb.Length >= maxLength) break;
-                    if (includedTypeNames.Contains(iface.Name)) continue;
-
-                    var ifaceStr = FormatInterface(iface);
-                    if (sb.Length + ifaceStr.Length > maxLength - 100 && includedItems > 0)
-                        break;
-
-                    sb.Append(ifaceStr);
-                    includedTypeNames.Add(iface.Name);
-                    includedItems++;
-                }
-
-                // Get functions for this export path
-                foreach (var fn in allFunctions.Where(f => f.ExportPath == exportPath))
-                {
-                    if (sb.Length >= maxLength) break;
-
-                    var fnStr = FormatFunction(fn);
-                    if (sb.Length + fnStr.Length > maxLength - 100 && includedItems > 0)
-                        break;
-
-                    sb.Append(fnStr);
-                    includedItems++;
-                }
-            }
-
-            // Include non-exported dependencies if space permits
-            sb.AppendLine($"// ============================================================================");
-            sb.AppendLine($"// Supporting Types (not directly exported)");
-            sb.AppendLine($"// ============================================================================");
-            sb.AppendLine();
-        }
-        else if (hasMultipleConditions)
-        {
-            // Condition-aware rendering: group types by their condition set
+            // Build grouping key for each type: "exportPath||conditionSet"
             var conditionSetKey = (string name) =>
             {
-                if (typeConditions.TryGetValue(name, out var conds))
+                if (hasMultipleConditions && typeConditions.TryGetValue(name, out var conds))
                     return string.Join(", ", conds.OrderBy(c => c, StringComparer.Ordinal));
-                return "default";
+                return "";
             };
 
-            // Build ordered groups: shared-across-all first, then per-condition
-            var allConditionsKey = string.Join(", ", distinctConditions);
-            var groups = new Dictionary<string, (List<ClassInfo> Classes, List<InterfaceInfo> Interfaces,
+            // Collect all section keys used by types
+            var sectionTypes = new Dictionary<string, (List<ClassInfo> Classes, List<InterfaceInfo> Interfaces,
                 List<EnumInfo> Enums, List<TypeAliasInfo> Types, List<FunctionInfo> Functions)>();
 
-            void AddToGroup(string key, ClassInfo? cls = null, InterfaceInfo? iface = null,
+            string SectionKey(string? exportPath, string condKey)
+            {
+                var ep = exportPath ?? "";
+                return hasSubpaths && hasMultipleConditions ? $"{ep}||{condKey}"
+                    : hasSubpaths ? ep
+                    : condKey;
+            }
+
+            void AddToSection(string key, ClassInfo? cls = null, InterfaceInfo? iface = null,
                 EnumInfo? en = null, TypeAliasInfo? ta = null, FunctionInfo? fn = null)
             {
-                if (!groups.TryGetValue(key, out var g))
+                if (!sectionTypes.TryGetValue(key, out var g))
                 {
                     g = ([], [], [], [], []);
-                    groups[key] = g;
+                    sectionTypes[key] = g;
                 }
                 if (cls is not null) g.Classes.Add(cls);
                 if (iface is not null) g.Interfaces.Add(iface);
@@ -392,31 +324,77 @@ public static class TypeScriptFormatter
                 if (fn is not null) g.Functions.Add(fn);
             }
 
-            foreach (var cls in allClasses) AddToGroup(conditionSetKey(cls.Name), cls: cls);
-            foreach (var iface in allInterfaces) AddToGroup(conditionSetKey(iface.Name), iface: iface);
-            foreach (var en in allEnums) AddToGroup(conditionSetKey(en.Name), en: en);
-            foreach (var ta in allTypes) AddToGroup(conditionSetKey(ta.Name), ta: ta);
-            foreach (var fn in allFunctions) AddToGroup(conditionSetKey(fn.Name), fn: fn);
+            foreach (var cls in allClasses) AddToSection(SectionKey(cls.ExportPath, conditionSetKey(cls.Name)), cls: cls);
+            foreach (var iface in allInterfaces) AddToSection(SectionKey(iface.ExportPath, conditionSetKey(iface.Name)), iface: iface);
+            foreach (var en in allEnums) AddToSection(SectionKey(null, conditionSetKey(en.Name)), en: en);
+            foreach (var ta in allTypes) AddToSection(SectionKey(null, conditionSetKey(ta.Name)), ta: ta);
+            foreach (var fn in allFunctions) AddToSection(SectionKey(fn.ExportPath, conditionSetKey(fn.Name)), fn: fn);
 
-            // Sort groups: all-conditions first, then by number of conditions descending
-            var sortedGroups = groups.OrderByDescending(g => g.Value.Classes.Count + g.Value.Interfaces.Count
-                    + g.Value.Enums.Count + g.Value.Types.Count + g.Value.Functions.Count)
-                .OrderByDescending(g => g.Key.Split(", ").Length)
+            // Sort sections: by export path first (. before subpaths), then by condition count descending
+            var sortedSections = sectionTypes
+                .OrderBy(s =>
+                {
+                    var parts = s.Key.Split("||");
+                    var ep = parts[0];
+                    return ep == "." || ep == "" ? "" : ep;
+                })
+                .ThenByDescending(s =>
+                {
+                    var parts = s.Key.Split("||");
+                    var condKey = parts.Length > 1 ? parts[1] : parts[0];
+                    return condKey.Split(", ").Length;
+                })
                 .ToList();
 
-            foreach (var (key, group) in sortedGroups)
+            foreach (var (key, section) in sortedSections)
             {
                 if (sb.Length >= maxLength) break;
 
-                var condList = key.Split(", ");
-                var label = condList.Length == distinctConditions.Count
-                    ? $"Shared ({key})"
-                    : key;
-                sb.AppendLine($"// ── {label} ──");
-                sb.AppendLine();
+                // Build section header
+                var parts = key.Split("||");
+                string? exportPath = null;
+                string condKey = "";
+                if (hasSubpaths && hasMultipleConditions)
+                {
+                    exportPath = parts[0];
+                    condKey = parts.Length > 1 ? parts[1] : "";
+                }
+                else if (hasSubpaths)
+                {
+                    exportPath = parts[0];
+                }
+                else
+                {
+                    condKey = parts[0];
+                }
 
-                var groupClasses = GetPrioritizedClasses(group.Classes, typeDeps);
-                foreach (var cls in groupClasses)
+                // Render header
+                var headerParts = new List<string>();
+                if (hasSubpaths && !string.IsNullOrEmpty(exportPath))
+                {
+                    var importPath = exportPath == "."
+                        ? index.Package
+                        : $"{index.Package}/{(exportPath.StartsWith("./", StringComparison.Ordinal) ? exportPath[2..] : exportPath)}";
+                    headerParts.Add($"import {{ ... }} from \"{importPath}\"");
+                }
+                if (hasMultipleConditions && !string.IsNullOrEmpty(condKey))
+                {
+                    var condList = condKey.Split(", ");
+                    var condLabel = condList.Length == distinctConditions.Count
+                        ? $"Shared ({condKey})"
+                        : condKey;
+                    headerParts.Add(condLabel);
+                }
+
+                if (headerParts.Count > 0)
+                {
+                    sb.AppendLine($"// ── {string.Join(" · ", headerParts)} ──");
+                    sb.AppendLine();
+                }
+
+                // Render types in section
+                var sectionClasses = GetPrioritizedClasses(section.Classes, typeDeps);
+                foreach (var cls in sectionClasses)
                 {
                     if (sb.Length >= maxLength) break;
                     if (includedTypeNames.Contains(cls.Name)) continue;
@@ -426,28 +404,28 @@ public static class TypeScriptFormatter
                     includedTypeNames.Add(cls.Name);
                     includedItems++;
                 }
-                foreach (var iface in group.Interfaces)
+                foreach (var iface in section.Interfaces)
                 {
                     if (sb.Length >= maxLength) break;
                     if (includedTypeNames.Contains(iface.Name)) continue;
                     var ifaceStr = FormatInterface(iface);
                     if (sb.Length + ifaceStr.Length <= maxLength) { sb.Append(ifaceStr); includedTypeNames.Add(iface.Name); includedItems++; }
                 }
-                foreach (var en in group.Enums)
+                foreach (var en in section.Enums)
                 {
                     if (sb.Length >= maxLength) break;
                     if (includedTypeNames.Contains(en.Name)) continue;
                     var enumStr = FormatEnum(en);
                     if (sb.Length + enumStr.Length <= maxLength) { sb.Append(enumStr); includedTypeNames.Add(en.Name); includedItems++; }
                 }
-                foreach (var ta in group.Types)
+                foreach (var ta in section.Types)
                 {
                     if (sb.Length >= maxLength) break;
                     if (includedTypeNames.Contains(ta.Name)) continue;
                     var typeStr = FormatTypeAlias(ta);
                     if (sb.Length + typeStr.Length <= maxLength) { sb.Append(typeStr); includedTypeNames.Add(ta.Name); includedItems++; }
                 }
-                foreach (var fn in group.Functions)
+                foreach (var fn in section.Functions)
                 {
                     if (sb.Length >= maxLength) break;
                     var fnStr = FormatFunction(fn);
@@ -457,7 +435,7 @@ public static class TypeScriptFormatter
         }
         else
         {
-            // Original behavior: no export path grouping, no conditions
+            // Simple case: single export path, single condition
             var prioritizedClasses = GetPrioritizedClasses(allClasses, typeDeps);
 
             // First pass: Include client classes and their dependencies
