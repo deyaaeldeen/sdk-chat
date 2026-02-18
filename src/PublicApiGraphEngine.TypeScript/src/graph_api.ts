@@ -191,16 +191,6 @@ const PRIMITIVE_TYPES = new Set([
     "undefined", "null", "void", "never", "any", "unknown", "object",
 ]);
 
-/** Common runtime builtins that should not be treated as dependency types. */
-const COMMON_BUILTINS = new Set([
-    "Promise", "Array", "Map", "Set", "Record", "Partial", "Required", "Readonly",
-    "Pick", "Omit", "Exclude", "Extract", "NonNullable", "ReturnType", "InstanceType",
-    "Error", "Date", "RegExp", "Buffer", "Uint8Array", "ArrayBuffer", "ArrayBufferLike",
-    "Blob", "ReadableStream", "WritableStream", "AbortController", "AbortSignal",
-    "URL", "Headers", "Request", "Response", "RequestInit", "RequestInfo",
-    "IteratorResult", "AsyncIterableIterator", "AsyncIterable", "Iterable", "Iterator",
-    "PromiseLike", "PropertyKey", "Function", "Object",
-]);
 
 /**
  * Builtin type names discovered dynamically from the TypeScript project's
@@ -503,15 +493,16 @@ class TypeReferenceCollector {
     collectFromType(type: Type): void {
         if (!this.project) return;
         try {
-            const before = this.refs.size;
-            collectTypeRefsFromType(type, this.project, this.refs);
-            // Tag newly added refs with context
+            // Collect into a separate set so we can identify only the new refs
+            const newRefs = new Set<ResolvedTypeRef>();
+            collectTypeRefsFromType(type, this.project, newRefs);
+            // Merge into the global set and tag only new refs with context
             const ctx = this.currentContext();
-            if (ctx && this.refs.size > before) {
-                if (!this.refsByContext.has(ctx)) this.refsByContext.set(ctx, new Set());
-                const ctxRefs = this.refsByContext.get(ctx)!;
-                for (const ref of this.refs) {
-                    ctxRefs.add(ref);
+            for (const ref of newRefs) {
+                this.refs.add(ref);
+                if (ctx) {
+                    if (!this.refsByContext.has(ctx)) this.refsByContext.set(ctx, new Set());
+                    this.refsByContext.get(ctx)!.add(ref);
                 }
             }
         } catch {
@@ -1948,12 +1939,13 @@ function buildImportResolutionMap(project: Project): Map<string, { packageName: 
 /**
  * Extracts a type definition from a resolved dependency module.
  * Uses getExportedDeclarations() to follow re-exports to the actual declaration.
+ * Returns both the graphed info and the AST declaration node for further analysis.
  */
 function extractTypeFromResolvedModule(
     typeName: string,
     resolvedFile: SourceFile,
     isDefaultImport: boolean
-): ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | null {
+): { graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo; declaration: Node; kind: "class" | "interface" | "enum" | "type" } | null {
     try {
         const exportedDecls = resolvedFile.getExportedDeclarations();
 
@@ -1970,16 +1962,16 @@ function extractTypeFromResolvedModule(
                 const kind = decl.getKindName();
 
                 if (kind === "ClassDeclaration") {
-                    return extractClass(decl as ClassDeclaration);
+                    return { graphed: extractClass(decl as ClassDeclaration), declaration: decl, kind: "class" };
                 }
                 if (kind === "InterfaceDeclaration") {
-                    return extractInterface(decl as InterfaceDeclaration);
+                    return { graphed: extractInterface(decl as InterfaceDeclaration), declaration: decl, kind: "interface" };
                 }
                 if (kind === "EnumDeclaration") {
-                    return extractEnum(decl as EnumDeclaration);
+                    return { graphed: extractEnum(decl as EnumDeclaration), declaration: decl, kind: "enum" };
                 }
                 if (kind === "TypeAliasDeclaration") {
-                    return extractTypeAlias(decl as TypeAliasDeclaration);
+                    return { graphed: extractTypeAlias(decl as TypeAliasDeclaration), declaration: decl, kind: "type" };
                 }
             }
         }
@@ -2021,6 +2013,21 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         }
     }
 
+    // Add resolved dependency source files to the project so ts-morph can
+    // traverse their members for sub-dependency discovery
+    const addedFiles = new Set<string>();
+    for (const [, entry] of importResolutionMap) {
+        const filePath = entry.resolvedFile.getFilePath();
+        if (!addedFiles.has(filePath)) {
+            addedFiles.add(filePath);
+            // Add the directory containing the resolved file to get all related .d.ts
+            const dir = path.dirname(filePath);
+            try {
+                project.addSourceFilesAtPaths(path.join(dir, "**/*.d.ts"));
+            } catch { /* ignore if already added */ }
+        }
+    }
+
     // Group initial refs by package name
     const typesByPackage = new Map<string, Set<string>>();
     for (const ref of externalRefs) {
@@ -2031,43 +2038,16 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         typesByPackage.get(ref.packageName)!.add(ref.name);
     }
 
-    // Also scan main API types for references to types not in definedTypes
-    // (catches extends/implements/property types that reference external types
-    // not captured by the type collector, e.g., CommonClientOptions in extends)
-    for (const mod of api.modules) {
-        for (const cls of mod.classes ?? []) {
-            for (const ref of collectTypeNamesFromGraphedType(cls)) {
-                if (!definedTypes.has(ref) && !typesByPackage.has(ref)) {
-                    // Try to find in import resolution map
-                    const res = importResolutionMap.get(ref);
-                    if (res) {
-                        if (!typesByPackage.has(res.packageName)) typesByPackage.set(res.packageName, new Set());
-                        typesByPackage.get(res.packageName)!.add(ref);
-                    }
-                }
-            }
-        }
-        for (const iface of mod.interfaces ?? []) {
-            for (const ref of collectTypeNamesFromGraphedType(iface)) {
-                if (!definedTypes.has(ref) && !typesByPackage.has(ref)) {
-                    const res = importResolutionMap.get(ref);
-                    if (res) {
-                        if (!typesByPackage.has(res.packageName)) typesByPackage.set(res.packageName, new Set());
-                        typesByPackage.get(res.packageName)!.add(ref);
-                    }
-                }
-            }
-        }
-    }
-
-    // Resolve types iteratively, discovering sub-dependencies within resolved types
-    const allResolved = new Map<string, { packageName: string; type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo }>();
+    // Resolve types iteratively using AST-based sub-dependency discovery.
+    // When a dependency type is resolved, we use ts-morph's type system to
+    // walk its declaration and find all referenced external types — no string
+    // tokenization or heuristics.
+    const allResolved = new Map<string, { packageName: string; type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo; kind: "class" | "interface" | "enum" | "type" }>();
     const allUnresolved = new Set<string>();
-    const processed = new Set<string>(); // type names already attempted
+    const processed = new Set<string>();
 
-    // Iterative resolution: resolve types, scan their signatures for new refs, repeat
     let pendingTypes = new Map(typesByPackage);
-    for (let iteration = 0; iteration < 5 && pendingTypes.size > 0; iteration++) {
+    while (pendingTypes.size > 0) {
         const newPending = new Map<string, Set<string>>();
 
         for (const [packageName, typeNames] of pendingTypes) {
@@ -2076,59 +2056,80 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                 processed.add(typeName);
 
                 const resolution = importResolutionMap.get(typeName);
-                let graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | null = null;
+                let result: { graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo; declaration: Node; kind: "class" | "interface" | "enum" | "type" } | null = null;
 
                 if (resolution) {
                     const isDefault = defaultImportedTypes.has(typeName);
-                    graphed = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault);
+                    result = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault);
                 }
 
-                if (!graphed) {
+                if (!result) {
                     allUnresolved.add(typeName);
                     continue;
                 }
 
-                allResolved.set(typeName, { packageName, type: graphed });
+                allResolved.set(typeName, { packageName, type: result.graphed, kind: result.kind });
 
-                // Scan the resolved type's signatures for sub-dependency type names
-                const subRefs = collectTypeNamesFromGraphedType(graphed);
+                // Use AST-based type traversal to discover sub-dependencies
+                const subRefs = new Set<ResolvedTypeRef>();
+                try {
+                    const declType = (result.declaration as any).getType?.();
+                    if (declType) {
+                        collectTypeRefsFromType(declType, project, subRefs);
+                    }
+                    // For classes/interfaces, also traverse members' types
+                    const decl = result.declaration;
+                    if (Node.isClassDeclaration(decl) || Node.isInterfaceDeclaration(decl)) {
+                        for (const member of decl.getMembers()) {
+                            try {
+                                const memberType = (member as any).getType?.();
+                                if (memberType) collectTypeRefsFromType(memberType, project, subRefs);
+                                const params = (member as any).getParameters?.();
+                                if (params) {
+                                    for (const p of params) {
+                                        const pType = p.getType?.();
+                                        if (pType) collectTypeRefsFromType(pType, project, subRefs);
+                                    }
+                                }
+                                const retType = (member as any).getReturnType?.();
+                                if (retType) collectTypeRefsFromType(retType, project, subRefs);
+                            } catch { /* skip members that fail */ }
+                        }
+                    }
+                } catch { /* skip types that fail traversal */ }
+
+                // Queue discovered sub-refs for resolution
                 for (const subRef of subRefs) {
-                    if (definedTypes.has(subRef)) continue;
-                    if (processed.has(subRef)) continue;
-                    if (allResolved.has(subRef)) continue;
+                    if (!subRef.packageName) continue;
+                    if (isNodePackage(subRef.packageName)) continue;
+                    if (definedTypes.has(subRef.name)) continue;
+                    if (processed.has(subRef.name)) continue;
+                    if (allResolved.has(subRef.name)) continue;
 
-                    // Try the import resolution map first
-                    const subResolution = importResolutionMap.get(subRef);
-                    if (subResolution) {
-                        const pkg = subResolution.packageName;
-                        if (!newPending.has(pkg)) newPending.set(pkg, new Set());
-                        newPending.get(pkg)!.add(subRef);
-                        continue;
-                    }
-
-                    // Try the same resolved module as the parent type
-                    if (resolution) {
-                        const found = extractTypeFromResolvedModule(subRef, resolution.resolvedFile, false);
-                        if (found) {
-                            importResolutionMap.set(subRef, { packageName: resolution.packageName, resolvedFile: resolution.resolvedFile });
-                            if (!newPending.has(packageName)) newPending.set(packageName, new Set());
-                            newPending.get(packageName)!.add(subRef);
-                            continue;
+                    // Register in import resolution map for resolution
+                    if (!importResolutionMap.has(subRef.name)) {
+                        let resolvedFile: SourceFile | undefined;
+                        // Prefer the exact declaration file when available — this handles
+                        // multi-module packages where different types live in different files
+                        if (subRef.declarationPath) {
+                            resolvedFile = project.getSourceFile(subRef.declarationPath) ?? undefined;
+                        }
+                        // Fall back to any existing entry for the same package
+                        if (!resolvedFile) {
+                            for (const [, entry] of importResolutionMap) {
+                                if (entry.packageName === subRef.packageName) {
+                                    resolvedFile = entry.resolvedFile;
+                                    break;
+                                }
+                            }
+                        }
+                        if (resolvedFile) {
+                            importResolutionMap.set(subRef.name, { packageName: subRef.packageName, resolvedFile });
                         }
                     }
 
-                    // Try all known resolved modules as a last resort
-                    let foundBroadly = false;
-                    for (const [, entry] of importResolutionMap) {
-                        const found = extractTypeFromResolvedModule(subRef, entry.resolvedFile, false);
-                        if (found) {
-                            importResolutionMap.set(subRef, entry);
-                            if (!newPending.has(entry.packageName)) newPending.set(entry.packageName, new Set());
-                            newPending.get(entry.packageName)!.add(subRef);
-                            foundBroadly = true;
-                            break;
-                        }
-                    }
+                    if (!newPending.has(subRef.packageName)) newPending.set(subRef.packageName, new Set());
+                    newPending.get(subRef.packageName)!.add(subRef.name);
                 }
             }
         }
@@ -2136,21 +2137,27 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         pendingTypes = newPending;
     }
 
+
     // Build dependency info grouped by package
     const depByPackage = new Map<string, DependencyInfo>();
-    for (const [typeName, { packageName, type }] of allResolved) {
+    for (const [typeName, { packageName, type, kind }] of allResolved) {
         if (!depByPackage.has(packageName)) {
             depByPackage.set(packageName, { package: packageName, isNode: isNodePackage(packageName) || undefined });
         }
         const depInfo = depByPackage.get(packageName)!;
-        if ("constructors" in type) {
-            (depInfo.classes ??= []).push(type as ClassInfo);
-        } else if ("methods" in type || "properties" in type) {
-            (depInfo.interfaces ??= []).push(type as InterfaceInfo);
-        } else if ("values" in type) {
-            (depInfo.enums ??= []).push(type as EnumInfo);
-        } else {
-            (depInfo.types ??= []).push(type as TypeAliasInfo);
+        switch (kind) {
+            case "class":
+                (depInfo.classes ??= []).push(type as ClassInfo);
+                break;
+            case "interface":
+                (depInfo.interfaces ??= []).push(type as InterfaceInfo);
+                break;
+            case "enum":
+                (depInfo.enums ??= []).push(type as EnumInfo);
+                break;
+            case "type":
+                (depInfo.types ??= []).push(type as TypeAliasInfo);
+                break;
         }
     }
 
@@ -2180,67 +2187,6 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
  * Extracts type names referenced in a resolved dependency type's signatures.
  * Only extracts type-position tokens, not parameter names or literals.
  */
-function collectTypeNamesFromGraphedType(type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo): Set<string> {
-    const names = new Set<string>();
-    const addTypeName = (name: string) => {
-        const base = name.split("<")[0].trim();
-        if (base && base.length > 1  // Skip single-letter generics (T, K, V, etc.)
-            && !PRIMITIVE_TYPES.has(base) && !isBuiltinType(base)
-            && !COMMON_BUILTINS.has(base)
-            && /^[A-Z]/.test(base) && !base.includes('"') && !base.includes("'")) {
-            names.add(base);
-        }
-    };
-
-    const extractTypesFromSig = (sig: string | undefined) => {
-        if (!sig) return;
-        // Extract type annotations after ":" or "?:" in parameter lists
-        const typePattern = /(?::\s*)([^,)]+)/g;
-        let match;
-        while ((match = typePattern.exec(sig)) !== null) {
-            for (const token of match[1].split(/[<>|&\[\]\s(){}]+/)) {
-                addTypeName(token);
-            }
-        }
-    };
-
-    const extractTypes = (text: string | undefined) => {
-        if (!text) return;
-        for (const token of text.split(/[<>|&,\[\]\s(){}:;=?]+/)) {
-            addTypeName(token);
-        }
-    };
-
-    if ("methods" in type) {
-        for (const m of (type as InterfaceInfo | ClassInfo).methods ?? []) {
-            extractTypesFromSig(m.sig);
-            extractTypes(m.ret);
-        }
-    }
-    if ("properties" in type) {
-        for (const p of (type as InterfaceInfo | ClassInfo).properties ?? []) {
-            extractTypes(p.type);
-        }
-    }
-    if ("constructors" in type) {
-        for (const c of (type as ClassInfo).constructors ?? []) {
-            extractTypesFromSig(c.sig);
-        }
-    }
-    if ("extends" in type) {
-        const ext = (type as ClassInfo | InterfaceInfo).extends;
-        if (typeof ext === "string") extractTypes(ext);
-        else if (Array.isArray(ext)) ext.forEach(extractTypes);
-    }
-    if ("implements" in type) {
-        ((type as ClassInfo).implements ?? []).forEach(extractTypes);
-    }
-    if ("type" in type && typeof (type as TypeAliasInfo).type === "string") {
-        extractTypes((type as TypeAliasInfo).type);
-    }
-
-    return names;
-}
 
 /**
  * Checks if a package is part of the Node.js runtime.
