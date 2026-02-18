@@ -190,6 +190,17 @@ const PRIMITIVE_TYPES = new Set([
     "undefined", "null", "void", "never", "any", "unknown", "object",
 ]);
 
+/** Common runtime builtins that should not be treated as dependency types. */
+const COMMON_BUILTINS = new Set([
+    "Promise", "Array", "Map", "Set", "Record", "Partial", "Required", "Readonly",
+    "Pick", "Omit", "Exclude", "Extract", "NonNullable", "ReturnType", "InstanceType",
+    "Error", "Date", "RegExp", "Buffer", "Uint8Array", "ArrayBuffer", "ArrayBufferLike",
+    "Blob", "ReadableStream", "WritableStream", "AbortController", "AbortSignal",
+    "URL", "Headers", "Request", "Response", "RequestInit", "RequestInfo",
+    "IteratorResult", "AsyncIterableIterator", "AsyncIterable", "Iterable", "Iterator",
+    "PromiseLike", "PropertyKey", "Function", "Object",
+]);
+
 /**
  * Builtin type names discovered dynamically from the TypeScript project's
  * lib files (lib.es*.d.ts, lib.dom.d.ts). These are language-level types
@@ -2002,69 +2013,177 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         }
     }
 
-    // Group by package name
-    const typesByPackage = new Map<string, ResolvedTypeRef[]>();
+    // Group initial refs by package name
+    const typesByPackage = new Map<string, Set<string>>();
     for (const ref of externalRefs) {
         if (!ref.packageName) continue;
-
         if (!typesByPackage.has(ref.packageName)) {
-            typesByPackage.set(ref.packageName, []);
+            typesByPackage.set(ref.packageName, new Set());
         }
-        typesByPackage.get(ref.packageName)!.push(ref);
+        typesByPackage.get(ref.packageName)!.add(ref.name);
     }
 
-    // Build dependency info array
-    const dependencies: DependencyInfo[] = [];
+    // Resolve types iteratively, discovering sub-dependencies within resolved types
+    const allResolved = new Map<string, { packageName: string; type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo }>();
+    const allUnresolved = new Set<string>();
+    const processed = new Set<string>(); // type names already attempted
 
-    for (const [packageName, refs] of typesByPackage) {
-        // Deduplicate type names
-        const uniqueTypeNames = [...new Set(refs.map(r => r.name))];
+    // Iterative resolution: resolve types, scan their signatures for new refs, repeat
+    let pendingTypes = new Map(typesByPackage);
+    for (let iteration = 0; iteration < 5 && pendingTypes.size > 0; iteration++) {
+        const newPending = new Map<string, Set<string>>();
 
-        const depInfo: DependencyInfo = { package: packageName, isNode: isNodePackage(packageName) || undefined };
+        for (const [packageName, typeNames] of pendingTypes) {
+            for (const typeName of typeNames) {
+                if (processed.has(typeName)) continue;
+                processed.add(typeName);
 
-        const classes: ClassInfo[] = [];
-        const interfaces: InterfaceInfo[] = [];
-        const enums: EnumInfo[] = [];
-        const types: TypeAliasInfo[] = [];
+                const resolution = importResolutionMap.get(typeName);
+                let graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | null = null;
 
-        for (const typeName of uniqueTypeNames) {
-            const resolution = importResolutionMap.get(typeName);
-            let graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | null = null;
+                if (resolution) {
+                    const isDefault = defaultImportedTypes.has(typeName);
+                    graphed = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault);
+                }
 
-            if (resolution) {
-                const isDefault = defaultImportedTypes.has(typeName);
-                graphed = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault);
-            }
+                if (!graphed) {
+                    allUnresolved.add(typeName);
+                    continue;
+                }
 
-            if (!graphed) {
-                // Type couldn't be resolved (package not installed or type not found) —
-                // create a minimal unresolved entry
-                types.push({ name: typeName, type: "unresolved" } as TypeAliasInfo);
-                continue;
-            }
+                allResolved.set(typeName, { packageName, type: graphed });
 
-            if ("constructors" in graphed) {
-                classes.push(graphed as ClassInfo);
-            } else if ("methods" in graphed || "properties" in graphed) {
-                interfaces.push(graphed as InterfaceInfo);
-            } else if ("values" in graphed) {
-                enums.push(graphed as EnumInfo);
-            } else {
-                types.push(graphed as TypeAliasInfo);
+                // Scan the resolved type's signatures for sub-dependency type names
+                const subRefs = collectTypeNamesFromGraphedType(graphed);
+                for (const subRef of subRefs) {
+                    if (definedTypes.has(subRef)) continue;
+                    if (processed.has(subRef)) continue;
+                    if (allResolved.has(subRef)) continue;
+
+                    // Try the import resolution map first
+                    const subResolution = importResolutionMap.get(subRef);
+                    if (subResolution) {
+                        const pkg = subResolution.packageName;
+                        if (!newPending.has(pkg)) newPending.set(pkg, new Set());
+                        newPending.get(pkg)!.add(subRef);
+                    } else if (resolution) {
+                        // Try the same resolved module as the parent type
+                        // (handles types re-exported from the same package)
+                        importResolutionMap.set(subRef, { packageName: resolution.packageName, resolvedFile: resolution.resolvedFile });
+                        if (!newPending.has(packageName)) newPending.set(packageName, new Set());
+                        newPending.get(packageName)!.add(subRef);
+                    }
+                }
             }
         }
 
-        if (classes.length > 0) depInfo.classes = classes;
-        if (interfaces.length > 0) depInfo.interfaces = interfaces;
-        if (enums.length > 0) depInfo.enums = enums;
-        if (types.length > 0) depInfo.types = types;
-
-        // Always include the dependency — even without resolved type details,
-        // the package reference from import declarations is valuable
-        dependencies.push(depInfo);
+        pendingTypes = newPending;
     }
 
-    return dependencies.sort((a, b) => a.package.localeCompare(b.package));
+    // Build dependency info grouped by package
+    const depByPackage = new Map<string, DependencyInfo>();
+    for (const [typeName, { packageName, type }] of allResolved) {
+        if (!depByPackage.has(packageName)) {
+            depByPackage.set(packageName, { package: packageName, isNode: isNodePackage(packageName) || undefined });
+        }
+        const depInfo = depByPackage.get(packageName)!;
+        if ("constructors" in type) {
+            (depInfo.classes ??= []).push(type as ClassInfo);
+        } else if ("methods" in type || "properties" in type) {
+            (depInfo.interfaces ??= []).push(type as InterfaceInfo);
+        } else if ("values" in type) {
+            (depInfo.enums ??= []).push(type as EnumInfo);
+        } else {
+            (depInfo.types ??= []).push(type as TypeAliasInfo);
+        }
+    }
+
+    // Add unresolved types
+    for (const typeName of allUnresolved) {
+        // Find which package it was supposed to come from
+        let pkg: string | undefined;
+        for (const ref of externalRefs) {
+            if (ref.name === typeName && ref.packageName) { pkg = ref.packageName; break; }
+        }
+        if (!pkg) {
+            const res = importResolutionMap.get(typeName);
+            if (res) pkg = res.packageName;
+        }
+        if (pkg) {
+            if (!depByPackage.has(pkg)) {
+                depByPackage.set(pkg, { package: pkg, isNode: isNodePackage(pkg) || undefined });
+            }
+            (depByPackage.get(pkg)!.types ??= []).push({ name: typeName, type: "unresolved" } as TypeAliasInfo);
+        }
+    }
+
+    return Array.from(depByPackage.values()).sort((a, b) => a.package.localeCompare(b.package));
+}
+
+/**
+ * Extracts type names referenced in a resolved dependency type's signatures.
+ * Only extracts type-position tokens, not parameter names or literals.
+ */
+function collectTypeNamesFromGraphedType(type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo): Set<string> {
+    const names = new Set<string>();
+    const addTypeName = (name: string) => {
+        const base = name.split("<")[0].trim();
+        if (base && base.length > 1  // Skip single-letter generics (T, K, V, etc.)
+            && !PRIMITIVE_TYPES.has(base) && !isBuiltinType(base)
+            && !COMMON_BUILTINS.has(base)
+            && /^[A-Z]/.test(base) && !base.includes('"') && !base.includes("'")) {
+            names.add(base);
+        }
+    };
+
+    const extractTypesFromSig = (sig: string | undefined) => {
+        if (!sig) return;
+        // Extract type annotations after ":" or "?:" in parameter lists
+        const typePattern = /(?::\s*)([^,)]+)/g;
+        let match;
+        while ((match = typePattern.exec(sig)) !== null) {
+            for (const token of match[1].split(/[<>|&\[\]\s(){}]+/)) {
+                addTypeName(token);
+            }
+        }
+    };
+
+    const extractTypes = (text: string | undefined) => {
+        if (!text) return;
+        for (const token of text.split(/[<>|&,\[\]\s(){}:;=?]+/)) {
+            addTypeName(token);
+        }
+    };
+
+    if ("methods" in type) {
+        for (const m of (type as InterfaceInfo | ClassInfo).methods ?? []) {
+            extractTypesFromSig(m.sig);
+            extractTypes(m.ret);
+        }
+    }
+    if ("properties" in type) {
+        for (const p of (type as InterfaceInfo | ClassInfo).properties ?? []) {
+            extractTypes(p.type);
+        }
+    }
+    if ("constructors" in type) {
+        for (const c of (type as ClassInfo).constructors ?? []) {
+            extractTypesFromSig(c.sig);
+        }
+    }
+    if ("extends" in type) {
+        const ext = (type as ClassInfo | InterfaceInfo).extends;
+        if (typeof ext === "string") extractTypes(ext);
+        else if (Array.isArray(ext)) ext.forEach(extractTypes);
+    }
+    if ("implements" in type) {
+        ((type as ClassInfo).implements ?? []).forEach(extractTypes);
+    }
+    if ("type" in type && typeof (type as TypeAliasInfo).type === "string") {
+        extractTypes((type as TypeAliasInfo).type);
+    }
+
+    return names;
 }
 
 /**
