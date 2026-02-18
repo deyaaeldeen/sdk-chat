@@ -458,6 +458,9 @@ class TypeReferenceCollector {
     private definedTypes = new Set<string>();
     private importedTypes = new Map<string, string>(); // typeName -> packageName
     private rawTypeNames = new Set<string>(); // type names seen in annotations
+    private contextStack: string[] = []; // stack of enclosing type names
+    private rawTypeNamesByContext = new Map<string, Set<string>>(); // context -> raw type names
+    private refsByContext = new Map<string, Set<ResolvedTypeRef>>(); // context -> resolved refs
 
     setProject(project: Project): void {
         this.project = project;
@@ -467,29 +470,55 @@ class TypeReferenceCollector {
         this.definedTypes.add(name.split("<")[0]);
     }
 
+    /** Push a context (enclosing type name) before extracting a class/interface/etc. */
+    pushContext(typeName: string): void {
+        this.contextStack.push(typeName);
+    }
+
+    /** Pop the context after extracting a class/interface/etc. */
+    popContext(): void {
+        this.contextStack.pop();
+    }
+
+    private currentContext(): string | null {
+        return this.contextStack.length > 0 ? this.contextStack[this.contextStack.length - 1] : null;
+    }
+
     collectFromType(type: Type): void {
         if (!this.project) return;
-        // Try-catch wrapper for safety - ts-morph can throw on malformed types
         try {
+            const before = this.refs.size;
             collectTypeRefsFromType(type, this.project, this.refs);
+            // Tag newly added refs with context
+            const ctx = this.currentContext();
+            if (ctx && this.refs.size > before) {
+                if (!this.refsByContext.has(ctx)) this.refsByContext.set(ctx, new Set());
+                const ctxRefs = this.refsByContext.get(ctx)!;
+                for (const ref of this.refs) {
+                    ctxRefs.add(ref);
+                }
+            }
         } catch {
             // Non-fatal - skip types that fail resolution
         }
     }
 
-    /**
-     * Track a raw type name from an annotation string. Used to match
-     * unresolved types against import declarations.
-     */
     collectRawTypeName(typeText: string): void {
         if (!typeText) return;
-        // Extract potential type names from the type text.
-        // Handle patterns like "Promise<HttpClient>", "HttpClient | undefined", etc.
         const tokens = typeText.split(/[<>|&,\[\]\s()]+/);
         for (const token of tokens) {
             const name = token.trim();
             if (name && !PRIMITIVE_TYPES.has(name) && !isBuiltinType(name)) {
                 this.rawTypeNames.add(name);
+                const ctx = this.currentContext();
+                if (ctx) {
+                    let set = this.rawTypeNamesByContext.get(ctx);
+                    if (!set) {
+                        set = new Set();
+                        this.rawTypeNamesByContext.set(ctx, set);
+                    }
+                    set.add(name);
+                }
             }
         }
     }
@@ -526,16 +555,43 @@ class TypeReferenceCollector {
         }
     }
 
-    getExternalRefs(): ResolvedTypeRef[] {
+    /**
+     * Get external type references, optionally scoped to types reachable
+     * from the given set of type names. When reachableTypes is provided,
+     * only raw type names collected in the context of those types are included.
+     */
+    getExternalRefs(reachableTypes?: Set<string>): ResolvedTypeRef[] {
+        // Build scoped refs based on reachable types
+        let scopedRefs: Set<ResolvedTypeRef>;
+        let scopedRawNames: Set<string>;
+
+        if (reachableTypes) {
+            scopedRefs = new Set<ResolvedTypeRef>();
+            scopedRawNames = new Set<string>();
+            for (const typeName of reachableTypes) {
+                const contextRefs = this.refsByContext.get(typeName);
+                if (contextRefs) {
+                    for (const ref of contextRefs) scopedRefs.add(ref);
+                }
+                const contextRawNames = this.rawTypeNamesByContext.get(typeName);
+                if (contextRawNames) {
+                    for (const name of contextRawNames) scopedRawNames.add(name);
+                }
+            }
+        } else {
+            scopedRefs = this.refs;
+            scopedRawNames = this.rawTypeNames;
+        }
+
         // Filter out locally defined types and types without package info
-        const resolved = Array.from(this.refs).filter(ref =>
+        const resolved = Array.from(scopedRefs).filter(ref =>
             !this.definedTypes.has(ref.name) &&
             ref.packageName !== undefined
         );
 
         // Also include import-backed refs for types used in the API but not resolved by ts-morph
         const resolvedNames = new Set(resolved.map(r => r.name));
-        for (const typeName of this.rawTypeNames) {
+        for (const typeName of scopedRawNames) {
             if (resolvedNames.has(typeName)) continue;
             if (this.definedTypes.has(typeName)) continue;
 
@@ -558,6 +614,9 @@ class TypeReferenceCollector {
         this.definedTypes.clear();
         this.importedTypes.clear();
         this.rawTypeNames.clear();
+        this.contextStack.length = 0;
+        this.rawTypeNamesByContext.clear();
+        this.refsByContext.clear();
     }
 }
 
@@ -756,6 +815,8 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
     const name = cls.getName();
     if (!name) throw new Error("Class must have a name");
 
+    typeCollector.pushContext(name);
+
     const result: ClassInfo = { name };
 
     const deprecated = getDeprecatedInfo(cls);
@@ -813,6 +874,7 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
         .map(extractProperty);
     if (props.length) result.properties = props;
 
+    typeCollector.popContext();
     return result;
 }
 
@@ -917,9 +979,10 @@ function extractInterfaceProperty(prop: Node): PropertyInfo | undefined {
 }
 
 function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
-    const result: InterfaceInfo = {
-        name: iface.getName(),
-    };
+    const name = iface.getName();
+    typeCollector.pushContext(name);
+
+    const result: InterfaceInfo = { name };
 
     // Extends
     const ext = iface.getExtends().map((e) => e.getText());
@@ -961,10 +1024,12 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
     if (methods.length) result.methods = methods;
     if (props.length) result.properties = props;
 
+    typeCollector.popContext();
     return result;
 }
 
 function extractEnum(en: EnumDeclaration): EnumInfo {
+    typeCollector.pushContext(en.getName());
     const result: EnumInfo = {
         name: en.getName(),
         doc: getDocString(en),
@@ -975,17 +1040,20 @@ function extractEnum(en: EnumDeclaration): EnumInfo {
     if (deprecated.deprecated) result.deprecated = true;
     if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
+    typeCollector.popContext();
     return result;
 }
 
 function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
+    const name = alias.getName();
+    typeCollector.pushContext(name);
     const type = alias.getType();
 
     // Collect type reference for dependency tracking
     typeCollector.collectFromType(type);
 
     const result: TypeAliasInfo = {
-        name: alias.getName(),
+        name,
         type: simplifyType(type.getText()),
         doc: getDocString(alias),
     };
@@ -994,12 +1062,15 @@ function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
     if (deprecated.deprecated) result.deprecated = true;
     if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
+    typeCollector.popContext();
     return result;
 }
 
 function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     const name = fn.getName();
     if (!name) return undefined;
+
+    typeCollector.pushContext(name);
 
     const paramInfos = fn.getParameters().map(extractParameterInfo);
     const params = fn.getParameters().map(formatParameter).join(", ");
@@ -1030,6 +1101,7 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     if (deprecated.deprecated) result.deprecated = true;
     if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
+    typeCollector.popContext();
     return result;
 }
 
@@ -1651,8 +1723,11 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
         modules: modules.sort((a, b) => a.name.localeCompare(b.name)),
     };
 
-    // Resolve transitive dependencies
-    const dependencies = resolveTransitiveDependencies(baseResult, project, rootPath);
+    // Compute types reachable from entry points for scoped dependency collection
+    const reachableTypes = computeReachableTypes(baseResult);
+
+    // Resolve transitive dependencies (scoped to reachable types)
+    const dependencies = resolveTransitiveDependencies(baseResult, project, rootPath, reachableTypes);
     if (dependencies.length > 0) {
         baseResult.dependencies = dependencies;
     }
@@ -1676,6 +1751,93 @@ function getDefinedTypes(api: ApiIndex): Set<string> {
         for (const t of mod.types || []) defined.add(t.name);
     }
     return defined;
+}
+
+/**
+ * Computes the set of type names reachable from entry points.
+ * Walks the type reference graph starting from entry-point types,
+ * following extends, implements, property types, method signatures, etc.
+ */
+function computeReachableTypes(api: ApiIndex): Set<string> {
+    const allTypeNames = getDefinedTypes(api);
+
+    // Build reference graph: typeName -> set of type names it references
+    const references = new Map<string, Set<string>>();
+    function addRef(from: string, to: string) {
+        const base = to.split("<")[0];
+        if (!allTypeNames.has(base)) return;
+        if (!references.has(from)) references.set(from, new Set());
+        references.get(from)!.add(base);
+    }
+
+    function collectRefsFromText(from: string, text: string | undefined) {
+        if (!text) return;
+        const tokens = text.split(/[<>|&,\[\]\s(){}:;=]+/);
+        for (const token of tokens) {
+            const name = token.trim();
+            if (name && allTypeNames.has(name)) addRef(from, name);
+        }
+    }
+
+    for (const mod of api.modules) {
+        for (const cls of mod.classes || []) {
+            if (cls.extends) collectRefsFromText(cls.name, cls.extends);
+            for (const impl of cls.implements || []) collectRefsFromText(cls.name, impl);
+            for (const m of cls.methods || []) {
+                collectRefsFromText(cls.name, m.sig);
+                collectRefsFromText(cls.name, m.ret);
+            }
+            for (const p of cls.properties || []) collectRefsFromText(cls.name, p.type);
+            for (const c of cls.constructors || []) collectRefsFromText(cls.name, c.sig);
+        }
+        for (const iface of mod.interfaces || []) {
+            for (const ext of iface.extends || []) collectRefsFromText(iface.name, ext);
+            for (const m of iface.methods || []) {
+                collectRefsFromText(iface.name, m.sig);
+                collectRefsFromText(iface.name, m.ret);
+            }
+            for (const p of iface.properties || []) collectRefsFromText(iface.name, p.type);
+        }
+        for (const t of mod.types || []) {
+            collectRefsFromText(t.name, t.type);
+        }
+        for (const fn of mod.functions || []) {
+            if (!fn.name) continue;
+            collectRefsFromText(fn.name, fn.sig);
+            collectRefsFromText(fn.name, fn.ret);
+        }
+    }
+
+    // BFS from entry points
+    const reachable = new Set<string>();
+    const queue: string[] = [];
+
+    for (const mod of api.modules) {
+        for (const cls of mod.classes || []) {
+            if (cls.entryPoint) { reachable.add(cls.name); queue.push(cls.name); }
+        }
+        for (const iface of mod.interfaces || []) {
+            if (iface.entryPoint) { reachable.add(iface.name); queue.push(iface.name); }
+        }
+        for (const fn of mod.functions || []) {
+            if (fn.entryPoint && fn.name) { reachable.add(fn.name); queue.push(fn.name); }
+        }
+    }
+
+    while (queue.length > 0) {
+        const current = queue.shift()!;
+        const refs = references.get(current);
+        if (refs) {
+            for (const ref of refs) {
+                if (!reachable.has(ref)) {
+                    reachable.add(ref);
+                    queue.push(ref);
+                }
+            }
+        }
+    }
+
+    return reachable;
 }
 
 /**
@@ -1786,15 +1948,15 @@ function extractTypeFromResolvedModule(
  * Resolves transitive dependencies from the API surface.
  * Uses AST-based type collection for accurate dependency tracking.
  */
-function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath: string): DependencyInfo[] {
+function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath: string, reachableTypes?: Set<string>): DependencyInfo[] {
     // Register all defined types with the collector (to exclude from dependencies)
     const definedTypes = getDefinedTypes(api);
     for (const typeName of definedTypes) {
         typeCollector.addDefinedType(typeName);
     }
 
-    // Get the AST-collected external type references
-    const externalRefs = typeCollector.getExternalRefs();
+    // Get the AST-collected external type references, scoped to reachable types
+    const externalRefs = typeCollector.getExternalRefs(reachableTypes);
 
     if (externalRefs.length === 0) {
         return [];
