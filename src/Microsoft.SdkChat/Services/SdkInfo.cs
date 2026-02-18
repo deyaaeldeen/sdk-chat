@@ -1673,6 +1673,12 @@ public class SdkInfo
             candidates.Sort((a, b) => b.FileScore.CompareTo(a.FileScore));
         }
 
+        // Filter out the root path itself — samples folder is always a subdirectory
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        candidates.RemoveAll(c =>
+            string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(c.Path)),
+                normalizedRoot, StringComparison.OrdinalIgnoreCase));
+
         var allPaths = candidates.ConvertAll(c => c.Path);
         var bestMatch = candidates.Count > 0 ? candidates[0].Path : null;
 
