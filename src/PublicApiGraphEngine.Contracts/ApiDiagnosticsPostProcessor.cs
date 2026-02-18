@@ -48,7 +48,6 @@ public static partial class ApiDiagnosticsPostProcessor
         var types = index.GetDiagnosticTypes().ToList();
 
         // SDK001: undocumented public type
-        // SDK002: entry-point client without operations
         foreach (var type in types)
         {
             if (string.IsNullOrWhiteSpace(type.Doc))
@@ -61,20 +60,6 @@ public static partial class ApiDiagnosticsPostProcessor
                         Id = "SDK001",
                         Text = $"Public type '{type.Name}' is missing documentation.",
                         Level = DiagnosticLevel.Info,
-                        TargetType = type.Id ?? type.Name,
-                    });
-            }
-
-            if (type.EntryPoint && type.Callables.Count is 0)
-            {
-                AddDiagnostic(
-                    diagnostics,
-                    seen,
-                    new ApiDiagnostic
-                    {
-                        Id = "SDK002",
-                        Text = $"Client type '{type.Name}' has no operations.",
-                        Level = DiagnosticLevel.Warning,
                         TargetType = type.Id ?? type.Name,
                     });
             }

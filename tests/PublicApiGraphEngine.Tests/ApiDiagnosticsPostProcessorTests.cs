@@ -31,27 +31,6 @@ public class ApiDiagnosticsPostProcessorTests
     }
 
     [Fact]
-    public void Build_EmitsSdk002_ForEntryPointWithoutOperations()
-    {
-        var index = new ApiIndex
-        {
-            Package = "contoso",
-            Packages =
-            [
-                new PackageApi
-                {
-                    Name = "contoso",
-                    Structs = [new StructApi { Name = "Client", EntryPoint = true, Doc = "client doc" }],
-                },
-            ],
-        };
-
-        var diagnostics = ApiDiagnosticsPostProcessor.Build(index);
-
-        Assert.Contains(diagnostics, d => d.Id == "SDK002" && d.Level == DiagnosticLevel.Warning);
-    }
-
-    [Fact]
     public void Build_EmitsSdk003_WhenMethodUsesDeprecatedType()
     {
         var index = new ApiIndex
@@ -112,36 +91,6 @@ public class ApiDiagnosticsPostProcessorTests
         var diagnostics = ApiDiagnosticsPostProcessor.Build(index);
 
         Assert.DoesNotContain(diagnostics, d => d.Id == "SDK001");
-    }
-
-    [Fact]
-    public void Build_SkipsSdk002_WhenEntryPointHasMethods()
-    {
-        var index = new ApiIndex
-        {
-            Package = "contoso",
-            Packages =
-            [
-                new PackageApi
-                {
-                    Name = "contoso",
-                    Structs =
-                    [
-                        new StructApi
-                        {
-                            Name = "Client",
-                            Doc = "client",
-                            EntryPoint = true,
-                            Methods = [new FuncApi { Name = "DoWork" }],
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var diagnostics = ApiDiagnosticsPostProcessor.Build(index);
-
-        Assert.DoesNotContain(diagnostics, d => d.Id == "SDK002");
     }
 
     [Fact]
