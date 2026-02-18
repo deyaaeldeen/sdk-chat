@@ -1541,6 +1541,7 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
 
         // Calculate module name
         let moduleName = path.relative(sourceDir, filePath);
+        moduleName = moduleName.replace(/\.d\.(ts|mts|cts)$/, "");
         moduleName = moduleName.replace(/\.(ts|tsx|mts)$/, "");
         moduleName = moduleName.replace(/\\/g, "/");
         if (moduleName.endsWith("/index")) {

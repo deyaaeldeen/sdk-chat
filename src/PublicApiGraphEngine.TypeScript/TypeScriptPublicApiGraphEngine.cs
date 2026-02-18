@@ -453,8 +453,9 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 
     /// <summary>
     /// Resolves the .d.ts output directory from package.json's "types", "typings",
-    /// or "exports" field. Returns the directory containing the declaration files,
-    /// or null if no compiled declarations are found.
+    /// or "exports" field. Collects all conditional type entry points and returns
+    /// their common ancestor directory so the engine can process all conditions.
+    /// Returns null if no compiled declarations are found.
     /// </summary>
     internal static string? ResolveDtsOutputFromPackageJson(string packageJsonPath)
     {
@@ -474,59 +475,101 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
             if (string.IsNullOrWhiteSpace(packageDir))
                 return null;
 
-            // Try in order: exports["."].import.types, exports["."].types, types, typings
-            string? typesPath = null;
+            // Collect all .d.ts type paths from exports and top-level fields
+            List<string> allTypePaths = [];
 
             if (root.TryGetProperty("exports", out var exports) && exports.ValueKind == JsonValueKind.Object)
             {
-                if (exports.TryGetProperty(".", out var dotExport) && dotExport.ValueKind == JsonValueKind.Object)
-                {
-                    // exports["."].import.types (ESM types — preferred)
-                    if (dotExport.TryGetProperty("import", out var importExport) && importExport.ValueKind == JsonValueKind.Object
-                        && importExport.TryGetProperty("types", out var importTypes) && importTypes.ValueKind == JsonValueKind.String)
-                    {
-                        typesPath = importTypes.GetString();
-                    }
-                    // exports["."].types (direct types)
-                    else if (dotExport.TryGetProperty("types", out var dotTypes) && dotTypes.ValueKind == JsonValueKind.String)
-                    {
-                        typesPath = dotTypes.GetString();
-                    }
-                    // exports["."].require.types (CJS types)
-                    else if (dotExport.TryGetProperty("require", out var requireExport) && requireExport.ValueKind == JsonValueKind.Object
-                        && requireExport.TryGetProperty("types", out var requireTypes) && requireTypes.ValueKind == JsonValueKind.String)
-                    {
-                        typesPath = requireTypes.GetString();
-                    }
-                }
+                CollectTypePaths(exports, allTypePaths);
             }
 
-            // Fall back to top-level types/typings
-            if (string.IsNullOrWhiteSpace(typesPath))
+            // Also check top-level types/typings
+            if (root.TryGetProperty("types", out var types) && types.ValueKind == JsonValueKind.String)
             {
-                if (root.TryGetProperty("types", out var types) && types.ValueKind == JsonValueKind.String)
-                    typesPath = types.GetString();
-                else if (root.TryGetProperty("typings", out var typings) && typings.ValueKind == JsonValueKind.String)
-                    typesPath = typings.GetString();
+                var v = types.GetString();
+                if (!string.IsNullOrWhiteSpace(v)) allTypePaths.Add(v!);
+            }
+            else if (root.TryGetProperty("typings", out var typings) && typings.ValueKind == JsonValueKind.String)
+            {
+                var v = typings.GetString();
+                if (!string.IsNullOrWhiteSpace(v)) allTypePaths.Add(v!);
             }
 
-            if (string.IsNullOrWhiteSpace(typesPath))
+            if (allTypePaths.Count == 0)
                 return null;
 
-            var fullTypesPath = Path.GetFullPath(Path.Combine(packageDir, typesPath!));
-            if (!File.Exists(fullTypesPath))
+            // Resolve all paths and filter to ones that actually exist
+            var resolvedDirs = allTypePaths
+                .Select(p => Path.GetFullPath(Path.Combine(packageDir, p)))
+                .Where(File.Exists)
+                .Select(p => Path.GetDirectoryName(p)!)
+                .Where(d => !string.IsNullOrWhiteSpace(d))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (resolvedDirs.Count == 0)
                 return null;
 
-            var dtsDir = Path.GetDirectoryName(fullTypesPath);
-            if (string.IsNullOrWhiteSpace(dtsDir) || !Directory.Exists(dtsDir))
-                return null;
+            if (resolvedDirs.Count == 1)
+                return resolvedDirs[0];
 
-            return dtsDir;
+            // Find common ancestor of all .d.ts directories
+            return FindCommonAncestor(resolvedDirs);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Recursively collects all "types" string values from a JSON element tree.
+    /// Handles nested conditional exports like exports["."].node.types, exports["."].browser.types, etc.
+    /// </summary>
+    private static void CollectTypePaths(JsonElement element, List<string> paths)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return;
+
+        foreach (var prop in element.EnumerateObject())
+        {
+            if (prop.Name == "types" && prop.Value.ValueKind == JsonValueKind.String)
+            {
+                var v = prop.Value.GetString();
+                if (!string.IsNullOrWhiteSpace(v))
+                    paths.Add(v!);
+            }
+            else if (prop.Value.ValueKind == JsonValueKind.Object)
+            {
+                CollectTypePaths(prop.Value, paths);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finds the longest common directory prefix of the given paths.
+    /// </summary>
+    private static string FindCommonAncestor(List<string> dirs)
+    {
+        var segments = dirs
+            .Select(d => Path.TrimEndingDirectorySeparator(d).Split(Path.DirectorySeparatorChar))
+            .ToList();
+
+        var minLen = segments.Min(s => s.Length);
+        var commonCount = 0;
+        for (var i = 0; i < minLen; i++)
+        {
+            var seg = segments[0][i];
+            if (segments.All(s => string.Equals(s[i], seg, StringComparison.OrdinalIgnoreCase)))
+                commonCount = i + 1;
+            else
+                break;
+        }
+
+        if (commonCount == 0)
+            return dirs[0];
+
+        return string.Join(Path.DirectorySeparatorChar, segments[0].Take(commonCount));
     }
 
     internal static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)
