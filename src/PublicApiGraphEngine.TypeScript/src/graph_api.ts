@@ -685,10 +685,6 @@ function simplifyType(type: string): string {
     if (!type) return type;
     // Remove import() statements
     type = type.replace(/import\([^)]+\)\./g, "");
-    // Simplify long types
-    if (type.length > 80) {
-        type = type.substring(0, 77) + "...";
-    }
     return type;
 }
 
