@@ -450,6 +450,10 @@ public sealed record TypeAliasInfo
     [JsonPropertyName("type")]
     public string Type { get; init; } = "";
 
+    [JsonPropertyName("typeParams")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TypeParams { get; init; }
+
     /// <summary>External package this type is re-exported from.</summary>
     [JsonPropertyName("reExportedFrom")]
     public string? ReExportedFrom { get; init; }

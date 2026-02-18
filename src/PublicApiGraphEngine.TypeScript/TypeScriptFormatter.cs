@@ -182,6 +182,9 @@ public static class TypeScriptFormatter
     {
         var sb = new StringBuilder();
 
+        // Emit triple-slash references for Node.js types and lib target
+        sb.AppendLine("/// <reference types=\"node\" />");
+        sb.AppendLine("/// <reference lib=\"es2020\" />");
         sb.AppendLine($"// {index.Package} - Public API Surface");
         sb.AppendLine("// Graphed by PublicApiGraphEngine.TypeScript");
         sb.AppendLine();
@@ -422,7 +425,6 @@ public static class TypeScriptFormatter
                 {
                     if (sb.Length >= maxLength) break;
                     if (includedTypeNames.Contains(ta.Name)) continue;
-                    if (IsSelfReferentialAlias(ta)) continue;
                     var typeStr = FormatTypeAlias(ta);
                     if (sb.Length + typeStr.Length <= maxLength) { sb.Append(typeStr); includedTypeNames.Add(ta.Name); includedItems++; }
                 }
@@ -484,7 +486,7 @@ public static class TypeScriptFormatter
                         continue;
                     }
 
-                    if (typesByName.TryGetValue(depName, out var typeDef) && !IsSelfReferentialAlias(typeDef))
+                    if (typesByName.TryGetValue(depName, out var typeDef))
                     {
                         var typeStr = FormatTypeAlias(typeDef);
                         if (sb.Length + typeStr.Length <= maxLength)
@@ -668,7 +670,7 @@ public static class TypeScriptFormatter
             if (m.IsDeprecated == true)
                 sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(m.DeprecatedMessage) ? "" : $" {m.DeprecatedMessage}")} */");
             var stat = m.Static == true ? "static " : "";
-            var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : "";
+            var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : ": void";
             sb.AppendLine($"    {stat}{m.Name}({m.Sig}){ret};");
         }
 
@@ -707,7 +709,7 @@ public static class TypeScriptFormatter
         {
             if (m.IsDeprecated == true)
                 sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(m.DeprecatedMessage) ? "" : $" {m.DeprecatedMessage}")} */");
-            var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : "";
+            var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : ": void";
             sb.AppendLine($"    {m.Name}({m.Sig}){ret};");
         }
 
@@ -740,8 +742,9 @@ public static class TypeScriptFormatter
         if (!string.IsNullOrEmpty(t.Doc))
             sb.AppendLine($"/** {t.Doc} */");
         var declare = exportKeyword ? "export declare " : "declare ";
-        var typeValue = t.Type == "unresolved" ? "unknown" : t.Type;
-        sb.AppendLine($"{declare}type {t.Name} = {typeValue};");
+        var typeParams = !string.IsNullOrEmpty(t.TypeParams) ? $"<{t.TypeParams}>" : "";
+        var typeValue = t.Type == "unresolved" || t.Type == t.Name ? "unknown" : t.Type;
+        sb.AppendLine($"{declare}type {t.Name}{typeParams} = {typeValue};");
         sb.AppendLine();
         return sb.ToString();
     }
@@ -753,7 +756,7 @@ public static class TypeScriptFormatter
             sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(fn.DeprecatedMessage) ? "" : $" {fn.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(fn.Doc))
             sb.AppendLine($"/** {fn.Doc} */");
-        var ret = !string.IsNullOrEmpty(fn.Ret) ? $": {fn.Ret}" : "";
+        var ret = !string.IsNullOrEmpty(fn.Ret) ? $": {fn.Ret}" : ": void";
         sb.AppendLine($"export declare function {fn.Name}({fn.Sig}){ret};");
         sb.AppendLine();
         return sb.ToString();

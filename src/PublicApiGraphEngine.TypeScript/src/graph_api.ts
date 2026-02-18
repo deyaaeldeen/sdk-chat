@@ -110,6 +110,7 @@ export interface EnumInfo {
 export interface TypeAliasInfo {
     name: string;
     type: string;
+    typeParams?: string;
     entryPoint?: boolean;
     exportPath?: string;
     reExportedFrom?: string;  // External package this is re-exported from
@@ -698,6 +699,8 @@ function formatParameter(p: ParameterDeclaration): string {
         // Collect type reference for dependency tracking
         typeCollector.collectFromType(type);
         typeCollector.collectRawTypeName(typeText);
+    } else {
+        sig += ": any";
     }
     // Also collect from annotation node (preserves original names for unresolved types)
     const typeNode = p.getTypeNode();
@@ -1063,11 +1066,20 @@ function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
     // Collect type reference for dependency tracking
     typeCollector.collectFromType(type);
 
+    // Use the type node text (original source) rather than Type.getText()
+    // which can resolve to the alias name itself for complex types
+    const typeNode = alias.getTypeNode();
+    const typeText = typeNode ? simplifyType(typeNode.getText()) : simplifyType(type.getText());
+
     const result: TypeAliasInfo = {
         name,
-        type: simplifyType(type.getText()),
+        type: typeText,
         doc: getDocString(alias),
     };
+
+    // Capture type parameters (e.g., <T> on type aliases)
+    const typeParams = alias.getTypeParameters().map(tp => tp.getText());
+    if (typeParams.length > 0) result.typeParams = typeParams.join(", ");
 
     const deprecated = getDeprecatedInfo(alias);
     if (deprecated.deprecated) result.deprecated = true;
@@ -2019,6 +2031,35 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         typesByPackage.get(ref.packageName)!.add(ref.name);
     }
 
+    // Also scan main API types for references to types not in definedTypes
+    // (catches extends/implements/property types that reference external types
+    // not captured by the type collector, e.g., CommonClientOptions in extends)
+    for (const mod of api.modules) {
+        for (const cls of mod.classes ?? []) {
+            for (const ref of collectTypeNamesFromGraphedType(cls)) {
+                if (!definedTypes.has(ref) && !typesByPackage.has(ref)) {
+                    // Try to find in import resolution map
+                    const res = importResolutionMap.get(ref);
+                    if (res) {
+                        if (!typesByPackage.has(res.packageName)) typesByPackage.set(res.packageName, new Set());
+                        typesByPackage.get(res.packageName)!.add(ref);
+                    }
+                }
+            }
+        }
+        for (const iface of mod.interfaces ?? []) {
+            for (const ref of collectTypeNamesFromGraphedType(iface)) {
+                if (!definedTypes.has(ref) && !typesByPackage.has(ref)) {
+                    const res = importResolutionMap.get(ref);
+                    if (res) {
+                        if (!typesByPackage.has(res.packageName)) typesByPackage.set(res.packageName, new Set());
+                        typesByPackage.get(res.packageName)!.add(ref);
+                    }
+                }
+            }
+        }
+    }
+
     // Resolve types iteratively, discovering sub-dependencies within resolved types
     const allResolved = new Map<string, { packageName: string; type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo }>();
     const allUnresolved = new Set<string>();
@@ -2062,12 +2103,31 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                         const pkg = subResolution.packageName;
                         if (!newPending.has(pkg)) newPending.set(pkg, new Set());
                         newPending.get(pkg)!.add(subRef);
-                    } else if (resolution) {
-                        // Try the same resolved module as the parent type
-                        // (handles types re-exported from the same package)
-                        importResolutionMap.set(subRef, { packageName: resolution.packageName, resolvedFile: resolution.resolvedFile });
-                        if (!newPending.has(packageName)) newPending.set(packageName, new Set());
-                        newPending.get(packageName)!.add(subRef);
+                        continue;
+                    }
+
+                    // Try the same resolved module as the parent type
+                    if (resolution) {
+                        const found = extractTypeFromResolvedModule(subRef, resolution.resolvedFile, false);
+                        if (found) {
+                            importResolutionMap.set(subRef, { packageName: resolution.packageName, resolvedFile: resolution.resolvedFile });
+                            if (!newPending.has(packageName)) newPending.set(packageName, new Set());
+                            newPending.get(packageName)!.add(subRef);
+                            continue;
+                        }
+                    }
+
+                    // Try all known resolved modules as a last resort
+                    let foundBroadly = false;
+                    for (const [, entry] of importResolutionMap) {
+                        const found = extractTypeFromResolvedModule(subRef, entry.resolvedFile, false);
+                        if (found) {
+                            importResolutionMap.set(subRef, entry);
+                            if (!newPending.has(entry.packageName)) newPending.set(entry.packageName, new Set());
+                            newPending.get(entry.packageName)!.add(subRef);
+                            foundBroadly = true;
+                            break;
+                        }
                     }
                 }
             }
