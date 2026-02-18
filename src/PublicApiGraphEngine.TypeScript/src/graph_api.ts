@@ -98,6 +98,8 @@ export interface InterfaceInfo {
 
 export interface EnumInfo {
     name: string;
+    entryPoint?: boolean;
+    exportPath?: string;
     reExportedFrom?: string;  // External package this is re-exported from
     doc?: string;
     values: string[];
@@ -108,6 +110,8 @@ export interface EnumInfo {
 export interface TypeAliasInfo {
     name: string;
     type: string;
+    entryPoint?: boolean;
+    exportPath?: string;
     reExportedFrom?: string;  // External package this is re-exported from
     doc?: string;
     deprecated?: boolean;
@@ -1670,16 +1674,16 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
             if (module.enums) {
                 for (const enumInfo of module.enums) {
                     const exportInfo = entryPointSymbols.get(enumInfo.name);
-                    if (exportInfo?.reExportedFrom) {
-                        enumInfo.reExportedFrom = exportInfo.reExportedFrom;
+                    if (exportInfo !== undefined) {
+                        applyEntryPoint(enumInfo, exportInfo);
                     }
                 }
             }
             if (module.types) {
                 for (const typeInfo of module.types) {
                     const exportInfo = entryPointSymbols.get(typeInfo.name);
-                    if (exportInfo?.reExportedFrom) {
-                        typeInfo.reExportedFrom = exportInfo.reExportedFrom;
+                    if (exportInfo !== undefined) {
+                        applyEntryPoint(typeInfo, exportInfo);
                     }
                 }
             }
@@ -1723,8 +1727,25 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
         modules: modules.sort((a, b) => a.name.localeCompare(b.name)),
     };
 
-    // Compute types reachable from entry points for scoped dependency collection
+    // Compute types reachable from entry points
     const reachableTypes = computeReachableTypes(baseResult);
+
+    // Filter modules to only include reachable types
+    if (reachableTypes.size > 0) {
+        for (const mod of baseResult.modules) {
+            if (mod.classes) mod.classes = mod.classes.filter(c => reachableTypes.has(c.name));
+            if (mod.interfaces) mod.interfaces = mod.interfaces.filter(i => reachableTypes.has(i.name));
+            if (mod.enums) mod.enums = mod.enums.filter(e => reachableTypes.has(e.name));
+            if (mod.types) mod.types = mod.types.filter(t => reachableTypes.has(t.name));
+            if (mod.functions) mod.functions = mod.functions.filter(f => f.name && reachableTypes.has(f.name));
+        }
+        // Remove empty modules
+        baseResult.modules = baseResult.modules.filter(m =>
+            (m.classes?.length ?? 0) > 0 || (m.interfaces?.length ?? 0) > 0 ||
+            (m.enums?.length ?? 0) > 0 || (m.types?.length ?? 0) > 0 ||
+            (m.functions?.length ?? 0) > 0
+        );
+    }
 
     // Resolve transitive dependencies (scoped to reachable types)
     const dependencies = resolveTransitiveDependencies(baseResult, project, rootPath, reachableTypes);
@@ -1818,6 +1839,12 @@ function computeReachableTypes(api: ApiIndex): Set<string> {
         }
         for (const iface of mod.interfaces || []) {
             if (iface.entryPoint) { reachable.add(iface.name); queue.push(iface.name); }
+        }
+        for (const en of mod.enums || []) {
+            if (en.entryPoint) { reachable.add(en.name); queue.push(en.name); }
+        }
+        for (const t of mod.types || []) {
+            if (t.entryPoint) { reachable.add(t.name); queue.push(t.name); }
         }
         for (const fn of mod.functions || []) {
             if (fn.entryPoint && fn.name) { reachable.add(fn.name); queue.push(fn.name); }
