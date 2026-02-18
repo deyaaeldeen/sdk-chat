@@ -1678,13 +1678,13 @@ function getDefinedTypes(api: ApiIndex): Set<string> {
 }
 
 /**
- * Finds the package that exports a given type name.
+ * Builds a map of type names to their resolved import declarations.
+ * Uses the existing project's module resolution to find types in dependencies,
+ * handling named imports, default imports, and re-exports.
  */
-function findTypeInNodeModules(typeName: string, rootPath: string, project: Project): { packageName: string; sourceFile: any } | null {
-    const nodeModulesPath = path.join(rootPath, "node_modules");
-    if (!fs.existsSync(nodeModulesPath)) return null;
+function buildImportResolutionMap(project: Project): Map<string, { packageName: string; resolvedFile: SourceFile }> {
+    const resolutionMap = new Map<string, { packageName: string; resolvedFile: SourceFile }>();
 
-    // Search through project source files for import statements that reference this type
     for (const sourceFile of project.getSourceFiles()) {
         const filePath = sourceFile.getFilePath();
         if (filePath.includes("node_modules")) continue;
@@ -1693,131 +1693,89 @@ function findTypeInNodeModules(typeName: string, rootPath: string, project: Proj
             const moduleSpecifier = importDecl.getModuleSpecifierValue();
             if (!moduleSpecifier || moduleSpecifier.startsWith(".")) continue;
 
-            // Check named imports
-            const namedImports = importDecl.getNamedImports();
-            for (const namedImport of namedImports) {
+            const resolvedFile = importDecl.getModuleSpecifierSourceFile();
+            if (!resolvedFile) continue;
+
+            // Named imports: import { Client, Foo } from "pkg"
+            for (const namedImport of importDecl.getNamedImports()) {
                 const importedName = namedImport.getName();
                 const aliasName = namedImport.getAliasNode()?.getText();
-                if (importedName === typeName || aliasName === typeName) {
-                    // Found! Now resolve the type from the package
-                    const resolvedSourceFile = resolveTypeFromPackage(moduleSpecifier, typeName, nodeModulesPath);
-                    if (resolvedSourceFile) {
-                        return { packageName: moduleSpecifier, sourceFile: resolvedSourceFile };
-                    }
+                const typeName = aliasName || importedName;
+                if (!resolutionMap.has(importedName)) {
+                    resolutionMap.set(importedName, { packageName: moduleSpecifier, resolvedFile });
+                }
+            }
+
+            // Default imports: import OpenAI from "openai"
+            const defaultImport = importDecl.getDefaultImport();
+            if (defaultImport) {
+                const typeName = defaultImport.getText();
+                if (!resolutionMap.has(typeName)) {
+                    resolutionMap.set(typeName, { packageName: moduleSpecifier, resolvedFile });
                 }
             }
         }
 
-        // Also check re-exports in export declarations
+        // Re-exports: export { Foo } from "pkg"
         for (const exportDecl of sourceFile.getExportDeclarations()) {
             const moduleSpecifier = exportDecl.getModuleSpecifierValue();
             if (!moduleSpecifier || moduleSpecifier.startsWith(".")) continue;
 
-            const namedExports = exportDecl.getNamedExports();
-            for (const namedExport of namedExports) {
+            const resolvedFile = exportDecl.getModuleSpecifierSourceFile();
+            if (!resolvedFile) continue;
+
+            for (const namedExport of exportDecl.getNamedExports()) {
                 const name = namedExport.getName();
-                if (name === typeName) {
-                    const resolvedSourceFile = resolveTypeFromPackage(moduleSpecifier, typeName, nodeModulesPath);
-                    if (resolvedSourceFile) {
-                        return { packageName: moduleSpecifier, sourceFile: resolvedSourceFile };
-                    }
+                if (!resolutionMap.has(name)) {
+                    resolutionMap.set(name, { packageName: moduleSpecifier, resolvedFile });
                 }
             }
         }
     }
 
-    return null;
+    return resolutionMap;
 }
 
 /**
- * Resolves the source file for a type from a package.
+ * Extracts a type definition from a resolved dependency module.
+ * Uses getExportedDeclarations() to follow re-exports to the actual declaration.
  */
-function resolveTypeFromPackage(packageName: string, typeName: string, nodeModulesPath: string): any | null {
-    // Handle scoped packages
-    const packagePath = path.join(nodeModulesPath, packageName);
-    if (!fs.existsSync(packagePath)) return null;
-
-    const pkgJsonPath = path.join(packagePath, "package.json");
-    if (!fs.existsSync(pkgJsonPath)) return null;
-
-    try {
-        const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
-
-        // Find types entry point
-        let typesPath: string | undefined;
-        if (pkg.types) typesPath = pkg.types;
-        else if (pkg.typings) typesPath = pkg.typings;
-        else if (pkg.exports?.["."]?.types) typesPath = pkg.exports["."].types;
-
-        if (!typesPath) return null;
-
-        const fullTypesPath = path.join(packagePath, typesPath);
-        if (!fs.existsSync(fullTypesPath)) return null;
-
-        return { path: fullTypesPath, packagePath };
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Cache for dependency project instances to avoid creating one per type lookup.
- */
-const depProjectCache = new Map<string, Project>();
-
-/**
- * Graphs a type from a dependency package's type definitions.
- */
-function extractTypeFromDependency(
+function extractTypeFromResolvedModule(
     typeName: string,
-    typesPath: string,
-    packagePath: string
+    resolvedFile: SourceFile,
+    isDefaultImport: boolean
 ): ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | null {
     try {
-        // Reuse cached project for this package path
-        let depProject = depProjectCache.get(packagePath);
-        if (!depProject) {
-            depProject = new Project({
-                skipAddingFilesFromTsConfig: true,
-                compilerOptions: {
-                    allowJs: true,
-                    declaration: true,
-                    skipLibCheck: true,
-                },
-            });
+        const exportedDecls = resolvedFile.getExportedDeclarations();
 
-            depProject.addSourceFilesAtPaths(path.join(packagePath, "**/*.d.ts"));
-            depProjectCache.set(packagePath, depProject);
-        }
+        // For default imports, check both "default" and the type name
+        const lookupKeys = isDefaultImport
+            ? ["default", typeName]
+            : [typeName];
 
-        // Search for the type in all source files
-        for (const sourceFile of depProject.getSourceFiles()) {
-            // Check classes
-            const cls = sourceFile.getClass(typeName);
-            if (cls && cls.isExported()) {
-                return extractClass(cls);
-            }
+        for (const key of lookupKeys) {
+            const decls = exportedDecls.get(key);
+            if (!decls) continue;
 
-            // Check interfaces
-            const iface = sourceFile.getInterface(typeName);
-            if (iface && iface.isExported()) {
-                return extractInterface(iface);
-            }
+            for (const decl of decls) {
+                const kind = decl.getKindName();
 
-            // Check enums
-            const en = sourceFile.getEnum(typeName);
-            if (en && en.isExported()) {
-                return extractEnum(en);
-            }
-
-            // Check type aliases
-            const typeAlias = sourceFile.getTypeAlias(typeName);
-            if (typeAlias && typeAlias.isExported()) {
-                return extractTypeAlias(typeAlias);
+                if (kind === "ClassDeclaration") {
+                    return extractClass(decl as ClassDeclaration);
+                }
+                if (kind === "InterfaceDeclaration") {
+                    return extractInterface(decl as InterfaceDeclaration);
+                }
+                if (kind === "EnumDeclaration") {
+                    return extractEnum(decl as EnumDeclaration);
+                }
+                if (kind === "TypeAliasDeclaration") {
+                    return extractTypeAlias(decl as TypeAliasDeclaration);
+                }
             }
         }
     } catch {
-        // Ignore errors from invalid packages
+        // Ignore errors from packages with invalid type definitions
     }
 
     return null;
@@ -1841,6 +1799,19 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         return [];
     }
 
+    // Build import resolution map using the existing project's module resolution
+    const importResolutionMap = buildImportResolutionMap(project);
+
+    // Collect default-imported type names for proper lookup strategy
+    const defaultImportedTypes = new Set<string>();
+    for (const sourceFile of project.getSourceFiles()) {
+        if (sourceFile.getFilePath().includes("node_modules")) continue;
+        for (const importDecl of sourceFile.getImportDeclarations()) {
+            const defImport = importDecl.getDefaultImport();
+            if (defImport) defaultImportedTypes.add(defImport.getText());
+        }
+    }
+
     // Group by package name
     const typesByPackage = new Map<string, ResolvedTypeRef[]>();
     for (const ref of externalRefs) {
@@ -1854,23 +1825,10 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
 
     // Build dependency info array
     const dependencies: DependencyInfo[] = [];
-    const resolvedTypes = new Map<string, { packageName: string; type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo }>();
 
     for (const [packageName, refs] of typesByPackage) {
         // Deduplicate type names
         const uniqueTypeNames = [...new Set(refs.map(r => r.name))];
-
-        // Try to extract full type definitions from the package
-        const nodeModulesPath = path.join(rootPath, "node_modules");
-        for (const typeName of uniqueTypeNames) {
-            const found = findTypeInNodeModules(typeName, rootPath, project);
-            if (found?.sourceFile?.path && found?.sourceFile?.packagePath) {
-                const graphed = extractTypeFromDependency(typeName, found.sourceFile.path, found.sourceFile.packagePath);
-                if (graphed) {
-                    resolvedTypes.set(typeName, { packageName, type: graphed });
-                }
-            }
-        }
 
         const depInfo: DependencyInfo = { package: packageName, isNode: isNodePackage(packageName) || undefined };
 
@@ -1880,26 +1838,29 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         const types: TypeAliasInfo[] = [];
 
         for (const typeName of uniqueTypeNames) {
-            const resolved = resolvedTypes.get(typeName);
-            if (!resolved) {
-                // Type couldn't be resolved (package not installed) —
+            const resolution = importResolutionMap.get(typeName);
+            let graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | null = null;
+
+            if (resolution) {
+                const isDefault = defaultImportedTypes.has(typeName);
+                graphed = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault);
+            }
+
+            if (!graphed) {
+                // Type couldn't be resolved (package not installed or type not found) —
                 // create a minimal unresolved entry
                 types.push({ name: typeName, type: "unresolved" } as TypeAliasInfo);
                 continue;
             }
 
-            const type = resolved.type;
-            if ("constructors" in type || "methods" in type && "properties" in type && !("extends" in type && Array.isArray((type as InterfaceInfo).extends))) {
-                // Distinguish class from interface by presence of constructors
-                if ("constructors" in type) {
-                    classes.push(type as ClassInfo);
-                } else if ("methods" in type || "properties" in type) {
-                    interfaces.push(type as InterfaceInfo);
-                }
-            } else if ("values" in type) {
-                enums.push(type as EnumInfo);
-            } else if ("type" in type && typeof (type as TypeAliasInfo).type === "string") {
-                types.push(type as TypeAliasInfo);
+            if ("constructors" in graphed) {
+                classes.push(graphed as ClassInfo);
+            } else if ("methods" in graphed || "properties" in graphed) {
+                interfaces.push(graphed as InterfaceInfo);
+            } else if ("values" in graphed) {
+                enums.push(graphed as EnumInfo);
+            } else {
+                types.push(graphed as TypeAliasInfo);
             }
         }
 
