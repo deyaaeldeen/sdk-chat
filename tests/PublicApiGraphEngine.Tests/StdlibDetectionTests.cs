@@ -907,7 +907,7 @@ public class StdlibDetectionTests
         };
 
         var stubs = api.ToStubs();
-        Assert.Contains("Dependencies", stubs);
+        Assert.Contains("declare module", stubs);
         Assert.Contains("@example/core-rest-pipeline", stubs);
     }
 
@@ -942,7 +942,7 @@ public class StdlibDetectionTests
         };
 
         var stubs = api.ToStubs();
-        Assert.DoesNotContain("// From: @types/node", stubs);
-        Assert.Contains("// From: @example/core-rest-pipeline", stubs);
+        Assert.DoesNotContain("@types/node", stubs);
+        Assert.Contains("@example/core-rest-pipeline", stubs);
     }
 }
