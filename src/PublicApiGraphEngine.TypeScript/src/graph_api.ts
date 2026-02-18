@@ -1477,38 +1477,37 @@ interface EngineOptions {
  * Graphs exported symbol names from entry point files.
  * Returns a map from symbol name to its export info (path and optional re-export source).
  *
- * When a symbol appears in multiple entry points with different conditions (e.g., both
- * in the "default" fallback index.d.ts AND in node/index.d.ts), we prefer the MOST
- * SPECIFIC condition. The fallback/default entry typically re-exports everything and
- * shouldn't mask platform-specific conditions.
+ * Uses declaration-site condition assignment: a symbol's condition is determined
+ * by the entry file where it is DECLARED, not where it is re-exported from.
+ * ts-morph's getExportedDeclarations() follows re-exports to the actual declaration,
+ * so we compare the declaration's source file against the entry file to distinguish
+ * local declarations from re-exports.
+ *
+ * Algorithm:
+ *   For each entry file E with condition C:
+ *     For each symbol S exported by E:
+ *       If S is declared in E → assign condition C to S
+ *       If S is re-exported from another file → skip (that file's condition wins)
+ *   Symbols not claimed by any entry's declarations get the condition of the
+ *   first entry that exports them (for non-entry files imported transitively).
  */
 function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): Map<string, ExportedSymbolInfo> {
-    // Collect ALL conditions per symbol, then select the best one
-    const symbolConditions = new Map<string, ExportedSymbolInfo[]>();
+    // Build set of entry file paths for quick lookup
+    const entryFilePaths = new Set(entryEntries.map(e => path.resolve(e.filePath)));
 
-    // Identify fallback entry files — files that appear under "types" or "default"
-    // conditions at the root export. These typically re-export everything and
-    // shouldn't be treated as the authoritative condition for a symbol.
-    const fallbackFiles = new Set<string>();
-    for (const entry of entryEntries) {
-        const norm = normalizeCondition(entry.condition);
-        if (norm === "default" || norm === "types") {
-            fallbackFiles.add(path.resolve(entry.filePath));
-        }
-    }
+    // Phase 1: Assign conditions based on declaration site.
+    // A symbol gets the condition of the entry file where it is DECLARED (not re-exported).
+    const exportedSymbols = new Map<string, ExportedSymbolInfo>();
 
-    // Sort entries: platform-specific conditions first, so they're recorded before fallbacks.
-    // Within the same specificity level, use stable sort by exportPath then condition.
+    // Sort entries so "." exportPath comes first, then by condition priority (ascending)
+    // for stable tie-breaking when a symbol is declared in multiple entry files.
     const sortedEntries = [...entryEntries].sort((a, b) => {
-        // exportPath "." gets priority over subpaths
         if (a.exportPath === "." && b.exportPath !== ".") return -1;
         if (b.exportPath === "." && a.exportPath !== ".") return 1;
         const exportPathCmp = a.exportPath.localeCompare(b.exportPath);
         if (exportPathCmp !== 0) return exportPathCmp;
 
-        // Higher condition priority number = more specific (node=4, browser=5 > default=0)
-        // Process more specific conditions first so they take precedence
-        const conditionCmp = getConditionPriority(b.condition) - getConditionPriority(a.condition);
+        const conditionCmp = getConditionPriority(a.condition) - getConditionPriority(b.condition);
         if (conditionCmp !== 0) return conditionCmp;
 
         return a.condition.localeCompare(b.condition);
@@ -1518,64 +1517,75 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
         const sourceFile = project.getSourceFile(entry.filePath);
         if (!sourceFile) continue;
 
-        const info: ExportedSymbolInfo = { exportPath: entry.exportPath, condition: entry.condition };
+        const entryAbsPath = path.resolve(entry.filePath);
 
-        // Get directly exported declarations
-        for (const decl of sourceFile.getExportedDeclarations().keys()) {
-            if (!symbolConditions.has(decl)) symbolConditions.set(decl, []);
-            symbolConditions.get(decl)!.push(info);
+        // Examine each exported symbol's declaration site
+        for (const [name, declarations] of sourceFile.getExportedDeclarations()) {
+            if (exportedSymbols.has(name)) continue;
+
+            // Check if any declaration lives in THIS entry file (= locally declared)
+            const isDeclaredHere = declarations.some(decl => {
+                const declFile = path.resolve(decl.getSourceFile().getFilePath());
+                return declFile === entryAbsPath;
+            });
+
+            if (isDeclaredHere) {
+                exportedSymbols.set(name, { exportPath: entry.exportPath, condition: entry.condition });
+            }
         }
 
-        // Check export statements for re-exports from external packages
+        // Handle re-exports from external packages (these are always "declared" here
+        // since the external package isn't part of our project)
         for (const exportDecl of sourceFile.getExportDeclarations()) {
             const moduleSpecifier = exportDecl.getModuleSpecifierValue();
             const isExternalPackage = moduleSpecifier && !moduleSpecifier.startsWith(".") && !moduleSpecifier.startsWith("/");
 
-            const namedExports = exportDecl.getNamedExports();
-            for (const namedExport of namedExports) {
-                const name = namedExport.getAliasNode()?.getText() ?? namedExport.getName();
-                const reExportInfo: ExportedSymbolInfo = {
-                    exportPath: entry.exportPath,
-                    condition: entry.condition,
-                    reExportedFrom: isExternalPackage ? moduleSpecifier : undefined,
-                };
-                if (!symbolConditions.has(name)) symbolConditions.set(name, []);
-                symbolConditions.get(name)!.push(reExportInfo);
-            }
+            if (isExternalPackage) {
+                for (const namedExport of exportDecl.getNamedExports()) {
+                    const name = namedExport.getAliasNode()?.getText() ?? namedExport.getName();
+                    if (!exportedSymbols.has(name)) {
+                        exportedSymbols.set(name, {
+                            exportPath: entry.exportPath,
+                            condition: entry.condition,
+                            reExportedFrom: moduleSpecifier
+                        });
+                    }
+                }
 
-            // Handle `export * from "external-package"`
-            if (exportDecl.isNamespaceExport() && isExternalPackage) {
-                const markerName = `__namespace_reexport__${moduleSpecifier}`;
-                if (!symbolConditions.has(markerName)) symbolConditions.set(markerName, []);
-                symbolConditions.get(markerName)!.push({
-                    exportPath: entry.exportPath,
-                    condition: entry.condition,
-                    reExportedFrom: moduleSpecifier
-                });
+                if (exportDecl.isNamespaceExport()) {
+                    const markerName = `__namespace_reexport__${moduleSpecifier}`;
+                    if (!exportedSymbols.has(markerName)) {
+                        exportedSymbols.set(markerName, {
+                            exportPath: entry.exportPath,
+                            condition: entry.condition,
+                            reExportedFrom: moduleSpecifier
+                        });
+                    }
+                }
             }
         }
     }
 
-    // Select the best condition for each symbol:
-    // - If a symbol appears in BOTH a fallback entry AND a platform-specific entry,
-    //   prefer the platform-specific condition (it's more informative).
-    // - If a symbol appears ONLY in fallback entries, use "default".
-    // - For re-exports, preserve the first match's reExportedFrom.
-    const exportedSymbols = new Map<string, ExportedSymbolInfo>();
-    for (const [name, infos] of symbolConditions) {
-        const specificInfos = infos.filter(info => {
-            const norm = normalizeCondition(info.condition);
-            return norm !== "default" && norm !== "types";
-        });
+    // Phase 2: Symbols declared in non-entry files that are re-exported by entry files.
+    // These weren't claimed in phase 1. Assign them the condition of the first entry
+    // that exports them (most general, since they're shared).
+    for (const entry of sortedEntries) {
+        const sourceFile = project.getSourceFile(entry.filePath);
+        if (!sourceFile) continue;
 
-        // Pick the best: specific condition if available, otherwise fallback
-        const best = specificInfos.length > 0
-            ? specificInfos.sort((a, b) =>
-                getConditionPriority(a.condition) - getConditionPriority(b.condition))[0]
-            : infos.sort((a, b) =>
-                getConditionPriority(a.condition) - getConditionPriority(b.condition))[0];
+        for (const [name, declarations] of sourceFile.getExportedDeclarations()) {
+            if (exportedSymbols.has(name)) continue;
 
-        exportedSymbols.set(name, best);
+            // Symbol is re-exported from a non-entry file — claim it with this entry's condition
+            const isDeclaredInAnyEntry = declarations.some(decl => {
+                const declFile = path.resolve(decl.getSourceFile().getFilePath());
+                return entryFilePaths.has(declFile);
+            });
+
+            if (!isDeclaredInAnyEntry) {
+                exportedSymbols.set(name, { exportPath: entry.exportPath, condition: entry.condition });
+            }
+        }
     }
 
     return exportedSymbols;
