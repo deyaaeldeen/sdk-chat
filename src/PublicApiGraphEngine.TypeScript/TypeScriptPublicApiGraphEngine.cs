@@ -453,10 +453,8 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
 
     /// <summary>
     /// Resolves the .d.ts output directory from package.json's "types", "typings",
-    /// or "exports" field. When multiple conditional exports exist (node, browser,
-    /// import, require), picks the preferred condition's .d.ts directory to avoid
-    /// loading duplicate type trees. The TS engine handles condition annotation
-    /// via package.json exports parsing.
+    /// or "exports" field. Collects all conditional type entry points and returns
+    /// their common ancestor directory so the engine can process all conditions.
     /// Returns null if no compiled declarations are found.
     /// </summary>
     internal static string? ResolveDtsOutputFromPackageJson(string packageJsonPath)
@@ -477,36 +475,46 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
             if (string.IsNullOrWhiteSpace(packageDir))
                 return null;
 
-            string? typesPath = null;
+            // Collect all .d.ts type paths from exports and top-level fields
+            List<string> allTypePaths = [];
 
-            // Look for the preferred condition's types in exports["."]
-            if (root.TryGetProperty("exports", out var exports) && exports.ValueKind == JsonValueKind.Object
-                && exports.TryGetProperty(".", out var dotExport) && dotExport.ValueKind == JsonValueKind.Object)
+            if (root.TryGetProperty("exports", out var exports) && exports.ValueKind == JsonValueKind.Object)
             {
-                typesPath = FindPreferredTypesPath(dotExport);
+                CollectTypePaths(exports, allTypePaths);
             }
 
-            // Fall back to top-level types/typings
-            if (string.IsNullOrWhiteSpace(typesPath))
+            // Also check top-level types/typings
+            if (root.TryGetProperty("types", out var types) && types.ValueKind == JsonValueKind.String)
             {
-                if (root.TryGetProperty("types", out var types) && types.ValueKind == JsonValueKind.String)
-                    typesPath = types.GetString();
-                else if (root.TryGetProperty("typings", out var typings) && typings.ValueKind == JsonValueKind.String)
-                    typesPath = typings.GetString();
+                var v = types.GetString();
+                if (!string.IsNullOrWhiteSpace(v)) allTypePaths.Add(v!);
+            }
+            else if (root.TryGetProperty("typings", out var typings) && typings.ValueKind == JsonValueKind.String)
+            {
+                var v = typings.GetString();
+                if (!string.IsNullOrWhiteSpace(v)) allTypePaths.Add(v!);
             }
 
-            if (string.IsNullOrWhiteSpace(typesPath))
+            if (allTypePaths.Count == 0)
                 return null;
 
-            var fullTypesPath = Path.GetFullPath(Path.Combine(packageDir, typesPath!));
-            if (!File.Exists(fullTypesPath))
+            // Resolve all paths and filter to ones that actually exist
+            var resolvedDirs = allTypePaths
+                .Select(p => Path.GetFullPath(Path.Combine(packageDir, p)))
+                .Where(File.Exists)
+                .Select(p => Path.GetDirectoryName(p)!)
+                .Where(d => !string.IsNullOrWhiteSpace(d))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (resolvedDirs.Count == 0)
                 return null;
 
-            var dtsDir = Path.GetDirectoryName(fullTypesPath);
-            if (string.IsNullOrWhiteSpace(dtsDir) || !Directory.Exists(dtsDir))
-                return null;
+            if (resolvedDirs.Count == 1)
+                return resolvedDirs[0];
 
-            return dtsDir;
+            // Find common ancestor of all .d.ts directories
+            return FindCommonAncestor(resolvedDirs);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -515,38 +523,53 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
     }
 
     /// <summary>
-    /// Finds the preferred condition's "types" path from an exports["."] object.
-    /// Priority order: direct "types", "import.types", "require.types", then
-    /// any other condition's "types".
+    /// Recursively collects all "types" string values from a JSON element tree.
+    /// Handles nested conditional exports like exports["."].node.types, exports["."].browser.types, etc.
     /// </summary>
-    private static string? FindPreferredTypesPath(JsonElement dotExport)
+    private static void CollectTypePaths(JsonElement element, List<string> paths)
     {
-        // Direct types at exports["."].types (highest priority)
-        if (dotExport.TryGetProperty("types", out var directTypes) && directTypes.ValueKind == JsonValueKind.String)
-            return directTypes.GetString();
+        if (element.ValueKind != JsonValueKind.Object)
+            return;
 
-        // Preferred conditions in priority order
-        ReadOnlySpan<string> preferredConditions = ["import", "require", "default", "node", "browser"];
-        foreach (var condition in preferredConditions)
+        foreach (var prop in element.EnumerateObject())
         {
-            if (dotExport.TryGetProperty(condition, out var condExport) && condExport.ValueKind == JsonValueKind.Object
-                && condExport.TryGetProperty("types", out var condTypes) && condTypes.ValueKind == JsonValueKind.String)
+            if (prop.Name == "types" && prop.Value.ValueKind == JsonValueKind.String)
             {
-                return condTypes.GetString();
+                var v = prop.Value.GetString();
+                if (!string.IsNullOrWhiteSpace(v))
+                    paths.Add(v!);
+            }
+            else if (prop.Value.ValueKind == JsonValueKind.Object)
+            {
+                CollectTypePaths(prop.Value, paths);
             }
         }
+    }
 
-        // Fall back to any condition that has a types field
-        foreach (var prop in dotExport.EnumerateObject())
+    /// <summary>
+    /// Finds the longest common directory prefix of the given paths.
+    /// </summary>
+    private static string FindCommonAncestor(List<string> dirs)
+    {
+        var segments = dirs
+            .Select(d => Path.TrimEndingDirectorySeparator(d).Split(Path.DirectorySeparatorChar))
+            .ToList();
+
+        var minLen = segments.Min(s => s.Length);
+        var commonCount = 0;
+        for (var i = 0; i < minLen; i++)
         {
-            if (prop.Value.ValueKind == JsonValueKind.Object
-                && prop.Value.TryGetProperty("types", out var anyTypes) && anyTypes.ValueKind == JsonValueKind.String)
-            {
-                return anyTypes.GetString();
-            }
+            var seg = segments[0][i];
+            if (segments.All(s => string.Equals(s[i], seg, StringComparison.OrdinalIgnoreCase)))
+                commonCount = i + 1;
+            else
+                break;
         }
 
-        return null;
+        if (commonCount == 0)
+            return dirs[0];
+
+        return string.Join(Path.DirectorySeparatorChar, segments[0].Take(commonCount));
     }
 
     internal static async Task EnsureDependenciesAsync(string scriptDir, CancellationToken ct)

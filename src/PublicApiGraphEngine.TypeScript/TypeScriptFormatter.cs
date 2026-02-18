@@ -200,6 +200,46 @@ public static class TypeScriptFormatter
         foreach (var e in allEnums) allTypeNames.Add(e.Name);
         foreach (var t in allTypes) allTypeNames.Add(t.Name);
 
+        // Detect distinct conditions and build type→conditions mapping
+        var distinctConditions = index.Modules
+            .Select(m => m.Condition)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(c => c, StringComparer.Ordinal)
+            .ToList();
+        var hasMultipleConditions = distinctConditions.Count > 1;
+
+        // Map each type name to its set of conditions (from containing modules)
+        Dictionary<string, HashSet<string>> typeConditions = [];
+        if (hasMultipleConditions)
+        {
+            foreach (var module in index.Modules)
+            {
+                var cond = module.Condition ?? "default";
+                void Track(string name)
+                {
+                    if (!typeConditions.TryGetValue(name, out var set))
+                    {
+                        set = [];
+                        typeConditions[name] = set;
+                    }
+                    set.Add(cond);
+                }
+                foreach (var c in module.Classes ?? []) Track(c.Name);
+                foreach (var i in module.Interfaces ?? []) Track(i.Name);
+                foreach (var e in module.Enums ?? []) Track(e.Name);
+                foreach (var t in module.Types ?? []) Track(t.Name);
+                foreach (var f in module.Functions ?? []) Track(f.Name);
+            }
+
+            // Deduplicate: keep only the first instance of each type name
+            allClasses = DeduplicateByName(allClasses, c => c.Name);
+            allInterfaces = DeduplicateByName(allInterfaces, i => i.Name);
+            allEnums = DeduplicateByName(allEnums, e => e.Name);
+            allTypes = DeduplicateByName(allTypes, t => t.Name);
+            allFunctions = DeduplicateByName(allFunctions, f => f.Name);
+        }
+
         // Pre-build dictionaries for O(1) lookups instead of O(n) FirstOrDefault
         var interfacesByName = SafeToDictionary(allInterfaces, i => i.Name);
         var enumsByName = SafeToDictionary(allEnums, e => e.Name);
@@ -322,9 +362,102 @@ public static class TypeScriptFormatter
             sb.AppendLine($"// ============================================================================");
             sb.AppendLine();
         }
+        else if (hasMultipleConditions)
+        {
+            // Condition-aware rendering: group types by their condition set
+            var conditionSetKey = (string name) =>
+            {
+                if (typeConditions.TryGetValue(name, out var conds))
+                    return string.Join(", ", conds.OrderBy(c => c, StringComparer.Ordinal));
+                return "default";
+            };
+
+            // Build ordered groups: shared-across-all first, then per-condition
+            var allConditionsKey = string.Join(", ", distinctConditions);
+            var groups = new Dictionary<string, (List<ClassInfo> Classes, List<InterfaceInfo> Interfaces,
+                List<EnumInfo> Enums, List<TypeAliasInfo> Types, List<FunctionInfo> Functions)>();
+
+            void AddToGroup(string key, ClassInfo? cls = null, InterfaceInfo? iface = null,
+                EnumInfo? en = null, TypeAliasInfo? ta = null, FunctionInfo? fn = null)
+            {
+                if (!groups.TryGetValue(key, out var g))
+                {
+                    g = ([], [], [], [], []);
+                    groups[key] = g;
+                }
+                if (cls is not null) g.Classes.Add(cls);
+                if (iface is not null) g.Interfaces.Add(iface);
+                if (en is not null) g.Enums.Add(en);
+                if (ta is not null) g.Types.Add(ta);
+                if (fn is not null) g.Functions.Add(fn);
+            }
+
+            foreach (var cls in allClasses) AddToGroup(conditionSetKey(cls.Name), cls: cls);
+            foreach (var iface in allInterfaces) AddToGroup(conditionSetKey(iface.Name), iface: iface);
+            foreach (var en in allEnums) AddToGroup(conditionSetKey(en.Name), en: en);
+            foreach (var ta in allTypes) AddToGroup(conditionSetKey(ta.Name), ta: ta);
+            foreach (var fn in allFunctions) AddToGroup(conditionSetKey(fn.Name), fn: fn);
+
+            // Sort groups: all-conditions first, then by number of conditions descending
+            var sortedGroups = groups.OrderByDescending(g => g.Value.Classes.Count + g.Value.Interfaces.Count
+                    + g.Value.Enums.Count + g.Value.Types.Count + g.Value.Functions.Count)
+                .OrderByDescending(g => g.Key.Split(", ").Length)
+                .ToList();
+
+            foreach (var (key, group) in sortedGroups)
+            {
+                if (sb.Length >= maxLength) break;
+
+                var condList = key.Split(", ");
+                var label = condList.Length == distinctConditions.Count
+                    ? $"Shared ({key})"
+                    : key;
+                sb.AppendLine($"// ── {label} ──");
+                sb.AppendLine();
+
+                var groupClasses = GetPrioritizedClasses(group.Classes, typeDeps);
+                foreach (var cls in groupClasses)
+                {
+                    if (sb.Length >= maxLength) break;
+                    if (includedTypeNames.Contains(cls.Name)) continue;
+                    var classStr = FormatClass(cls);
+                    if (sb.Length + classStr.Length > maxLength - 100 && includedItems > 0) break;
+                    sb.Append(classStr);
+                    includedTypeNames.Add(cls.Name);
+                    includedItems++;
+                }
+                foreach (var iface in group.Interfaces)
+                {
+                    if (sb.Length >= maxLength) break;
+                    if (includedTypeNames.Contains(iface.Name)) continue;
+                    var ifaceStr = FormatInterface(iface);
+                    if (sb.Length + ifaceStr.Length <= maxLength) { sb.Append(ifaceStr); includedTypeNames.Add(iface.Name); includedItems++; }
+                }
+                foreach (var en in group.Enums)
+                {
+                    if (sb.Length >= maxLength) break;
+                    if (includedTypeNames.Contains(en.Name)) continue;
+                    var enumStr = FormatEnum(en);
+                    if (sb.Length + enumStr.Length <= maxLength) { sb.Append(enumStr); includedTypeNames.Add(en.Name); includedItems++; }
+                }
+                foreach (var ta in group.Types)
+                {
+                    if (sb.Length >= maxLength) break;
+                    if (includedTypeNames.Contains(ta.Name)) continue;
+                    var typeStr = FormatTypeAlias(ta);
+                    if (sb.Length + typeStr.Length <= maxLength) { sb.Append(typeStr); includedTypeNames.Add(ta.Name); includedItems++; }
+                }
+                foreach (var fn in group.Functions)
+                {
+                    if (sb.Length >= maxLength) break;
+                    var fnStr = FormatFunction(fn);
+                    if (sb.Length + fnStr.Length <= maxLength) { sb.Append(fnStr); includedItems++; }
+                }
+            }
+        }
         else
         {
-            // Original behavior: no export path grouping
+            // Original behavior: no export path grouping, no conditions
             var prioritizedClasses = GetPrioritizedClasses(allClasses, typeDeps);
 
             // First pass: Include client classes and their dependencies
@@ -663,5 +796,17 @@ public static class TypeScriptFormatter
         sb.AppendLine($"export {async}function {fn.Name}({fn.Sig}){ret};");
         sb.AppendLine();
         return sb.ToString();
+    }
+
+    private static List<T> DeduplicateByName<T>(List<T> items, Func<T, string> getName)
+    {
+        HashSet<string> seen = [];
+        List<T> result = [];
+        foreach (var item in items)
+        {
+            if (seen.Add(getName(item)))
+                result.Add(item);
+        }
+        return result;
     }
 }
