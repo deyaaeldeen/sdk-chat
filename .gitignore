@@ -7,6 +7,10 @@ dist/
 # Allow test fixture build outputs
 !tests/PublicApiGraphEngine.Tests/TestFixtures/**/dist/
 
+# Allow test fixture node_modules (mock dependencies)
+!tests/PublicApiGraphEngine.Tests/TestFixtures/**/node_modules/
+!tests/PublicApiGraphEngine.Tests/TestFixtures/**/node_modules/**
+
 # IDE
 .vs/
 *.user
