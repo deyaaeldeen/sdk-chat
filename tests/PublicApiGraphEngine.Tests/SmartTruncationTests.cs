@@ -569,7 +569,8 @@ public class SmartTruncationTests
         {
             Name = "ChatClient",
             Extends = "BaseClient",
-            Methods = [new TypeScript.MethodInfo { Name = "send", Sig = "message: ChatMessage", Ret = "Promise<ChatResponse>" }]
+            Methods = [new TypeScript.MethodInfo { Name = "send", Sig = "message: ChatMessage", Ret = "Promise<ChatResponse>" }],
+            ReferencedTypes = ["BaseClient", "ChatMessage", "ChatResponse"]
         };
 
         var allTypes = new HashSet<string> { "ChatClient", "BaseClient", "ChatMessage", "ChatResponse" };

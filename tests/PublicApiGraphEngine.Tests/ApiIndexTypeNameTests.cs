@@ -57,7 +57,8 @@ public class ApiIndexTypeNameTests
         var typeAlias = new TsModels.TypeAliasInfo
         {
             Name = "UnionType",
-            Type = "ModelA | ModelB | string"
+            Type = "ModelA | ModelB | string",
+            ReferencedTypes = ["ModelA", "ModelB"]
         };
 
         var allTypeNames = new HashSet<string>(["ModelA", "ModelB", "UnionType", "Unrelated"]);

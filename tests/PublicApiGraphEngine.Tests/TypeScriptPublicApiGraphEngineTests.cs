@@ -384,7 +384,8 @@ public class TypeScriptPublicApiGraphEngineTests : IClassFixture<TypeScriptEngin
         {
             Name = "ChildClient",
             Extends = "BaseClient",
-            Methods = [new MethodInfo { Name = "op", Sig = "()", Ret = "void" }]
+            Methods = [new MethodInfo { Name = "op", Sig = "()", Ret = "void" }],
+            ReferencedTypes = ["BaseClient"]
         };
 
         var refs = cls.GetReferencedTypes(allTypes);
@@ -399,7 +400,8 @@ public class TypeScriptPublicApiGraphEngineTests : IClassFixture<TypeScriptEngin
         var cls = new ClassInfo
         {
             Name = "TestClass",
-            Implements = ["Disposable", "Serializable"]
+            Implements = ["Disposable", "Serializable"],
+            ReferencedTypes = ["Disposable", "Serializable"]
         };
 
         var refs = cls.GetReferencedTypes(allTypes);
@@ -414,7 +416,8 @@ public class TypeScriptPublicApiGraphEngineTests : IClassFixture<TypeScriptEngin
         var cls = new ClassInfo
         {
             Name = "TestClient",
-            Methods = [new MethodInfo { Name = "call", Sig = "(req: Request)", Ret = "Response" }]
+            Methods = [new MethodInfo { Name = "call", Sig = "(req: Request)", Ret = "Response" }],
+            ReferencedTypes = ["Request", "Response"]
         };
 
         var refs = cls.GetReferencedTypes(allTypes);
@@ -429,7 +432,8 @@ public class TypeScriptPublicApiGraphEngineTests : IClassFixture<TypeScriptEngin
         var cls = new ClassInfo
         {
             Name = "TestClass",
-            Properties = [new PropertyInfo { Name = "opts", Type = "Options" }]
+            Properties = [new PropertyInfo { Name = "opts", Type = "Options" }],
+            ReferencedTypes = ["Options"]
         };
 
         var refs = cls.GetReferencedTypes(allTypes);

@@ -28,6 +28,11 @@ public sealed record ApiIndex : IApiIndex
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DependencyInfo>? Dependencies { get; init; }
 
+    /// <summary>Fully resolved dependency packages with proper modules/conditions.</summary>
+    [JsonPropertyName("resolvedDependencies")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ApiIndex>? ResolvedDependencies { get; init; }
+
     [JsonPropertyName("diagnostics")]
     public IReadOnlyList<ApiDiagnostic> Diagnostics { get; init; } = [];
 
@@ -166,6 +171,10 @@ public sealed record ModuleInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Condition { get; init; }
 
+    [JsonPropertyName("conditionChain")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ConditionChain { get; init; }
+
     [JsonPropertyName("exportPath")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ExportPath { get; init; }
@@ -240,6 +249,15 @@ public sealed record ClassInfo
     [JsonPropertyName("properties")]
     public IReadOnlyList<PropertyInfo>? Properties { get; init; }
 
+    [JsonPropertyName("indexSignatures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<IndexSignatureInfo>? IndexSignatures { get; init; }
+
+    /// <summary>Type names referenced in signatures, computed by the extraction engine.</summary>
+    [JsonPropertyName("referencedTypes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ReferencedTypes { get; init; }
+
     /// <summary>Returns true if this is a client class (SDK entry point with operations).
     /// A client type must be an entry point AND have methods.</summary>
     [JsonIgnore]
@@ -295,33 +313,29 @@ public sealed record ClassInfo
     {
         result.Clear();
 
-        if (!string.IsNullOrEmpty(Extends))
+        foreach (var r in ReferencedTypes ?? [])
         {
-            var baseName = IApiIndex.NormalizeTypeName(Extends);
-            if (allTypeNames.Contains(baseName))
-                result.Add(baseName);
+            if (allTypeNames.Contains(r))
+                result.Add(r);
         }
-
-        foreach (var iface in Implements ?? [])
-        {
-            var ifaceName = IApiIndex.NormalizeTypeName(iface);
-            if (allTypeNames.Contains(ifaceName))
-                result.Add(ifaceName);
-        }
-
-        foreach (var method in Methods ?? [])
-        {
-            SignatureTokenizer.TokenizeInto(method.Sig, result);
-            SignatureTokenizer.TokenizeInto(method.Ret, result);
-        }
-
-        foreach (var prop in Properties ?? [])
-        {
-            SignatureTokenizer.TokenizeInto(prop.Type, result);
-        }
-
-        result.IntersectWith(allTypeNames);
     }
+}
+
+/// <summary>An index signature on a class or interface (e.g., [key: string]: unknown).</summary>
+public sealed record IndexSignatureInfo
+{
+    [JsonPropertyName("keyName")]
+    public string KeyName { get; init; } = "";
+
+    [JsonPropertyName("keyType")]
+    public string KeyType { get; init; } = "";
+
+    [JsonPropertyName("valueType")]
+    public string ValueType { get; init; } = "";
+
+    [JsonPropertyName("readonly")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Readonly { get; init; }
 }
 
 /// <summary>An interface declaration.</summary>
@@ -372,6 +386,15 @@ public sealed record InterfaceInfo
     [JsonPropertyName("properties")]
     public IReadOnlyList<PropertyInfo>? Properties { get; init; }
 
+    [JsonPropertyName("indexSignatures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<IndexSignatureInfo>? IndexSignatures { get; init; }
+
+    /// <summary>Type names referenced in signatures, computed by the extraction engine.</summary>
+    [JsonPropertyName("referencedTypes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ReferencedTypes { get; init; }
+
     /// <summary>
     /// Populates <paramref name="result"/> with type names referenced in extends, method signatures, and properties.
     /// Clears the set first so callers can reuse it across iterations.
@@ -380,25 +403,19 @@ public sealed record InterfaceInfo
     {
         result.Clear();
 
-        foreach (var ext in Extends ?? [])
+        foreach (var r in ReferencedTypes ?? [])
         {
-            var baseName = IApiIndex.NormalizeTypeName(ext);
-            if (allTypeNames.Contains(baseName))
-                result.Add(baseName);
+            if (allTypeNames.Contains(r))
+                result.Add(r);
         }
+    }
 
-        foreach (var method in Methods ?? [])
-        {
-            SignatureTokenizer.TokenizeInto(method.Sig, result);
-            SignatureTokenizer.TokenizeInto(method.Ret, result);
-        }
-
-        foreach (var prop in Properties ?? [])
-        {
-            SignatureTokenizer.TokenizeInto(prop.Type, result);
-        }
-
-        result.IntersectWith(allTypeNames);
+    /// <summary>Gets type names referenced in this interface's signatures.</summary>
+    public HashSet<string> GetReferencedTypes(HashSet<string> allTypeNames)
+    {
+        HashSet<string> tokens = [];
+        CollectReferencedTypes(allTypeNames, tokens);
+        return tokens;
     }
 }
 
@@ -469,12 +486,21 @@ public sealed record TypeAliasInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DeprecatedMessage { get; init; }
 
+    /// <summary>Type names referenced in this type alias, computed by the extraction engine.</summary>
+    [JsonPropertyName("referencedTypes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ReferencedTypes { get; init; }
+
     /// <summary>Gets type names referenced in this type alias definition.</summary>
     public void CollectReferencedTypes(HashSet<string> allTypeNames, HashSet<string> result)
     {
         result.Clear();
-        SignatureTokenizer.TokenizeInto(Type, result);
-        result.IntersectWith(allTypeNames);
+
+        foreach (var r in ReferencedTypes ?? [])
+        {
+            if (allTypeNames.Contains(r))
+                result.Add(r);
+        }
     }
 }
 
@@ -502,6 +528,10 @@ public sealed record FunctionInfo
     /// <summary>External package this function is re-exported from.</summary>
     [JsonPropertyName("reExportedFrom")]
     public string? ReExportedFrom { get; init; }
+
+    [JsonPropertyName("typeParams")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TypeParams { get; init; }
 
     [JsonPropertyName("sig")]
     public string Sig
@@ -533,6 +563,11 @@ public sealed record FunctionInfo
     [JsonPropertyName("deprecatedMsg")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DeprecatedMessage { get; init; }
+
+    /// <summary>Type names referenced in signatures, computed by the extraction engine.</summary>
+    [JsonPropertyName("referencedTypes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ReferencedTypes { get; init; }
 }
 
 /// <summary>A method declaration.</summary>
@@ -548,6 +583,10 @@ public sealed record MethodInfo
     [JsonPropertyName("crossLanguageId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CrossLanguageId { get; init; }
+
+    [JsonPropertyName("typeParams")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TypeParams { get; init; }
 
     [JsonPropertyName("sig")]
     public string Sig

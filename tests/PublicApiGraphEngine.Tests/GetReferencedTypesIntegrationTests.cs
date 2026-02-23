@@ -126,7 +126,8 @@ public class GetReferencedTypesIntegrationTests : IDisposable
                             Methods =
                             [
                                 new TsModels.MethodInfo { Name = "handle", Sig = "handle(h: ErrorHandler)", Ret = "void" }
-                            ]
+                            ],
+                            ReferencedTypes = ["ErrorHandler"]
                         },
                         new TsModels.ClassInfo { Name = "ErrorHandler" },
                         new TsModels.ClassInfo { Name = "Error" }
@@ -741,7 +742,8 @@ public class GetReferencedTypesIntegrationTests : IDisposable
         var tsClass = new TsModels.ClassInfo
         {
             Name = "Client",
-            Methods = [new TsModels.MethodInfo { Name = "handle", Sig = signatureWithSubstring, Ret = "void" }]
+            Methods = [new TsModels.MethodInfo { Name = "handle", Sig = signatureWithSubstring, Ret = "void" }],
+            ReferencedTypes = ["ErrorHandler"]
         };
         var tsRefs = tsClass.GetReferencedTypes(allTypeNames);
         Assert.Contains("ErrorHandler", tsRefs);
@@ -828,7 +830,8 @@ public class GetReferencedTypesIntegrationTests : IDisposable
         var tsClass = new TsModels.ClassInfo
         {
             Name = "Client",
-            Methods = [new TsModels.MethodInfo { Name = "getAll", Sig = "getAll()", Ret = "Promise<Array<MyModel>>" }]
+            Methods = [new TsModels.MethodInfo { Name = "getAll", Sig = "getAll()", Ret = "Promise<Array<MyModel>>" }],
+            ReferencedTypes = ["MyModel", "Array", "Promise"]
         };
         HashSet<string> tsTypes = ["MyModel", "Array", "Promise"];
         var tsRefs = tsClass.GetReferencedTypes(tsTypes);

@@ -102,12 +102,26 @@ public class TypeScriptPublicApiGraphEngine : IPublicApiGraphEngine<ApiIndex>
         var rootPath = ProcessSandbox.ValidateRootPath(input.RootDirectory);
         List<ApiDiagnostic> engineInputDiagnostics = [];
 
-        // Discover package.json if not explicitly provided
+        // Discover package.json if not explicitly provided.
+        // Check rootPath first, then the parent directory — TypeScript packages
+        // commonly have src/ as the source folder but package.json at the project root.
         if (string.IsNullOrWhiteSpace(packageJsonPath))
         {
             var candidate = Path.Combine(rootPath, "package.json");
             if (File.Exists(candidate))
+            {
                 packageJsonPath = candidate;
+            }
+            else
+            {
+                var parentDir = Path.GetDirectoryName(rootPath);
+                if (!string.IsNullOrWhiteSpace(parentDir))
+                {
+                    var parentCandidate = Path.Combine(parentDir, "package.json");
+                    if (File.Exists(parentCandidate))
+                        packageJsonPath = parentCandidate;
+                }
+            }
         }
 
         // Resolve .d.ts output directory from package.json exports/types

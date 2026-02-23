@@ -31,7 +31,8 @@ public class GetReferencedTypesTests
             Methods =
             [
                 new TsModels.MethodInfo { Name = "download", Sig = "download(options?: DownloadOptions)", Ret = "Promise<BlobDownloadResponse>" }
-            ]
+            ],
+            ReferencedTypes = ["DownloadOptions", "BlobDownloadResponse"]
         };
 
         HashSet<string> allTypes = ["DownloadOptions", "BlobDownloadResponse", "UnrelatedType"];
@@ -51,7 +52,8 @@ public class GetReferencedTypesTests
             Properties =
             [
                 new TsModels.PropertyInfo { Name = "pipeline", Type = "Pipeline" }
-            ]
+            ],
+            ReferencedTypes = ["Pipeline"]
         };
 
         HashSet<string> allTypes = ["Pipeline", "Other"];
@@ -67,7 +69,8 @@ public class GetReferencedTypesTests
         var cls = new TsModels.ClassInfo
         {
             Name = "BlobClient",
-            Extends = "StorageClient<BlobClientOptions>"
+            Extends = "StorageClient<BlobClientOptions>",
+            ReferencedTypes = ["StorageClient"]
         };
 
         HashSet<string> allTypes = ["StorageClient", "BlobClientOptions"];
@@ -84,7 +87,8 @@ public class GetReferencedTypesTests
         var cls = new TsModels.ClassInfo
         {
             Name = "MyClient",
-            Implements = ["Disposable", "AsyncIterable<Item>"]
+            Implements = ["Disposable", "AsyncIterable<Item>"],
+            ReferencedTypes = ["Disposable", "AsyncIterable"]
         };
 
         HashSet<string> allTypes = ["Disposable", "AsyncIterable", "Item"];
@@ -115,7 +119,8 @@ public class GetReferencedTypesTests
             Methods =
             [
                 new TsModels.MethodInfo { Name = "handle", Sig = "handle(handler: ErrorHandler)", Ret = "void" }
-            ]
+            ],
+            ReferencedTypes = ["ErrorHandler"]
         };
 
         HashSet<string> allTypes = ["Error", "ErrorHandler"];
@@ -335,7 +340,12 @@ public class GetReferencedTypesTests
                 Ret = $"Type{(i + 1) % 50}"
             });
 
-        var tsClass = new TsModels.ClassInfo { Name = "Client", Methods = tsMethods };
+        var tsClass = new TsModels.ClassInfo
+        {
+            Name = "Client",
+            Methods = tsMethods,
+            ReferencedTypes = Enumerable.Range(0, 21).Select(i => $"Type{i}").ToList()
+        };
         var tsRefs = tsClass.GetReferencedTypes(typeNames);
 
         // Should find Type0..Type20 (from sig) and Type1..Type20 (from ret)
@@ -628,7 +638,8 @@ public class GetReferencedTypesTests
         {
             Name = "Client",
             Extends = "BaseClient",
-            Methods = [new TsModels.MethodInfo { Name = "do", Sig = "opts: Options", Ret = "Promise<Result>" }]
+            Methods = [new TsModels.MethodInfo { Name = "do", Sig = "opts: Options", Ret = "Promise<Result>" }],
+            ReferencedTypes = ["BaseClient", "Options", "Result"]
         };
         HashSet<string> allTypes = ["BaseClient", "Options", "Result"];
 

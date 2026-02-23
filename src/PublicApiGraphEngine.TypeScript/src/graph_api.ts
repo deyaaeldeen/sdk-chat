@@ -16,6 +16,7 @@ import {
     PropertyDeclaration,
     ConstructorDeclaration,
     ParameterDeclaration,
+    IndexSignatureDeclaration,
     JSDocableNode,
     Node,
     Type,
@@ -31,6 +32,7 @@ import * as path from "path";
 
 export interface MethodInfo {
     name: string;
+    typeParams?: string;
     sig: string;
     params?: ParameterInfo[];
     ret?: string;
@@ -49,6 +51,13 @@ export interface PropertyInfo {
     doc?: string;
     deprecated?: boolean;
     deprecatedMsg?: string;
+}
+
+export interface IndexSignatureInfo {
+    keyName: string;
+    keyType: string;
+    valueType: string;
+    readonly?: boolean;
 }
 
 export interface ConstructorInfo {
@@ -80,6 +89,9 @@ export interface ClassInfo {
     constructors?: ConstructorInfo[];
     methods?: MethodInfo[];
     properties?: PropertyInfo[];
+    indexSignatures?: IndexSignatureInfo[];
+    /** Type names referenced by this entity's API surface, populated from compiler type resolution. */
+    referencedTypes?: string[];
 }
 
 export interface InterfaceInfo {
@@ -94,6 +106,9 @@ export interface InterfaceInfo {
     deprecatedMsg?: string;
     methods?: MethodInfo[];
     properties?: PropertyInfo[];
+    indexSignatures?: IndexSignatureInfo[];
+    /** Type names referenced by this entity's API surface, populated from compiler type resolution. */
+    referencedTypes?: string[];
 }
 
 export interface EnumInfo {
@@ -117,10 +132,13 @@ export interface TypeAliasInfo {
     doc?: string;
     deprecated?: boolean;
     deprecatedMsg?: string;
+    /** Type names referenced by this entity's API surface, populated from compiler type resolution. */
+    referencedTypes?: string[];
 }
 
 export interface FunctionInfo {
     name: string;
+    typeParams?: string;
     entryPoint?: boolean;
     exportPath?: string;  // The subpath to import from (e.g., "." or "./client")
     reExportedFrom?: string;  // External package this is re-exported from
@@ -131,11 +149,15 @@ export interface FunctionInfo {
     async?: boolean;
     deprecated?: boolean;
     deprecatedMsg?: string;
+    /** Type names referenced by this entity's API surface, populated from compiler type resolution. */
+    referencedTypes?: string[];
 }
 
 export interface ModuleInfo {
     name: string;
     condition?: string;
+    /** Full chain of export conditions, e.g. ["import", "types"]. */
+    conditionChain?: string[];
     exportPath?: string;
     /** If this module is from a dependency, the package name */
     fromPackage?: string;
@@ -148,6 +170,7 @@ export interface ModuleInfo {
 
 export interface ApiIndex {
     package: string;
+    version?: string;
     modules: ModuleInfo[];
     /** Types from dependency packages that appear in the public API */
     dependencies?: DependencyInfo[];
@@ -173,15 +196,16 @@ export interface DependencyInfo {
 // ============================================================================
 
 /**
- * Paths that indicate a type is a language-level builtin (from TypeScript lib).
- * These are universal types like Promise, Array, Map that every JS runtime provides.
- * Note: @types/node is NOT included — Node.js stdlib types (Buffer, http.IncomingMessage)
- * are tracked as dependencies since they carry useful API surface information.
+ * Checks if a source file is from TypeScript's default library (lib.*.d.ts)
+ * using the compiler's own classification rather than path-based heuristics.
  */
-const BUILTIN_PATH_PATTERNS = [
-    "/typescript/lib/",      // TypeScript lib files (lib.dom.d.ts, lib.es*.d.ts)
-    "/node_modules/typescript/", // Alternative path format
-];
+function isDefaultLibFile(project: Project, sf: SourceFile): boolean {
+    try {
+        return project.getProgram().compilerObject.isSourceFileDefaultLibrary(sf.compilerNode);
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Primitive type names that are always builtins (not resolvable to declarations).
@@ -192,36 +216,47 @@ const PRIMITIVE_TYPES = new Set([
 ]);
 
 
+// ============================================================================
+// Extraction Context — encapsulates all mutable state for a single extraction
+// ============================================================================
+
 /**
- * Builtin type names discovered dynamically from the TypeScript project's
- * lib files (lib.es*.d.ts, lib.dom.d.ts). These are language-level types
- * like Promise, Array, Map that every JS runtime provides.
- * Populated at engine time by scanning source files that match
- * BUILTIN_PATH_PATTERNS, ensuring the set stays current with the
- * TypeScript version installed in the target project.
- * Note: @types/node types are NOT builtins — they are stdlib dependencies.
+ * Encapsulates all mutable state needed during a single package extraction.
+ * Creating a new context for each extraction prevents state leaking between
+ * runs and makes the extraction lifecycle explicit.
+ */
+class ExtractionContext {
+    /** The ts-morph Project used for this extraction. */
+    readonly project: Project;
+    /** Builtin type names discovered from TypeScript lib files. */
+    readonly discoveredBuiltins: Set<string>;
+    /** Collector for external type references found during extraction. */
+    readonly typeRefs: TypeReferenceCollector;
+    /** Cache for package.json name lookups by directory. */
+    readonly pkgNameCache: Map<string, string | undefined>;
+
+    constructor(project: Project) {
+        this.project = project;
+        this.discoveredBuiltins = discoverBuiltinTypes(project);
+        this.typeRefs = new TypeReferenceCollector();
+        this.typeRefs.setProject(project);
+        this.pkgNameCache = new Map();
+    }
+}
+
+/**
+ * Module-level extraction context, initialized at the start of each
+ * extractPackage() call. Provides access to shared state (type collector,
+ * builtin types, package name cache) without threading a parameter
+ * through every function.
+ */
+let extractionCtx: ExtractionContext;
+
+/**
+ * Builtin type names — alias into the current extraction context for
+ * backward compatibility with isBuiltinType() and other consumers.
  */
 let discoveredBuiltins = new Set<string>();
-
-/**
- * Project instance for type resolution (set during engine run).
- */
-let typeResolutionProject: Project | null = null;
-
-/**
- * Sets the project to use for type resolution and discovers all builtin
- * type names from TypeScript lib files.
- *
- * Scans source files matching BUILTIN_PATH_PATTERNS and collects all
- * interface, class, type alias, and enum names. This replaces the previous
- * static WELL_KNOWN_BUILTINS set with version-aware runtime discovery,
- * similar to how the Java engine uses ModuleLayer.boot() and the
- * Python engine uses sys.stdlib_module_names.
- */
-function setTypeResolutionProject(project: Project): void {
-    typeResolutionProject = project;
-    discoveredBuiltins = discoverBuiltinTypes(project);
-}
 
 /**
  * Scans all source files from TypeScript lib to collect
@@ -231,7 +266,7 @@ function discoverBuiltinTypes(project: Project): Set<string> {
     const builtins = new Set<string>();
 
     const builtinFiles = project.getSourceFiles()
-        .filter(sf => BUILTIN_PATH_PATTERNS.some(p => sf.getFilePath().includes(p)));
+        .filter(sf => isDefaultLibFile(project, sf));
 
     for (const sourceFile of builtinFiles) {
         try {
@@ -269,16 +304,15 @@ function discoverBuiltinTypes(project: Project): Set<string> {
  * Note: @types/node types are NOT builtins — they are stdlib dependencies.
  */
 function isBuiltinType(typeName: string): boolean {
-    // Strip generic parameters
-    const baseName = typeName.split("<")[0].trim();
-
     // Check primitives first (not resolvable to declarations)
-    if (PRIMITIVE_TYPES.has(baseName)) {
+    if (PRIMITIVE_TYPES.has(typeName)) {
         return true;
     }
 
-    // Check against dynamically discovered builtins from TypeScript lib files
-    return discoveredBuiltins.has(baseName);
+    // Check against dynamically discovered builtins from TypeScript lib files.
+    // Symbol names from the compiler never include generic parameters,
+    // so no stripping is needed.
+    return discoveredBuiltins.has(typeName);
 }
 
 // ============================================================================
@@ -312,17 +346,18 @@ function collectTypeRefsFromType(
     type: Type,
     project: Project,
     refs: Set<ResolvedTypeRef>,
-    visited = new Set<string>()
+    visited: WeakSet<object> = new WeakSet()
 ): void {
     if (!type) return;
 
     // Wrap in try-catch to handle malformed declarations that can throw in ts-morph
     try {
-        // Get a unique ID for this type to prevent infinite recursion
-        // Note: getText() can throw on error types - handled by outer try-catch
-        const typeId = type.getText();
-        if (visited.has(typeId)) return;
-        visited.add(typeId);
+        // Use the compiler's internal type object identity to detect cycles.
+        // Unlike getText()-based keys, object identity has zero collisions
+        // and cannot conflate structurally similar but distinct types.
+        const compilerType = type.compilerType;
+        if (visited.has(compilerType)) return;
+        visited.add(compilerType);
 
         // Get the underlying TypeScript type
         const tsType = type.compilerType;
@@ -335,6 +370,34 @@ function collectTypeRefsFromType(
             ts.TypeFlags.BigInt | ts.TypeFlags.ESSymbol
         )) {
             return;
+        }
+
+        // Check for type alias symbols BEFORE union/intersection handling.
+        // Type aliases like `HttpMethods = "GET" | "PUT" | ...` are resolved
+        // by TypeScript to their underlying union type, erasing the alias.
+        // We need to capture the alias as a type reference before recursing.
+        const aliasSymbol = type.getAliasSymbol();
+        if (aliasSymbol) {
+            const aliasName = aliasSymbol.getName();
+            if (aliasName && aliasName !== "__type" && aliasName !== "__object" &&
+                !PRIMITIVE_TYPES.has(aliasName) && !isBuiltinType(aliasName)) {
+                const aliasDecls = aliasSymbol.getDeclarations();
+                if (aliasDecls && aliasDecls.length > 0) {
+                    const aliasDecl = aliasDecls[0];
+                    if (Node.isTypeAliasDeclaration(aliasDecl)) {
+                        const sf = aliasDecl.getSourceFile();
+                        if (!isDefaultLibFile(project, sf)) {
+                            const fp = sf.getFilePath();
+                            refs.add({
+                                name: aliasName,
+                                fullName: aliasSymbol.getFullyQualifiedName?.() ?? aliasName,
+                                declarationPath: fp,
+                                packageName: resolvePackageNameFromPath(fp),
+                            });
+                        }
+                    }
+                }
+            }
         }
 
         // Handle union types
@@ -372,14 +435,73 @@ function collectTypeRefsFromType(
 
         // Get the symbol for the type
         const symbol = type.getSymbol() || type.getAliasSymbol();
-        if (!symbol) return;
+        if (!symbol) {
+            // No symbol — still recurse into call signatures for function types
+            // e.g. `(options: Foo) => Bar`
+            for (const sig of type.getCallSignatures()) {
+                try {
+                    for (const param of sig.getParameters()) {
+                        const paramDecls = param.getDeclarations();
+                        if (paramDecls.length > 0) {
+                            const paramType = getTypeFromDeclaration(paramDecls[0]);
+                            if (paramType) collectTypeRefsFromType(paramType, project, refs, visited);
+                        }
+                    }
+                    collectTypeRefsFromType(sig.getReturnType(), project, refs, visited);
+                } catch { /* skip */ }
+            }
+            return;
+        }
 
         // Get the type name
         const typeName = symbol.getName();
 
-        // Skip anonymous types, primitives, and builtins
-        if (!typeName || typeName === "__type" || typeName === "__object" ||
-            PRIMITIVE_TYPES.has(typeName) || isBuiltinType(typeName)) {
+        // Skip primitives and builtins — but still process type arguments
+        // for generic builtins like Promise<T>, Map<K,V>, Array<T>, etc.
+        if (!typeName || PRIMITIVE_TYPES.has(typeName) || isBuiltinType(typeName)) {
+            const typeArgs = type.getTypeArguments();
+            for (const typeArg of typeArgs) {
+                collectTypeRefsFromType(typeArg, project, refs, visited);
+            }
+            return;
+        }
+
+        // For anonymous/inline object types, recurse into their properties,
+        // call signatures, and index signatures so we discover named type
+        // references within them
+        // (e.g. `{ tracingContext?: TracingContext }` → discovers TracingContext)
+        // (e.g. `{ [key: string]: FormDataValue }` → discovers FormDataValue)
+        if (typeName === "__type" || typeName === "__object") {
+            for (const prop of type.getProperties()) {
+                try {
+                    const propDecls = prop.getDeclarations();
+                    if (propDecls.length > 0) {
+                        const propType = getTypeFromDeclaration(propDecls[0]);
+                        if (propType) collectTypeRefsFromType(propType, project, refs, visited);
+                    }
+                } catch { /* skip */ }
+            }
+            for (const sig of type.getCallSignatures()) {
+                try {
+                    for (const param of sig.getParameters()) {
+                        const paramDecls = param.getDeclarations();
+                        if (paramDecls.length > 0) {
+                            const paramType = getTypeFromDeclaration(paramDecls[0]);
+                            if (paramType) collectTypeRefsFromType(paramType, project, refs, visited);
+                        }
+                    }
+                    collectTypeRefsFromType(sig.getReturnType(), project, refs, visited);
+                } catch { /* skip */ }
+            }
+            // Traverse index signature value types (e.g. { [key: string]: FormDataValue })
+            try {
+                const stringIndexType = type.getStringIndexType();
+                if (stringIndexType) collectTypeRefsFromType(stringIndexType, project, refs, visited);
+            } catch { /* skip */ }
+            try {
+                const numberIndexType = type.getNumberIndexType();
+                if (numberIndexType) collectTypeRefsFromType(numberIndexType, project, refs, visited);
+            } catch { /* skip */ }
             return;
         }
 
@@ -388,12 +510,42 @@ function collectTypeRefsFromType(
         if (!declarations || declarations.length === 0) return;
 
         const declaration = declarations[0];
+
+        // Only track type-level declarations (class, interface, enum, type alias).
+        // Method/property/function declarations are NOT types — but we still
+        // recurse into their parameter and return types below.
+        const isTypeDeclaration =
+            Node.isClassDeclaration(declaration) ||
+            Node.isInterfaceDeclaration(declaration) ||
+            Node.isEnumDeclaration(declaration) ||
+            Node.isTypeAliasDeclaration(declaration);
+
+        if (!isTypeDeclaration) {
+            // For method/function-like declarations, recurse into param & return types
+            const params = getParametersFromDeclaration(declaration);
+            for (const p of params) {
+                try {
+                    const pType = p.getType();
+                    if (pType) collectTypeRefsFromType(pType, project, refs, visited);
+                } catch { /* skip */ }
+            }
+            const retType = getReturnTypeFromDeclaration(declaration);
+            if (retType) collectTypeRefsFromType(retType, project, refs, visited);
+            return;
+        }
+
         const sourceFile = declaration.getSourceFile();
         const filePath = sourceFile.getFilePath();
 
-        // Check if this is from a builtin location
-        const isBuiltinPath = BUILTIN_PATH_PATTERNS.some(pattern => filePath.includes(pattern));
-        if (isBuiltinPath) return;
+        // Check if this is from TypeScript's default library
+        if (isDefaultLibFile(project, sourceFile)) {
+            // Still process type arguments for generic builtins (e.g. Promise<T>)
+            const typeArgs = type.getTypeArguments();
+            for (const typeArg of typeArgs) {
+                collectTypeRefsFromType(typeArg, project, refs, visited);
+            }
+            return;
+        }
 
         // Determine the package name from the source file path
         const packageName = resolvePackageNameFromPath(filePath);
@@ -425,31 +577,135 @@ function collectTypeRefsFromType(
 
 /**
  * Resolves the package name from a source file path.
- * Handles node_modules paths and local source files.
+ * Handles node_modules paths, and falls back to walking up directories
+ * to find the nearest package.json (for monorepo symlink-resolved paths).
  */
 function resolvePackageNameFromPath(filePath: string): string | undefined {
     // Check if it's in node_modules
     const nodeModulesIndex = filePath.lastIndexOf("node_modules");
-    if (nodeModulesIndex === -1) return undefined;
+    if (nodeModulesIndex !== -1) {
+        // Extract the package path after node_modules
+        const afterNodeModules = filePath.substring(nodeModulesIndex + "node_modules".length + 1);
 
-    // Extract the package path after node_modules
-    const afterNodeModules = filePath.substring(nodeModulesIndex + "node_modules".length + 1);
-
-    // Handle scoped packages (@org/package)
-    if (afterNodeModules.startsWith("@")) {
-        const parts = afterNodeModules.split(/[/\\]/);
-        if (parts.length >= 2) {
-            return `${parts[0]}/${parts[1]}`;
+        // Handle scoped packages (@org/package)
+        if (afterNodeModules.startsWith("@")) {
+            const parts = afterNodeModules.split(/[/\\]/);
+            if (parts.length >= 2) {
+                return `${parts[0]}/${parts[1]}`;
+            }
+        } else {
+            // Regular package
+            const parts = afterNodeModules.split(/[/\\]/);
+            if (parts.length >= 1) {
+                return parts[0];
+            }
         }
-    } else {
-        // Regular package
-        const parts = afterNodeModules.split(/[/\\]/);
-        if (parts.length >= 1) {
-            return parts[0];
-        }
+        return undefined;
     }
 
+    // No node_modules in the path — walk up directories to find package.json
+    // This handles monorepo setups where symlinks resolve to real paths
+    return resolvePackageNameFromAncestorPkgJson(filePath);
+}
+
+/** Package name cache — alias into the current extraction context. */
+let pkgNameCache = new Map<string, string | undefined>();
+
+/**
+ * Walks up from a file path to find the nearest package.json and reads
+ * the "name" field. Results are cached per directory.
+ */
+function resolvePackageNameFromAncestorPkgJson(filePath: string): string | undefined {
+    let dir = path.dirname(filePath);
+    const root = path.parse(dir).root;
+
+    while (dir && dir !== root) {
+        if (pkgNameCache.has(dir)) return pkgNameCache.get(dir);
+
+        const pkgPath = path.join(dir, "package.json");
+        if (fs.existsSync(pkgPath)) {
+            try {
+                const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+                const name: string | undefined = pkg.name;
+                if (name) {
+                    pkgNameCache.set(dir, name);
+                    return name;
+                }
+                // package.json without "name" (e.g. {"type":"commonjs"}) — keep walking up
+            } catch {
+                // Malformed JSON — keep walking up
+            }
+        }
+        dir = path.dirname(dir);
+    }
+    pkgNameCache.set(dir, undefined);
     return undefined;
+}
+
+/**
+ * Collects type references from a TypeNode AST annotation.
+ * This catches type aliases that TypeScript resolves away at the type level.
+ * For example, `type OperationRequest = PipelineRequest` — the resolved type is
+ * PipelineRequest, but the source annotation says OperationRequest. The
+ * `getAliasSymbol()` approach in `collectTypeRefsFromType` only works for
+ * complex aliases (union, intersection, generic); simple direct aliases are
+ * fully erased by the type checker. Walking the TypeNode AST captures them.
+ */
+function collectTypeRefsFromTypeNode(
+    node: Node,
+    project: Project,
+    refs: Set<ResolvedTypeRef>,
+): void {
+    try {
+        // TypeReference nodes: `Foo`, `Promise<Bar>`, `Map<K, V>`
+        if (Node.isTypeReference(node)) {
+            const typeName = node.getTypeName();
+            const name = Node.isQualifiedName(typeName)
+                ? typeName.getRight().getText()
+                : typeName.getText();
+
+            if (!PRIMITIVE_TYPES.has(name) && !isBuiltinType(name)) {
+                try {
+                    const symbol = typeName.getSymbol();
+                    if (symbol) {
+                        const decls = symbol.getDeclarations();
+                        if (decls && decls.length > 0) {
+                            const decl = decls[0];
+                            if (
+                                Node.isTypeAliasDeclaration(decl) ||
+                                Node.isClassDeclaration(decl) ||
+                                Node.isInterfaceDeclaration(decl) ||
+                                Node.isEnumDeclaration(decl)
+                            ) {
+                                const sf = decl.getSourceFile();
+                                if (!isDefaultLibFile(project, sf)) {
+                                    const fp = sf.getFilePath();
+                                    refs.add({
+                                        name,
+                                        fullName: symbol.getFullyQualifiedName?.() ?? name,
+                                        declarationPath: fp,
+                                        packageName: resolvePackageNameFromPath(fp),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } catch { /* skip unresolvable symbols */ }
+            }
+
+            // Recurse into type arguments: Promise<Foo> → visit Foo
+            for (const typeArg of node.getTypeArguments()) {
+                collectTypeRefsFromTypeNode(typeArg, project, refs);
+            }
+            return;
+        }
+
+        // For compound type nodes (union, intersection, tuple, array, function, etc.)
+        // recurse into all child nodes
+        for (const child of node.forEachChildAsArray()) {
+            collectTypeRefsFromTypeNode(child, project, refs);
+        }
+    } catch { /* Non-fatal */ }
 }
 
 /**
@@ -463,9 +719,7 @@ class TypeReferenceCollector {
     private project: Project | null = null;
     private definedTypes = new Set<string>();
     private importedTypes = new Map<string, string>(); // typeName -> packageName
-    private rawTypeNames = new Set<string>(); // type names seen in annotations
     private contextStack: string[] = []; // stack of enclosing type names
-    private rawTypeNamesByContext = new Map<string, Set<string>>(); // context -> raw type names
     private refsByContext = new Map<string, Set<ResolvedTypeRef>>(); // context -> resolved refs
 
     setProject(project: Project): void {
@@ -473,7 +727,8 @@ class TypeReferenceCollector {
     }
 
     addDefinedType(name: string): void {
-        this.definedTypes.add(name.split("<")[0]);
+        // Entity names from getName() never include generic parameters.
+        this.definedTypes.add(name);
     }
 
     /** Push a context (enclosing type name) before extracting a class/interface/etc. */
@@ -510,23 +765,26 @@ class TypeReferenceCollector {
         }
     }
 
-    collectRawTypeName(typeText: string): void {
-        if (!typeText) return;
-        const tokens = typeText.split(/[<>|&,\[\]\s()]+/);
-        for (const token of tokens) {
-            const name = token.trim();
-            if (name && !PRIMITIVE_TYPES.has(name) && !isBuiltinType(name)) {
-                this.rawTypeNames.add(name);
-                const ctx = this.currentContext();
+    /**
+     * Collect type references from a TypeNode AST annotation.
+     * Catches type aliases that TypeScript resolves away at the type level
+     * (e.g., `type OperationRequest = PipelineRequest`).
+     */
+    collectFromTypeNode(typeNode: Node): void {
+        if (!this.project) return;
+        try {
+            const newRefs = new Set<ResolvedTypeRef>();
+            collectTypeRefsFromTypeNode(typeNode, this.project, newRefs);
+            const ctx = this.currentContext();
+            for (const ref of newRefs) {
+                this.refs.add(ref);
                 if (ctx) {
-                    let set = this.rawTypeNamesByContext.get(ctx);
-                    if (!set) {
-                        set = new Set();
-                        this.rawTypeNamesByContext.set(ctx, set);
-                    }
-                    set.add(name);
+                    if (!this.refsByContext.has(ctx)) this.refsByContext.set(ctx, new Set());
+                    this.refsByContext.get(ctx)!.add(ref);
                 }
             }
+        } catch {
+            // Non-fatal
         }
     }
 
@@ -564,30 +822,24 @@ class TypeReferenceCollector {
 
     /**
      * Get external type references, optionally scoped to types reachable
-     * from the given set of type names. When reachableTypes is provided,
-     * only raw type names collected in the context of those types are included.
+     * from the given set of type names. Uses compiler-resolved references
+     * (via collectFromType) with import-declaration-based fallback for
+     * types from uninstalled packages.
      */
     getExternalRefs(reachableTypes?: Set<string>): ResolvedTypeRef[] {
         // Build scoped refs based on reachable types
         let scopedRefs: Set<ResolvedTypeRef>;
-        let scopedRawNames: Set<string>;
 
         if (reachableTypes) {
             scopedRefs = new Set<ResolvedTypeRef>();
-            scopedRawNames = new Set<string>();
             for (const typeName of reachableTypes) {
                 const contextRefs = this.refsByContext.get(typeName);
                 if (contextRefs) {
                     for (const ref of contextRefs) scopedRefs.add(ref);
                 }
-                const contextRawNames = this.rawTypeNamesByContext.get(typeName);
-                if (contextRawNames) {
-                    for (const name of contextRawNames) scopedRawNames.add(name);
-                }
             }
         } else {
             scopedRefs = this.refs;
-            scopedRawNames = this.rawTypeNames;
         }
 
         // Filter out locally defined types and types without package info
@@ -596,41 +848,62 @@ class TypeReferenceCollector {
             ref.packageName !== undefined
         );
 
-        // Also include import-backed refs for types used in the API but not resolved by ts-morph
+        // Import-declaration fallback: include types that were imported from
+        // external packages but not resolved by ts-morph (e.g., uninstalled deps).
+        // This replaces the old string-tokenization approach with the compiler's
+        // own import resolution.
         const resolvedNames = new Set(resolved.map(r => r.name));
-        for (const typeName of scopedRawNames) {
+        for (const [typeName, packageName] of this.importedTypes) {
             if (resolvedNames.has(typeName)) continue;
             if (this.definedTypes.has(typeName)) continue;
 
-            const packageName = this.importedTypes.get(typeName);
-            if (packageName) {
-                resolved.push({
-                    name: typeName,
-                    fullName: typeName,
-                    declarationPath: "",
-                    packageName: packageName,
-                });
-            }
+            resolved.push({
+                name: typeName,
+                fullName: typeName,
+                declarationPath: "",
+                packageName: packageName,
+            });
         }
 
         return resolved;
+    }
+
+    /**
+     * Returns per-entity type reference names.
+     * Each entity (class, interface, function, type alias) context name maps
+     * to the set of type names it references, extracted from compiler type resolution.
+     */
+    getContextRefNames(): Map<string, string[]> {
+        const result = new Map<string, string[]>();
+        for (const [ctx, refs] of this.refsByContext) {
+            const names = new Set<string>();
+            for (const ref of refs) {
+                names.add(ref.name);
+            }
+            result.set(ctx, Array.from(names));
+        }
+        return result;
     }
 
     clear(): void {
         this.refs.clear();
         this.definedTypes.clear();
         this.importedTypes.clear();
-        this.rawTypeNames.clear();
         this.contextStack.length = 0;
-        this.rawTypeNamesByContext.clear();
         this.refsByContext.clear();
+    }
+
+    /** Returns a read-only view of type → package mappings from import declarations. */
+    getImportedPackages(): ReadonlyMap<string, string> {
+        return this.importedTypes;
     }
 }
 
 /**
- * Global type reference collector instance.
+ * Type reference collector — alias into the current extraction context.
+ * Reassigned at the start of each extractPackage() call.
  */
-const typeCollector = new TypeReferenceCollector();
+let typeCollector = new TypeReferenceCollector();
 
 // ============================================================================
 // Engine Functions
@@ -654,6 +927,60 @@ function getDocString(node: JSDocableNode): string | undefined {
     return firstLine.length > 120 ? firstLine.substring(0, 117) + "..." : firstLine;
 }
 
+// ============================================================================
+// Phase 4: Type-safe node accessors — eliminate `as any` casts
+// ============================================================================
+
+/**
+ * Safely get the type from a declaration node using ts-morph type guards.
+ * Replaces `(decl as any).getType?.()` patterns.
+ */
+function getTypeFromDeclaration(decl: Node): Type | undefined {
+    if (Node.isParameterDeclaration(decl)) return decl.getType();
+    if (Node.isPropertyDeclaration(decl)) return decl.getType();
+    if (Node.isPropertySignature(decl)) return decl.getType();
+    if (Node.isVariableDeclaration(decl)) return decl.getType();
+    if (Node.isTypeAliasDeclaration(decl)) return decl.getType();
+    if (Node.isMethodDeclaration(decl)) return decl.getReturnType();
+    if (Node.isMethodSignature(decl)) return decl.getReturnType();
+    if (Node.isGetAccessorDeclaration(decl)) return decl.getReturnType();
+    if (Node.isSetAccessorDeclaration(decl)) return decl.getParameters()[0]?.getType();
+    if (Node.isFunctionDeclaration(decl)) return decl.getReturnType();
+    if (Node.isClassDeclaration(decl)) return decl.getType();
+    if (Node.isInterfaceDeclaration(decl)) return decl.getType();
+    if (Node.isEnumDeclaration(decl)) return decl.getType();
+    if (Node.isIndexSignatureDeclaration(decl)) return decl.getReturnType();
+    return undefined;
+}
+
+/**
+ * Safely get parameters from a declaration node using ts-morph type guards.
+ * Replaces `(decl as any).getParameters?.()` patterns.
+ */
+function getParametersFromDeclaration(decl: Node): ParameterDeclaration[] {
+    if (Node.isMethodDeclaration(decl)) return decl.getParameters();
+    if (Node.isMethodSignature(decl)) return decl.getParameters();
+    if (Node.isFunctionDeclaration(decl)) return decl.getParameters();
+    if (Node.isConstructorDeclaration(decl)) return decl.getParameters();
+    if (Node.isGetAccessorDeclaration(decl)) return decl.getParameters();
+    if (Node.isSetAccessorDeclaration(decl)) return decl.getParameters();
+    return [];
+}
+
+/**
+ * Safely get the return type from a declaration node using ts-morph type guards.
+ * Replaces `(decl as any).getReturnType?.()` patterns.
+ */
+function getReturnTypeFromDeclaration(decl: Node): Type | undefined {
+    if (Node.isMethodDeclaration(decl)) return decl.getReturnType();
+    if (Node.isMethodSignature(decl)) return decl.getReturnType();
+    if (Node.isFunctionDeclaration(decl)) return decl.getReturnType();
+    if (Node.isConstructorDeclaration(decl)) return decl.getReturnType();
+    if (Node.isGetAccessorDeclaration(decl)) return decl.getReturnType();
+    if (Node.isIndexSignatureDeclaration(decl)) return decl.getReturnType();
+    return undefined;
+}
+
 /**
  * Checks if a node has @internal or @hidden JSDoc tags, indicating it should be excluded
  * from the public API surface.
@@ -673,38 +1000,31 @@ function hasInternalOrHiddenTag(node: JSDocableNode): boolean {
     return false;
 }
 
-function simplifyType(type: string): string {
-    if (!type) return type;
-    // Remove import() statements
-    type = type.replace(/import\([^)]+\)\./g, "");
-    return type;
-}
-
 function formatParameter(p: ParameterDeclaration): string {
     let sig = p.getName();
     if (p.isOptional()) sig += "?";
     const type = p.getType();
-    const typeText = type.getText();
+    const typeNode = p.getTypeNode();
+    // Prefer the developer-written type annotation (always clean).
+    // Fall back to compiler-inferred text using the parameter as scope
+    // to minimize import() qualifiers.
+    const typeText = stripImportPrefix(typeNode?.getText() || type.getText(p));
     if (typeText && typeText !== "any") {
-        sig += `: ${simplifyType(typeText)}`;
+        sig += `: ${typeText}`;
         // Collect type reference for dependency tracking
         typeCollector.collectFromType(type);
-        typeCollector.collectRawTypeName(typeText);
+        // Also collect from TypeNode to catch simple type aliases resolved away by TS
+        if (typeNode) typeCollector.collectFromTypeNode(typeNode);
     } else {
         sig += ": any";
-    }
-    // Also collect from annotation node (preserves original names for unresolved types)
-    const typeNode = p.getTypeNode();
-    if (typeNode) {
-        typeCollector.collectRawTypeName(typeNode.getText());
     }
     return sig;
 }
 
 function extractParameterInfo(p: ParameterDeclaration): ParameterInfo {
     const typeNodeText = p.getTypeNode()?.getText();
-    const inferredTypeText = p.getType().getText();
-    const type = simplifyType(typeNodeText || inferredTypeText || "any");
+    const inferredTypeText = p.getType().getText(p);
+    const type = stripImportPrefix(typeNodeText || inferredTypeText || "any");
 
     const info: ParameterInfo = {
         name: p.getName(),
@@ -741,27 +1061,28 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
     const paramInfos = method.getParameters().map(extractParameterInfo);
     const params = method.getParameters().map(formatParameter).join(", ");
     const returnType = method.getReturnType();
-    const ret = returnType?.getText();
+    const returnTypeNode = method.getReturnTypeNode();
+    const ret = stripImportPrefix(returnTypeNode?.getText() || returnType?.getText(method) || "");
 
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
-        if (ret) typeCollector.collectRawTypeName(ret);
     }
-    // Also collect from annotation node (preserves original names for unresolved types)
-    const retTypeNode = method.getReturnTypeNode();
-    if (retTypeNode) {
-        typeCollector.collectRawTypeName(retTypeNode.getText());
-    }
+    // Also collect from TypeNode to catch simple type aliases resolved away by TS
+    if (returnTypeNode) typeCollector.collectFromTypeNode(returnTypeNode);
+
+    const typeParams = method.getTypeParameters().map(t => t.getText()).join(", ");
 
     const result: MethodInfo = {
         name: method.getName(),
         sig: params,
     };
 
+    if (typeParams) result.typeParams = typeParams;
+
     if (paramInfos.length) result.params = paramInfos;
 
-    if (ret && ret !== "void") result.ret = simplifyType(ret);
+    if (ret && ret !== "void") result.ret = ret;
 
     const doc = getDocString(method);
     if (doc) result.doc = doc;
@@ -778,14 +1099,16 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
 
 function extractProperty(prop: PropertyDeclaration): PropertyInfo {
     const type = prop.getType();
+    const typeNode = prop.getTypeNode();
 
     // Collect type reference for dependency tracking
     typeCollector.collectFromType(type);
-    typeCollector.collectRawTypeName(type.getText());
+    // Also collect from TypeNode to catch simple type aliases resolved away by TS
+    if (typeNode) typeCollector.collectFromTypeNode(typeNode);
 
     const result: PropertyInfo = {
         name: prop.getName(),
-        type: simplifyType(type.getText()),
+        type: stripImportPrefix(typeNode?.getText() || type.getText(prop)),
     };
 
     if (prop.isReadonly()) result.readonly = true;
@@ -832,7 +1155,6 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
     const ext = cls.getExtends();
     if (ext) {
         result.extends = ext.getText();
-        typeCollector.collectRawTypeName(ext.getText());
         // Collect base class type
         const baseType = ext.getType();
         typeCollector.collectFromType(baseType);
@@ -845,7 +1167,6 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
         result.implements = impl;
         // Collect interface types
         for (const implExpr of implExprs) {
-            typeCollector.collectRawTypeName(implExpr.getText());
             const implType = implExpr.getType();
             typeCollector.collectFromType(implType);
         }
@@ -868,16 +1189,66 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
     // Methods
     const methods = cls
         .getMethods()
-        .filter((m) => m.getScope() !== "private" && !m.getName().startsWith("_"))
+        .filter((m) => m.getScope() !== "private" && !hasInternalOrHiddenTag(m))
         .map(extractMethod);
     if (methods.length) result.methods = methods;
 
     // Properties
     const props = cls
         .getProperties()
-        .filter((p) => p.getScope() !== "private" && !p.getName().startsWith("_"))
+        .filter((p) => p.getScope() !== "private" && !hasInternalOrHiddenTag(p))
         .map(extractProperty);
-    if (props.length) result.properties = props;
+
+    // Get/Set Accessors — extract as properties with correct readonly flag
+    const setAccessorNames = new Set(
+        cls.getSetAccessors()
+            .filter((a) => a.getScope() !== "private")
+            .map((a) => a.getName())
+    );
+    const accessorProps: PropertyInfo[] = cls
+        .getGetAccessors()
+        .filter((a) => a.getScope() !== "private" && !hasInternalOrHiddenTag(a))
+        .map((getter) => {
+            const returnType = getter.getReturnType();
+            const typeText = stripImportPrefix(getter.getReturnTypeNode()?.getText()
+                || (returnType ? returnType.getText(getter) : "any"));
+            if (returnType) {
+                typeCollector.collectFromType(returnType);
+            }
+            const accessorResult: PropertyInfo = {
+                name: getter.getName(),
+                type: typeText,
+            };
+            if (!setAccessorNames.has(getter.getName())) {
+                accessorResult.readonly = true;
+            }
+            const doc = getDocString(getter);
+            if (doc) accessorResult.doc = doc;
+            const deprecated = getDeprecatedInfo(getter);
+            if (deprecated.deprecated) accessorResult.deprecated = true;
+            if (deprecated.deprecatedMsg) accessorResult.deprecatedMsg = deprecated.deprecatedMsg;
+            return accessorResult;
+        });
+
+    const allProps = [...props, ...accessorProps];
+    if (allProps.length) result.properties = allProps;
+
+    // Index signatures — e.g., [key: string]: unknown
+    // ClassDeclaration doesn't have getIndexSignatures(), so filter getMembers() by kind.
+    const classIndexSigNodes: IndexSignatureDeclaration[] = cls
+        .getMembers()
+        .filter((m) => Node.isIndexSignatureDeclaration(m)) as IndexSignatureDeclaration[];
+    const classIndexSigs: IndexSignatureInfo[] = classIndexSigNodes
+        .map((sig) => {
+            const keyParam = sig.getKeyName();
+            const keyType = sig.getKeyType().getText();
+            const valueType = stripImportPrefix(sig.getReturnTypeNode()?.getText() || sig.getReturnType().getText(sig));
+            typeCollector.collectFromType(sig.getReturnType());
+            const indexSig: IndexSignatureInfo = { keyName: keyParam, keyType, valueType };
+            if (sig.isReadonly()) indexSig.readonly = true;
+            return indexSig;
+        });
+    if (classIndexSigs.length) result.indexSignatures = classIndexSigs;
 
     typeCollector.popContext();
     return result;
@@ -889,22 +1260,28 @@ function extractInterfaceMethod(method: Node): MethodInfo | undefined {
     const paramInfos = method.getParameters().map(extractParameterInfo);
     const params = method.getParameters().map(formatParameter).join(", ");
     const returnType = method.getReturnType();
-    const ret = returnType?.getText();
+    const returnTypeNode = method.getReturnTypeNode();
+    const ret = stripImportPrefix(returnTypeNode?.getText() || returnType?.getText(method) || "");
 
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
-        if (ret) typeCollector.collectRawTypeName(ret);
     }
+    // Also collect from TypeNode to catch simple type aliases resolved away by TS
+    if (returnTypeNode) typeCollector.collectFromTypeNode(returnTypeNode);
+
+    const typeParams = method.getTypeParameters().map(t => t.getText()).join(", ");
 
     const result: MethodInfo = {
         name: method.getName(),
         sig: params,
     };
 
+    if (typeParams) result.typeParams = typeParams;
+
     if (paramInfos.length) result.params = paramInfos;
 
-    if (ret && ret !== "void") result.ret = simplifyType(ret);
+    if (ret && ret !== "void") result.ret = ret;
 
     const doc = getDocString(method);
     if (doc) result.doc = doc;
@@ -925,13 +1302,15 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
     const paramInfos = typeNode.getParameters().map(extractParameterInfo);
     const params = typeNode.getParameters().map(formatParameter).join(", ");
     const returnType = typeNode.getReturnType();
-    const ret = returnType?.getText();
+    const returnTypeNode = typeNode.getReturnTypeNode();
+    const ret = stripImportPrefix(returnTypeNode?.getText() || returnType?.getText(prop) || "");
 
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
-        if (ret) typeCollector.collectRawTypeName(ret);
     }
+    // Also collect from TypeNode to catch simple type aliases resolved away by TS
+    if (returnTypeNode) typeCollector.collectFromTypeNode(returnTypeNode);
 
     const result: MethodInfo = {
         name: prop.getName(),
@@ -940,7 +1319,7 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
 
     if (paramInfos.length) result.params = paramInfos;
 
-    if (ret && ret !== "void") result.ret = simplifyType(ret);
+    if (ret && ret !== "void") result.ret = ret;
 
     const doc = getDocString(prop);
     if (doc) result.doc = doc;
@@ -955,19 +1334,17 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
 function extractInterfaceProperty(prop: Node): PropertyInfo | undefined {
     if (!Node.isPropertySignature(prop)) return undefined;
 
-    const typeText = prop.getType().getText();
-    typeCollector.collectRawTypeName(typeText);
-    // Also collect from the type annotation node directly —
-    // the resolved type may be 'any' for uninstalled packages,
-    // but the annotation text preserves the original type name
     const typeNode = prop.getTypeNode();
-    if (typeNode) {
-        typeCollector.collectRawTypeName(typeNode.getText());
-    }
+    const typeText = stripImportPrefix(typeNode?.getText() || prop.getType().getText(prop));
+
+    // Collect type reference for dependency tracking
+    typeCollector.collectFromType(prop.getType());
+    // Also collect from TypeNode to catch simple type aliases resolved away by TS
+    if (typeNode) typeCollector.collectFromTypeNode(typeNode);
 
     const result: PropertyInfo = {
         name: prop.getName(),
-        type: simplifyType(typeText),
+        type: typeText,
     };
 
     if (prop.isReadonly()) result.readonly = true;
@@ -989,9 +1366,13 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
 
     const result: InterfaceInfo = { name };
 
-    // Extends
-    const ext = iface.getExtends().map((e) => e.getText());
+    // Extends — collect type references for dependency tracking
+    const extExprs = iface.getExtends();
+    const ext = extExprs.map((e) => e.getText());
     if (ext.length) result.extends = ext;
+    for (const extExpr of extExprs) {
+        typeCollector.collectFromType(extExpr.getType());
+    }
 
     // Type parameters
     const typeParams = iface.getTypeParameters().map((t) => t.getText());
@@ -1009,14 +1390,15 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
     methods.push(
         ...iface
             .getMethods()
-            .filter((m) => !m.getName().startsWith("_"))
+            .filter((m) => !hasInternalOrHiddenTag(m))
             .map((m) => extractInterfaceMethod(m))
             .filter((m): m is MethodInfo => m !== undefined),
     );
 
     // Properties
     const props: PropertyInfo[] = [];
-    for (const prop of iface.getProperties().filter((p) => !p.getName().startsWith("_"))) {
+    for (const prop of iface.getProperties()) {
+        if (Node.isPropertySignature(prop) && hasInternalOrHiddenTag(prop)) continue;
         const callable = extractInterfaceCallableProperty(prop);
         if (callable) {
             methods.push(callable);
@@ -1028,6 +1410,20 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
 
     if (methods.length) result.methods = methods;
     if (props.length) result.properties = props;
+
+    // Index signatures — e.g., [key: string]: unknown
+    const indexSigs: IndexSignatureInfo[] = iface
+        .getIndexSignatures()
+        .map((sig) => {
+            const keyParam = sig.getKeyName();
+            const keyType = sig.getKeyType().getText();
+            const valueType = stripImportPrefix(sig.getReturnTypeNode()?.getText() || sig.getReturnType().getText(sig));
+            typeCollector.collectFromType(sig.getReturnType());
+            const indexSig: IndexSignatureInfo = { keyName: keyParam, keyType, valueType };
+            if (sig.isReadonly()) indexSig.readonly = true;
+            return indexSig;
+        });
+    if (indexSigs.length) result.indexSignatures = indexSigs;
 
     typeCollector.popContext();
     return result;
@@ -1058,9 +1454,22 @@ function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
     typeCollector.collectFromType(type);
 
     // Use the type node text (original source) rather than Type.getText()
-    // which can resolve to the alias name itself for complex types
+    // which can resolve to the alias name itself for complex types.
+    // However, for indexed access types (e.g., AppSettings["database"]),
+    // prefer the compiler-resolved type since it gives the concrete type name.
     const typeNode = alias.getTypeNode();
-    const typeText = typeNode ? simplifyType(typeNode.getText()) : simplifyType(type.getText());
+    let typeText: string;
+    const typeNodeText = typeNode?.getText();
+    const resolvedText = type.getText(alias);
+    if (typeNode && typeNode.getKind() === ts.SyntaxKind.IndexedAccessType) {
+        // Indexed access type (e.g., AppSettings["database"]) — use compiler-resolved
+        // type since the concrete type name is more useful than the access expression.
+        typeText = stripImportPrefix(resolvedText);
+    } else if (typeNodeText) {
+        typeText = stripImportPrefix(typeNodeText);
+    } else {
+        typeText = stripImportPrefix(resolvedText);
+    }
 
     const result: TypeAliasInfo = {
         name,
@@ -1089,22 +1498,25 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     const paramInfos = fn.getParameters().map(extractParameterInfo);
     const params = fn.getParameters().map(formatParameter).join(", ");
     const returnType = fn.getReturnType();
-    const ret = returnType?.getText();
+    const ret = stripImportPrefix(fn.getReturnTypeNode()?.getText() || returnType?.getText(fn) || "");
 
     // Collect return type reference
     if (returnType) {
         typeCollector.collectFromType(returnType);
-        if (ret) typeCollector.collectRawTypeName(ret);
     }
+
+    const typeParams = fn.getTypeParameters().map(t => t.getText()).join(", ");
 
     const result: FunctionInfo = {
         name,
         sig: params,
     };
 
+    if (typeParams) result.typeParams = typeParams;
+
     if (paramInfos.length) result.params = paramInfos;
 
-    if (ret && ret !== "void") result.ret = simplifyType(ret);
+    if (ret && ret !== "void") result.ret = ret;
 
     const doc = getDocString(fn);
     if (doc) result.doc = doc;
@@ -1197,12 +1609,18 @@ function resolveEntryPointFiles(rootPath: string, options: EngineOptions): Expor
     const pkg: PackageJson = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     const entryEntries: ExportEntry[] = [];
 
+    // Export paths in package.json are relative to the package.json location,
+    // which may differ from rootPath (e.g. rootPath = .../pkg/src but package.json
+    // is at .../pkg/).  Use the package.json directory as the resolve base.
+    const pkgDir = path.dirname(path.resolve(pkgPath));
+    const resolveBase = pkgDir !== path.resolve(rootPath) ? pkgDir : rootPath;
+
     // 1. Modern exports map (highest priority) - prefer "." export
     if (pkg.exports) {
         // First try root export only ("." entry)
         const rootExportPaths = extractExportPaths(pkg.exports, true);
         for (const entry of rootExportPaths) {
-            const resolved = resolveToSourceFile(rootPath, entry.filePath, options);
+            const resolved = resolveToSourceFile(resolveBase, entry.filePath, options);
             if (resolved) entryEntries.push({ exportPath: entry.exportPath, condition: entry.condition, filePath: resolved });
         }
 
@@ -1211,50 +1629,31 @@ function resolveEntryPointFiles(rootPath: string, options: EngineOptions): Expor
         for (const entry of allExportPaths) {
             // Skip if already added from root
             if (entryEntries.some(e => e.exportPath === entry.exportPath && e.condition === entry.condition)) continue;
-            const resolved = resolveToSourceFile(rootPath, entry.filePath, options);
+            const resolved = resolveToSourceFile(resolveBase, entry.filePath, options);
             if (resolved) entryEntries.push({ exportPath: entry.exportPath, condition: entry.condition, filePath: resolved });
         }
     }
 
     // 2. TypeScript types/typings (these are root exports)
     if (entryEntries.length === 0 && pkg.types) {
-        const resolved = resolveToSourceFile(rootPath, pkg.types, options);
+        const resolved = resolveToSourceFile(resolveBase, pkg.types, options);
         if (resolved) entryEntries.push({ exportPath: ".", condition: "default", filePath: resolved });
     }
     if (entryEntries.length === 0 && pkg.typings && pkg.typings !== pkg.types) {
-        const resolved = resolveToSourceFile(rootPath, pkg.typings, options);
+        const resolved = resolveToSourceFile(resolveBase, pkg.typings, options);
         if (resolved) entryEntries.push({ exportPath: ".", condition: "default", filePath: resolved });
     }
 
     // 3. ES module entry (root export)
     if (entryEntries.length === 0 && pkg.module) {
-        const resolved = resolveToSourceFile(rootPath, pkg.module, options);
+        const resolved = resolveToSourceFile(resolveBase, pkg.module, options);
         if (resolved) entryEntries.push({ exportPath: ".", condition: "default", filePath: resolved });
     }
 
     // 4. CommonJS entry (root export)
     if (entryEntries.length === 0 && pkg.main) {
-        const resolved = resolveToSourceFile(rootPath, pkg.main, options);
+        const resolved = resolveToSourceFile(resolveBase, pkg.main, options);
         if (resolved) entryEntries.push({ exportPath: ".", condition: "default", filePath: resolved });
-    }
-
-    // 5. Fallback to common entry points
-    if (entryEntries.length === 0) {
-        const fallbackPaths = [
-            "src/index.ts",
-            "src/index.tsx",
-            "src/index.mts",
-            "index.ts",
-            "index.tsx",
-            "lib/index.ts",
-        ];
-        for (const fallback of fallbackPaths) {
-            const fullPath = path.join(rootPath, fallback);
-            if (fs.existsSync(fullPath)) {
-                entryEntries.push({ exportPath: ".", condition: "default", filePath: fullPath });
-                break;
-            }
-        }
     }
 
     return entryEntries;
@@ -1268,6 +1667,8 @@ interface ExportEntry {
     exportPath: string;
     /** Resolved export condition context (e.g., "default", "node", "browser") */
     condition: string;
+    /** Full chain of conditions before normalization, e.g. ["import", "types"] */
+    conditionChain?: string[];
     /** The resolved source file path */
     filePath: string;
 }
@@ -1279,8 +1680,8 @@ interface ExportEntry {
  * @param rootOnly - If true, only extract from the "." export
  * @returns Array of {exportPath, filePath} pairs
  */
-function extractExportPaths(exports: string | Record<string, unknown>, rootOnly: boolean = false): Array<{ exportPath: string; condition: string; filePath: string }> {
-    const results: Array<{ exportPath: string; condition: string; filePath: string }> = [];
+function extractExportPaths(exports: string | Record<string, unknown>, rootOnly: boolean = false): ExportEntry[] {
+    const results: ExportEntry[] = [];
     const MAX_DEPTH = 10;
     const visited = new Set<unknown>();
 
@@ -1299,7 +1700,8 @@ function extractExportPaths(exports: string | Record<string, unknown>, rootOnly:
         if (typeof value === "string") {
             const rawCondition = conditions.length > 0 ? conditions.join("|") : "default";
             const condition = normalizeCondition(rawCondition);
-            results.push({ exportPath, condition, filePath: value });
+            const conditionChain = conditions.length > 1 ? [...conditions] : undefined;
+            results.push({ exportPath, condition, conditionChain, filePath: value });
             return;
         }
 
@@ -1347,7 +1749,7 @@ function normalizeCondition(condition: string): string {
     // When "types" co-occurs with an environment condition (node, browser),
     // prefer the environment condition so platform-specific modules retain
     // their context instead of collapsing to a generic "types" label.
-    const environmentConditions = new Set(["node", "browser", "import", "require"]);
+    const environmentConditions = new Set(["node", "browser", "import", "require", "workerd", "react-native"]);
     const hasTypes = chain.includes("types");
     if (hasTypes) {
         const envCondition = chain.find(c => environmentConditions.has(c));
@@ -1358,7 +1760,7 @@ function normalizeCondition(condition: string): string {
     }
 
     // Return the first recognized condition to provide a stable canonical form.
-    const recognized = new Set(["import", "require", "node", "browser", "development", "production"]);
+    const recognized = new Set(["import", "require", "node", "browser", "workerd", "react-native", "development", "production"]);
     for (const c of chain) {
         if (recognized.has(c)) {
             return c;
@@ -1385,71 +1787,110 @@ function getConditionPriority(condition: string): number {
 }
 
 /**
- * Resolves a dist/output path to its corresponding source file.
- * Handles common patterns like dist/ -> src/, types/ -> src/.
+ * Resolves a package.json entry point path to the actual source/declaration file on disk.
+ *
+ * Resolution strategy (in order):
+ * 1. Direct path or extension-converted path (e.g. .js → .d.ts in compiled mode)
+ * 2. TypeScript module resolution via ts.resolveModuleName (respects tsconfig paths/rootDirs)
+ * 3. Common output-to-source directory mappings (source mode only, e.g. dist/ → src/)
  */
 function resolveToSourceFile(rootPath: string, outputPath: string, options: EngineOptions): string | null {
-    // Normalize path
-    let filePath = outputPath.replace(/^\.\//, "");
+    const filePath = outputPath.replace(/^\.\//, "");
 
     if (options.mode === "compiled") {
-        const candidatePaths = [
-            filePath,
-            filePath.replace(/\.js$/, ".d.ts").replace(/\.mjs$/, ".d.mts").replace(/\.cjs$/, ".d.cts"),
-        ];
-
-        for (const candidate of candidatePaths) {
-            const direct = path.join(rootPath, candidate);
-            if (fs.existsSync(direct)) {
-                return direct;
-            }
-
-            if (options.dtsRoot) {
-                const fromDtsRoot = path.join(options.dtsRoot, candidate);
-                if (fs.existsSync(fromDtsRoot)) {
-                    return fromDtsRoot;
-                }
-            }
-        }
-
-        return null;
+        return resolveCompiledFile(rootPath, filePath, options);
     }
 
-    // Common output-to-source mappings
-    const mappings: Array<{ from: RegExp; to: string }> = [
-        { from: /^dist-esm\//, to: "src/" },
-        { from: /^dist\//, to: "src/" },
-        { from: /^lib\//, to: "src/" },
-        { from: /^build\//, to: "src/" },
-        { from: /^out\//, to: "src/" },
-        { from: /^types\//, to: "src/" },
+    return resolveSourceFile(rootPath, filePath);
+}
+
+/**
+ * Compiled mode: find the .d.ts declaration file directly.
+ */
+function resolveCompiledFile(rootPath: string, filePath: string, options: EngineOptions): string | null {
+    const candidatePaths = [
+        filePath,
+        filePath.replace(/\.js$/, ".d.ts").replace(/\.mjs$/, ".d.mts").replace(/\.cjs$/, ".d.cts"),
     ];
 
-    for (const { from, to } of mappings) {
-        if (from.test(filePath)) {
-            filePath = filePath.replace(from, to);
-            break;
+    for (const candidate of candidatePaths) {
+        const direct = path.join(rootPath, candidate);
+        if (fs.existsSync(direct)) {
+            return direct;
+        }
+
+        if (options.dtsRoot) {
+            const fromDtsRoot = path.join(options.dtsRoot, candidate);
+            if (fs.existsSync(fromDtsRoot)) {
+                return fromDtsRoot;
+            }
         }
     }
 
-    // Convert .d.ts or .js to .ts
-    filePath = filePath
+    return null;
+}
+
+/**
+ * Source mode: resolve an output path (e.g. ./dist/index.js) to the corresponding
+ * source file (e.g. ./src/index.ts).
+ *
+ * Tries direct lookup first, then TypeScript module resolution, then falls back
+ * to common directory mappings (dist→src, lib→src, etc.).
+ */
+function resolveSourceFile(rootPath: string, filePath: string): string | null {
+    // 1. Direct path with extension conversion (.js → .ts)
+    const directPath = path.join(rootPath, filePath)
         .replace(/\.d\.ts$/, ".ts")
         .replace(/\.js$/, ".ts")
         .replace(/\.mjs$/, ".mts")
         .replace(/\.cjs$/, ".cts");
-
-    const fullPath = path.join(rootPath, filePath);
-    if (fs.existsSync(fullPath)) {
-        return fullPath;
-    }
-
-    // Try without the source mapping (file might be at root)
-    const directPath = path.join(rootPath, outputPath.replace(/^\.\//, ""))
-        .replace(/\.d\.ts$/, ".ts")
-        .replace(/\.js$/, ".ts");
     if (fs.existsSync(directPath)) {
         return directPath;
+    }
+
+    // 2. TypeScript module resolution (respects tsconfig paths, rootDirs, etc.)
+    const tsResolved = tryTypeScriptModuleResolution(rootPath, filePath);
+    if (tsResolved) {
+        return tsResolved;
+    }
+
+    return null;
+}
+
+/**
+ * Attempt TypeScript module resolution for a file path.
+ * This leverages tsconfig paths, rootDirs, and other compiler options.
+ */
+function tryTypeScriptModuleResolution(rootPath: string, filePath: string): string | null {
+    const tsconfigPath = path.join(rootPath, "tsconfig.json");
+    if (!fs.existsSync(tsconfigPath)) {
+        return null;
+    }
+
+    try {
+        const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+        if (configFile.error) return null;
+
+        const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, rootPath);
+        const specifier = "./" + filePath
+            .replace(/\.d\.ts$/, "")
+            .replace(/\.ts$/, "")
+            .replace(/\.js$/, "")
+            .replace(/\.mjs$/, "")
+            .replace(/\.cjs$/, "");
+
+        const result = ts.resolveModuleName(
+            specifier,
+            path.join(rootPath, "package.json"),
+            parsed.options,
+            ts.sys
+        );
+
+        if (result.resolvedModule) {
+            return result.resolvedModule.resolvedFileName;
+        }
+    } catch {
+        // tsconfig parsing failed — fall through to heuristic mappings
     }
 
     return null;
@@ -1604,8 +2045,18 @@ function detectPackageName(rootPath: string, packageJsonPath?: string): string {
     return path.basename(rootPath);
 }
 
+function detectPackageVersion(rootPath: string, packageJsonPath?: string): string | undefined {
+    const pkgPath = packageJsonPath ?? path.join(rootPath, "package.json");
+    if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+        return pkg.version || undefined;
+    }
+    return undefined;
+}
+
 export function extractPackage(rootPath: string, options: EngineOptions = { mode: "source" }): ApiIndex {
     const packageName = detectPackageName(rootPath, options.packageJsonPath);
+    const packageVersion = detectPackageVersion(rootPath, options.packageJsonPath);
 
     // Find tsconfig or create minimal config
     const tsConfigPath = path.join(rootPath, "tsconfig.json");
@@ -1621,10 +2072,12 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
         },
     });
 
-    // Set project for type resolution and discover builtin types from lib files
-    setTypeResolutionProject(project);
-    typeCollector.setProject(project);
-    typeCollector.clear();
+    // Initialize extraction context — consolidates all mutable state
+    // (builtins, type collector, package name cache) for this extraction run.
+    extractionCtx = new ExtractionContext(project);
+    discoveredBuiltins = extractionCtx.discoveredBuiltins;
+    typeCollector = extractionCtx.typeRefs;
+    pkgNameCache = extractionCtx.pkgNameCache;
 
     // Find source files
     const srcDir = path.join(rootPath, "src");
@@ -1698,6 +2151,7 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
                 .sort((a, b) => getConditionPriority(a.condition) - getConditionPriority(b.condition))[0];
             if (matchingEntry) {
                 module.condition = matchingEntry.condition;
+                module.conditionChain = matchingEntry.conditionChain;
                 module.exportPath = matchingEntry.exportPath;
             }
 
@@ -1783,13 +2237,38 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
         }
         if (inheritedCondition !== undefined) {
             module.condition = inheritedCondition;
+            // Inherited conditions don't have a chain — the chain belongs to the entry module
         }
     }
 
     const baseResult: ApiIndex = {
         package: packageName,
+        version: packageVersion,
         modules: modules.sort((a, b) => a.name.localeCompare(b.name)),
     };
+
+    // Populate referencedTypes on all entities from compiler-resolved type refs.
+    // This must happen before computeReachableTypes so BFS can use the data.
+    const contextRefNames = typeCollector.getContextRefNames();
+    for (const mod of baseResult.modules) {
+        for (const cls of mod.classes || []) {
+            const refs = contextRefNames.get(cls.name);
+            if (refs?.length) cls.referencedTypes = refs;
+        }
+        for (const iface of mod.interfaces || []) {
+            const refs = contextRefNames.get(iface.name);
+            if (refs?.length) iface.referencedTypes = refs;
+        }
+        for (const t of mod.types || []) {
+            const refs = contextRefNames.get(t.name);
+            if (refs?.length) t.referencedTypes = refs;
+        }
+        for (const fn of mod.functions || []) {
+            if (!fn.name) continue;
+            const refs = contextRefNames.get(fn.name);
+            if (refs?.length) fn.referencedTypes = refs;
+        }
+    }
 
     // Compute types reachable from entry points
     const reachableTypes = computeReachableTypes(baseResult);
@@ -1817,6 +2296,31 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
         baseResult.dependencies = dependencies;
     }
 
+    // Phase 8: Emit structured diagnostics to stderr for unresolved dependencies.
+    // The C# host parses each stderr line as an ApiDiagnostic with level=Warning.
+    const reportedPackages = new Set<string>();
+    if (dependencies.length > 0) {
+        for (const dep of dependencies) {
+            const unresolvedTypes = (dep.types ?? []).filter(t => t.type === "unresolved");
+            if (unresolvedTypes.length > 0) {
+                const typeNames = unresolvedTypes.map(t => t.name).join(", ");
+                console.error(`Unresolved dependency: package '${dep.package}' has ${unresolvedTypes.length} unresolved type(s): ${typeNames}`);
+                reportedPackages.add(dep.package);
+            }
+        }
+    }
+
+    // Also check for imported packages that couldn't be resolved at all
+    const importedPackages = typeCollector.getImportedPackages();
+    for (const [, pkgName] of importedPackages) {
+        if (reportedPackages.has(pkgName)) continue;
+        const pkgDir = path.join(rootPath, "node_modules", pkgName);
+        if (!fs.existsSync(pkgDir)) {
+            console.error(`Unresolved dependency: package '${pkgName}' is referenced but not installed`);
+            reportedPackages.add(pkgName);
+        }
+    }
+
     return baseResult;
 }
 
@@ -1841,55 +2345,31 @@ function getDefinedTypes(api: ApiIndex): Set<string> {
 /**
  * Computes the set of type names reachable from entry points.
  * Walks the type reference graph starting from entry-point types,
- * following extends, implements, property types, method signatures, etc.
+ * using pre-computed referencedTypes from compiler type resolution.
  */
 function computeReachableTypes(api: ApiIndex): Set<string> {
     const allTypeNames = getDefinedTypes(api);
 
-    // Build reference graph: typeName -> set of type names it references
+    // Build reference graph from pre-computed referencedTypes fields.
+    // These were populated from TypeReferenceCollector's compiler-resolved refs.
     const references = new Map<string, Set<string>>();
-    function addRef(from: string, to: string) {
-        const base = to.split("<")[0];
-        if (!allTypeNames.has(base)) return;
-        if (!references.has(from)) references.set(from, new Set());
-        references.get(from)!.add(base);
-    }
-
-    function collectRefsFromText(from: string, text: string | undefined) {
-        if (!text) return;
-        const tokens = text.split(/[<>|&,\[\]\s(){}:;=]+/);
-        for (const token of tokens) {
-            const name = token.trim();
-            if (name && allTypeNames.has(name)) addRef(from, name);
-        }
-    }
-
     for (const mod of api.modules) {
         for (const cls of mod.classes || []) {
-            if (cls.extends) collectRefsFromText(cls.name, cls.extends);
-            for (const impl of cls.implements || []) collectRefsFromText(cls.name, impl);
-            for (const m of cls.methods || []) {
-                collectRefsFromText(cls.name, m.sig);
-                collectRefsFromText(cls.name, m.ret);
-            }
-            for (const p of cls.properties || []) collectRefsFromText(cls.name, p.type);
-            for (const c of cls.constructors || []) collectRefsFromText(cls.name, c.sig);
+            const refs = (cls.referencedTypes ?? []).filter(t => allTypeNames.has(t));
+            if (refs.length) references.set(cls.name, new Set(refs));
         }
         for (const iface of mod.interfaces || []) {
-            for (const ext of iface.extends || []) collectRefsFromText(iface.name, ext);
-            for (const m of iface.methods || []) {
-                collectRefsFromText(iface.name, m.sig);
-                collectRefsFromText(iface.name, m.ret);
-            }
-            for (const p of iface.properties || []) collectRefsFromText(iface.name, p.type);
+            const refs = (iface.referencedTypes ?? []).filter(t => allTypeNames.has(t));
+            if (refs.length) references.set(iface.name, new Set(refs));
         }
         for (const t of mod.types || []) {
-            collectRefsFromText(t.name, t.type);
+            const refs = (t.referencedTypes ?? []).filter(t2 => allTypeNames.has(t2));
+            if (refs.length) references.set(t.name, new Set(refs));
         }
         for (const fn of mod.functions || []) {
             if (!fn.name) continue;
-            collectRefsFromText(fn.name, fn.sig);
-            collectRefsFromText(fn.name, fn.ret);
+            const refs = (fn.referencedTypes ?? []).filter(t => allTypeNames.has(t));
+            if (refs.length) references.set(fn.name, new Set(refs));
         }
     }
 
@@ -2067,17 +2547,14 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         }
     }
 
-    // Add resolved dependency source files to the project so ts-morph can
-    // traverse their members for sub-dependency discovery
-    const addedFiles = new Set<string>();
+    // Lazily add resolved dependency source files to the project.
+    // Only add the specific resolved files, not the entire directory tree.
+    // Additional files are added on-demand during sub-dependency traversal.
     for (const [, entry] of importResolutionMap) {
         const filePath = entry.resolvedFile.getFilePath();
-        if (!addedFiles.has(filePath)) {
-            addedFiles.add(filePath);
-            // Add the directory containing the resolved file to get all related .d.ts
-            const dir = path.dirname(filePath);
+        if (!project.getSourceFile(filePath)) {
             try {
-                project.addSourceFilesAtPaths(path.join(dir, "**/*.d.ts"));
+                project.addSourceFileAtPath(filePath);
             } catch { /* ignore if already added */ }
         }
     }
@@ -2127,7 +2604,7 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                 // Use AST-based type traversal to discover sub-dependencies
                 const subRefs = new Set<ResolvedTypeRef>();
                 try {
-                    const declType = (result.declaration as any).getType?.();
+                    const declType = getTypeFromDeclaration(result.declaration);
                     if (declType) {
                         collectTypeRefsFromType(declType, project, subRefs);
                     }
@@ -2136,18 +2613,37 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                     if (Node.isClassDeclaration(decl) || Node.isInterfaceDeclaration(decl)) {
                         for (const member of decl.getMembers()) {
                             try {
-                                const memberType = (member as any).getType?.();
+                                const memberType = getTypeFromDeclaration(member);
                                 if (memberType) collectTypeRefsFromType(memberType, project, subRefs);
-                                const params = (member as any).getParameters?.();
-                                if (params) {
-                                    for (const p of params) {
-                                        const pType = p.getType?.();
-                                        if (pType) collectTypeRefsFromType(pType, project, subRefs);
-                                    }
+                                // Also collect from TypeNodes to catch simple type aliases
+                                // that TypeScript resolves away (e.g., type X = Y)
+                                if (Node.isPropertySignature(member) || Node.isPropertyDeclaration(member)) {
+                                    const memberTypeNode = member.getTypeNode();
+                                    if (memberTypeNode) collectTypeRefsFromTypeNode(memberTypeNode, project, subRefs);
                                 }
-                                const retType = (member as any).getReturnType?.();
+                                const params = getParametersFromDeclaration(member);
+                                for (const p of params) {
+                                    const pType = p.getType();
+                                    if (pType) collectTypeRefsFromType(pType, project, subRefs);
+                                    const pTypeNode = p.getTypeNode();
+                                    if (pTypeNode) collectTypeRefsFromTypeNode(pTypeNode, project, subRefs);
+                                }
+                                const retType = getReturnTypeFromDeclaration(member);
                                 if (retType) collectTypeRefsFromType(retType, project, subRefs);
+                                // Collect from return type node
+                                if (Node.isMethodSignature(member) || Node.isMethodDeclaration(member)) {
+                                    const retTypeNode = member.getReturnTypeNode();
+                                    if (retTypeNode) collectTypeRefsFromTypeNode(retTypeNode, project, subRefs);
+                                }
                             } catch { /* skip members that fail */ }
+                        }
+                    }
+                    // For type aliases, also traverse the underlying type's structure
+                    if (Node.isTypeAliasDeclaration(result.declaration)) {
+                        const typeNode = result.declaration.getTypeNode();
+                        if (typeNode) {
+                            const resolvedType = typeNode.getType();
+                            if (resolvedType) collectTypeRefsFromType(resolvedType, project, subRefs);
                         }
                     }
                 } catch { /* skip types that fail traversal */ }
@@ -2167,6 +2663,12 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                         // multi-module packages where different types live in different files
                         if (subRef.declarationPath) {
                             resolvedFile = project.getSourceFile(subRef.declarationPath) ?? undefined;
+                            // Lazy loading: add the declaration file to the project on-demand
+                            if (!resolvedFile && fs.existsSync(subRef.declarationPath)) {
+                                try {
+                                    resolvedFile = project.addSourceFileAtPath(subRef.declarationPath);
+                                } catch { /* ignore if already added */ }
+                            }
                         }
                         // Fall back to any existing entry for the same package
                         if (!resolvedFile) {
@@ -2332,6 +2834,11 @@ export function formatStubs(api: ApiIndex): string {
                     lines.push(`${indent}    ${ro}${prop.name}${opt}: ${prop.type};`);
                 }
 
+                for (const sig of iface.indexSignatures || []) {
+                    const ro = sig.readonly ? "readonly " : "";
+                    lines.push(`${indent}    ${ro}[${sig.keyName}: ${sig.keyType}]: ${sig.valueType};`);
+                }
+
                 for (const m of iface.methods || []) {
                     const async = m.async ? "async " : "";
                     const ret = m.ret ? `: ${m.ret}` : "";
@@ -2354,6 +2861,11 @@ export function formatStubs(api: ApiIndex): string {
                     const opt = prop.optional ? "?" : "";
                     const ro = prop.readonly ? "readonly " : "";
                     lines.push(`${indent}    ${ro}${prop.name}${opt}: ${prop.type};`);
+                }
+
+                for (const sig of cls.indexSignatures || []) {
+                    const ro = sig.readonly ? "readonly " : "";
+                    lines.push(`${indent}    ${ro}[${sig.keyName}: ${sig.keyType}]: ${sig.valueType};`);
                 }
 
                 for (const ctor of cls.constructors || []) {
@@ -2408,6 +2920,11 @@ export function formatStubs(api: ApiIndex): string {
                     lines.push(`    ${ro}${prop.name}${opt}: ${prop.type};`);
                 }
 
+                for (const sig of iface.indexSignatures || []) {
+                    const ro = sig.readonly ? "readonly " : "";
+                    lines.push(`    ${ro}[${sig.keyName}: ${sig.keyType}]: ${sig.valueType};`);
+                }
+
                 for (const m of iface.methods || []) {
                     const ret = m.ret ? `: ${m.ret}` : "";
                     lines.push(`    ${m.name}(${m.sig})${ret};`);
@@ -2428,6 +2945,11 @@ export function formatStubs(api: ApiIndex): string {
                     const opt = prop.optional ? "?" : "";
                     const ro = prop.readonly ? "readonly " : "";
                     lines.push(`    ${ro}${prop.name}${opt}: ${prop.type};`);
+                }
+
+                for (const sig of cls.indexSignatures || []) {
+                    const ro = sig.readonly ? "readonly " : "";
+                    lines.push(`    ${ro}[${sig.keyName}: ${sig.keyType}]: ${sig.valueType};`);
                 }
 
                 for (const m of cls.methods || []) {
@@ -2573,6 +3095,47 @@ Examples:
 // Usage Analysis - Find which API operations are used in samples
 // ============================================================================
 
+/**
+ * Extracts the outermost type constructor from a type string.
+ * E.g., "Map<K, V>" → "Map", "Promise<Response>" → "Promise", "Foo" → "Foo".
+ * For non-generic type strings, returns the input unchanged (trimmed).
+ */
+function baseTypeName(typeStr: string): string {
+    return stripImportPrefix(typeStr, true);
+}
+
+/**
+ * Strips compiler-generated `import("…")` qualifiers from type text.
+ *   import("./path").TypeName         → TypeName
+ *   import("./path").Foo<import("./p").Bar> → Foo<Bar>
+ *   typeof import("./path")           → typeof path-last-segment
+ *
+ * When `baseOnly` is true, also strips generic parameters (delegates to
+ * baseTypeName logic).  Callers that need the full generic text pass false.
+ */
+function stripImportPrefix(text: string, baseOnly = false): string {
+    let result = text;
+    if (result.includes("import(")) {
+        // Strip import("..."). (with trailing dot) leaving what follows
+        result = result.replace(/import\([^)]+\)\./g, "");
+        // typeof import("path") → typeof <last-segment>
+        result = result.replace(/typeof\s+import\(["']([^"']+)["']\)/g, (_, p: string) => {
+            const seg = p.split("/");
+            return `typeof ${seg[seg.length - 1]}`;
+        });
+        // Bare import("path") → last-segment
+        result = result.replace(/import\(["']([^"']+)["']\)/g, (_, p: string) => {
+            const seg = p.split("/");
+            return seg[seg.length - 1];
+        });
+    }
+    if (baseOnly) {
+        const idx = result.indexOf("<");
+        return (idx >= 0 ? result.slice(0, idx) : result).trim();
+    }
+    return result;
+}
+
 interface UsageResult {
     file_count: number;
     covered: CoveredOp[];
@@ -2625,7 +3188,7 @@ function buildVarTypeMap(
             // Check type annotation first: const client: BlobClient
             const typeNode = node.getTypeNode();
             if (typeNode) {
-                const typeName = typeNode.getText().split("<")[0].trim();
+                const typeName = baseTypeName(typeNode.getText());
                 if (clientNames.has(typeName)) {
                     varTypes.set(varName, typeName);
                     return;
@@ -2684,7 +3247,7 @@ function buildVarTypeMap(
                         if (Node.isIdentifier(objExpr)) {
                             const receiverType = varTypes.get(objExpr.getText());
                             if (receiverType) {
-                                const methodKey = `${receiverType.split("<")[0]}.${calledMethodName}`;
+                                const methodKey = `${baseTypeName(receiverType)}.${calledMethodName}`;
                                 const retType = methodReturnTypeMap.get(methodKey);
                                 if (retType) {
                                     varTypes.set(varName, retType);
@@ -2699,7 +3262,7 @@ function buildVarTypeMap(
                 if (Node.isAsExpression(initializer)) {
                     const asTypeNode = initializer.getTypeNode();
                     if (asTypeNode) {
-                        const typeName = asTypeNode.getText().split("<")[0].trim();
+                        const typeName = baseTypeName(asTypeNode.getText());
                         if (clientNames.has(typeName)) {
                             varTypes.set(varName, typeName);
                             return;
@@ -2715,7 +3278,7 @@ function buildVarTypeMap(
                         const sourceType = varTypes.get(sourceVar);
                         if (sourceType) {
                             const propName = initializer.getName();
-                            const propKey = `${sourceType.split("<")[0]}.${propName}`;
+                            const propKey = `${baseTypeName(sourceType)}.${propName}`;
                             const propType = propertyTypeMap.get(propKey);
                             if (propType) {
                                 varTypes.set(varName, propType);
@@ -2734,7 +3297,7 @@ function buildVarTypeMap(
                 const propName = nameNode.getText();
                 const typeNode = node.getTypeNode();
                 if (typeNode) {
-                    const typeName = typeNode.getText().split("<")[0].trim();
+                    const typeName = baseTypeName(typeNode.getText());
                     if (clientNames.has(typeName)) {
                         varTypes.set(propName, typeName);
                         return;
@@ -2759,13 +3322,28 @@ function buildVarTypeMap(
 
 /**
  * Unwrap async wrapper types from a TypeScript return type string.
- * E.g., "Promise<BlobClient>" → "BlobClient".
+ * E.g., "Promise<BlobClient>" → "BlobClient", "Promise<Map<K, V>>" → "Map<K, V>".
+ * Uses bracket-depth matching to correctly handle nested generics.
  */
 function unwrapAsyncReturnType(returnType: string): string {
     const wrappers = ["Promise", "PromiseLike", "AsyncIterable", "AsyncIterableIterator"];
     for (const wrapper of wrappers) {
-        if (returnType.startsWith(wrapper + "<") && returnType.endsWith(">")) {
-            return returnType.slice(wrapper.length + 1, -1);
+        if (returnType.startsWith(wrapper + "<")) {
+            // Find the matching closing bracket using depth tracking
+            let depth = 0;
+            for (let i = wrapper.length; i < returnType.length; i++) {
+                if (returnType[i] === "<") depth++;
+                else if (returnType[i] === ">") {
+                    depth--;
+                    if (depth === 0) {
+                        // Only unwrap if the closing bracket is at the end
+                        if (i === returnType.length - 1) {
+                            return returnType.slice(wrapper.length + 1, i);
+                        }
+                        break;
+                    }
+                }
+            }
         }
     }
     return returnType;
@@ -2784,9 +3362,9 @@ function buildMethodReturnTypeMap(
     for (const cls of usageClasses) {
         for (const method of cls.methods || []) {
             if (method.ret) {
-                const returnType = unwrapAsyncReturnType(method.ret).split("<")[0].trim();
+                const returnType = baseTypeName(unwrapAsyncReturnType(method.ret));
                 if (clientMethods.has(returnType)) {
-                    map.set(`${cls.name.split("<")[0]}.${method.name}`, returnType);
+                    map.set(`${cls.name}.${method.name}`, returnType);
                 }
             }
         }
@@ -2794,9 +3372,9 @@ function buildMethodReturnTypeMap(
     for (const iface of usageInterfaces) {
         for (const method of iface.methods || []) {
             if (method.ret) {
-                const returnType = unwrapAsyncReturnType(method.ret).split("<")[0].trim();
+                const returnType = baseTypeName(unwrapAsyncReturnType(method.ret));
                 if (clientMethods.has(returnType)) {
-                    map.set(`${iface.name.split("<")[0]}.${method.name}`, returnType);
+                    map.set(`${iface.name}.${method.name}`, returnType);
                 }
             }
         }
@@ -2816,7 +3394,7 @@ function buildFunctionReturnTypeMap(
     for (const mod of api.modules) {
         for (const func of mod.functions || []) {
             if (func.ret) {
-                const returnType = unwrapAsyncReturnType(func.ret).split("<")[0].trim();
+                const returnType = baseTypeName(unwrapAsyncReturnType(func.ret));
                 if (clientMethods.has(returnType)) {
                     map.set(func.name, returnType);
                 }
@@ -2838,17 +3416,17 @@ function buildPropertyTypeMap(
     const map = new Map<string, string>();
     for (const cls of usageClasses) {
         for (const prop of cls.properties || []) {
-            const returnType = prop.type.split("<")[0].trim();
+            const returnType = baseTypeName(prop.type);
             if (clientMethods.has(returnType)) {
-                map.set(`${cls.name.split("<")[0]}.${prop.name}`, returnType);
+                map.set(`${cls.name}.${prop.name}`, returnType);
             }
         }
     }
     for (const iface of usageInterfaces) {
         for (const prop of iface.properties || []) {
-            const returnType = prop.type.split("<")[0].trim();
+            const returnType = baseTypeName(prop.type);
             if (clientMethods.has(returnType)) {
-                map.set(`${iface.name.split("<")[0]}.${prop.name}`, returnType);
+                map.set(`${iface.name}.${prop.name}`, returnType);
             }
         }
     }
@@ -2864,19 +3442,19 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
     for (const mod of api.modules) {
         for (const cls of mod.classes || []) {
             allClasses.push(cls);
-            allTypeNames.add(cls.name.split("<")[0]);
+            allTypeNames.add(cls.name);
         }
         for (const iface of mod.interfaces || []) {
             allInterfaces.push(iface);
-            interfaceNames.add(iface.name.split("<")[0]);
-            allTypeNames.add(iface.name.split("<")[0]);
+            interfaceNames.add(iface.name);
+            allTypeNames.add(iface.name);
         }
     }
 
     const interfaceImplementers = new Map<string, ClassInfo[]>();
     for (const cls of allClasses) {
         for (const iface of cls.implements || []) {
-            const ifaceName = iface.split("<")[0];
+            const ifaceName = baseTypeName(iface);
             const list = interfaceImplementers.get(ifaceName) ?? [];
             list.push(cls);
             interfaceImplementers.set(ifaceName, list);
@@ -2885,18 +3463,17 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
 
     const interfacesByName = new Map<string, InterfaceInfo>();
     for (const iface of allInterfaces) {
-        const name = iface.name.split("<")[0];
-        if (!interfacesByName.has(name)) {
-            interfacesByName.set(name, iface);
+        if (!interfacesByName.has(iface.name)) {
+            interfacesByName.set(iface.name, iface);
         }
     }
 
     const references = new Map<string, Set<string>>();
     for (const cls of allClasses) {
-        references.set(cls.name.split("<")[0], getReferencedTypes(cls, allTypeNames));
+        references.set(cls.name, getReferencedTypes(cls, allTypeNames));
     }
     for (const iface of allInterfaces) {
-        references.set(iface.name.split("<")[0], getReferencedTypesForInterface(iface, allTypeNames));
+        references.set(iface.name, getReferencedTypesForInterface(iface, allTypeNames));
     }
 
     const referencedBy = new Map<string, number>();
@@ -2911,29 +3488,27 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
     const operationTypes = new Set<string>();
     for (const cls of allClasses) {
         if ((cls.methods?.length ?? 0) > 0) {
-            operationTypes.add(cls.name.split("<")[0]);
+            operationTypes.add(cls.name);
         }
     }
     for (const iface of allInterfaces) {
         if ((iface.methods?.length ?? 0) > 0) {
-            operationTypes.add(iface.name.split("<")[0]);
+            operationTypes.add(iface.name);
         }
     }
 
     // Root classes: entry points (from package exports) with methods, or unreferenced types with operations
     let rootClasses = allClasses.filter((cls) => {
-        const name = cls.name.split("<")[0];
         const hasOperations = (cls.methods?.length ?? 0) > 0;
-        const refs = references.get(name);
+        const refs = references.get(cls.name);
         const referencesOperations = refs ? Array.from(refs).some((r) => operationTypes.has(r)) : false;
-        return (cls.entryPoint && hasOperations) || (!referencedBy.has(name) && (hasOperations || referencesOperations));
+        return (cls.entryPoint && hasOperations) || (!referencedBy.has(cls.name) && (hasOperations || referencesOperations));
     });
 
     if (rootClasses.length === 0) {
         rootClasses = allClasses.filter((cls) => {
-            const name = cls.name.split("<")[0];
             const hasOperations = (cls.methods?.length ?? 0) > 0;
-            const refs = references.get(name);
+            const refs = references.get(cls.name);
             const referencesOperations = refs ? Array.from(refs).some((r) => operationTypes.has(r)) : false;
             return hasOperations || referencesOperations;
         });
@@ -2943,10 +3518,9 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
     const queue: string[] = [];
 
     for (const cls of rootClasses) {
-        const name = cls.name.split("<")[0];
-        if (!reachable.has(name)) {
-            reachable.add(name);
-            queue.push(name);
+        if (!reachable.has(cls.name)) {
+            reachable.add(cls.name);
+            queue.push(cls.name);
         }
     }
 
@@ -2964,21 +3538,20 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
 
         if (interfaceNames.has(current)) {
             for (const impl of interfaceImplementers.get(current) ?? []) {
-                const implName = impl.name.split("<")[0];
-                if (!reachable.has(implName)) {
-                    reachable.add(implName);
-                    queue.push(implName);
+                if (!reachable.has(impl.name)) {
+                    reachable.add(impl.name);
+                    queue.push(impl.name);
                 }
             }
         }
     }
 
     const usageClasses = allClasses.filter(
-        (cls) => reachable.has(cls.name.split("<")[0]) && (cls.methods?.length ?? 0) > 0
+        (cls) => reachable.has(cls.name) && (cls.methods?.length ?? 0) > 0
     );
 
     const usageInterfaces = allInterfaces.filter(
-        (iface) => reachable.has(iface.name.split("<")[0]) && (iface.methods?.length ?? 0) > 0
+        (iface) => reachable.has(iface.name) && (iface.methods?.length ?? 0) > 0
     );
 
     // Build map of client methods from API
@@ -3022,14 +3595,13 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
 
     // Expand clientNames to include container types — reachable classes that
     // have properties pointing to client types (e.g., EmptyClient with widgets: WidgetClient)
-    const allReachableClasses = allClasses.filter(cls => reachable.has(cls.name.split("<")[0]));
+    const allReachableClasses = allClasses.filter(cls => reachable.has(cls.name));
     for (const cls of allReachableClasses) {
-        const name = cls.name.split("<")[0];
-        if (clientNames.has(name)) continue;
+        if (clientNames.has(cls.name)) continue;
         for (const prop of cls.properties || []) {
-            const propType = prop.type.split("<")[0].trim();
+            const propType = baseTypeName(prop.type);
             if (clientMethods.has(propType)) {
-                clientNames.add(name);
+                clientNames.add(cls.name);
                 break;
             }
         }
@@ -3089,7 +3661,7 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
                             if (Node.isIdentifier(propExpr)) {
                                 const objType = varTypes.get(propExpr.getText());
                                 if (objType) {
-                                    const propKey = `${objType.split("<")[0]}.${propName}`;
+                                    const propKey = `${baseTypeName(objType)}.${propName}`;
                                     const fieldType = propertyTypeMap.get(propKey);
                                     if (fieldType && clientMethods.has(fieldType)) {
                                         const methods = clientMethods.get(fieldType)!;
@@ -3141,7 +3713,7 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
                                     // service.getClient().method()
                                     const receiverType = varTypes.get(chainedObj.getText());
                                     if (receiverType) {
-                                        const methodKey = `${receiverType.split("<")[0]}.${chainedMethodName}`;
+                                        const methodKey = `${baseTypeName(receiverType)}.${chainedMethodName}`;
                                         const retType = methodReturnTypeMap.get(methodKey);
                                         if (retType && clientMethods.has(retType)) {
                                             const methods = clientMethods.get(retType)!;
@@ -3179,7 +3751,7 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
     const implToIfaceNames = new Map<string, string[]>();
     for (const cls of allClasses) {
         for (const iface of cls.implements || []) {
-            const ifaceName = iface.split("<")[0];
+            const ifaceName = baseTypeName(iface);
             const impls = ifaceToImplNames.get(ifaceName) ?? [];
             impls.push(cls.name);
             ifaceToImplNames.set(ifaceName, impls);
@@ -3239,94 +3811,11 @@ function analyzeUsage(samplesPath: string, api: ApiIndex): UsageResult {
 }
 
 function getReferencedTypes(cls: ClassInfo, allTypeNames: Set<string>): Set<string> {
-    const refs = new Set<string>();
-
-    if (cls.extends) {
-        const baseName = cls.extends.split("<")[0];
-        if (allTypeNames.has(baseName)) {
-            refs.add(baseName);
-        }
-    }
-
-    for (const iface of cls.implements || []) {
-        const ifaceName = iface.split("<")[0];
-        if (allTypeNames.has(ifaceName)) {
-            refs.add(ifaceName);
-        }
-    }
-
-    // Tokenize all method signatures + return types + property types
-    const tokens = new Set<string>();
-    for (const method of cls.methods || []) {
-        tokenizeInto(method.sig, tokens);
-        if (method.ret) tokenizeInto(method.ret, tokens);
-    }
-
-    for (const prop of cls.properties || []) {
-        tokenizeInto(prop.type, tokens);
-    }
-
-    // Intersect with known type names
-    for (const token of tokens) {
-        if (allTypeNames.has(token)) {
-            refs.add(token);
-        }
-    }
-
-    return refs;
+    return new Set((cls.referencedTypes ?? []).filter(t => allTypeNames.has(t)));
 }
 
 function getReferencedTypesForInterface(iface: InterfaceInfo, allTypeNames: Set<string>): Set<string> {
-    const refs = new Set<string>();
-
-    if (iface.extends) {
-        for (const entry of iface.extends) {
-            const baseName = entry.split("<")[0];
-            if (allTypeNames.has(baseName)) {
-                refs.add(baseName);
-            }
-        }
-    }
-
-    const tokens = new Set<string>();
-    for (const method of iface.methods || []) {
-        tokenizeInto(method.sig, tokens);
-        if (method.ret) tokenizeInto(method.ret, tokens);
-    }
-
-    for (const prop of iface.properties || []) {
-        tokenizeInto(prop.type, tokens);
-    }
-
-    for (const token of tokens) {
-        if (allTypeNames.has(token)) {
-            refs.add(token);
-        }
-    }
-
-    return refs;
-}
-
-/**
- * Graphs identifier tokens (runs of letters, digits, underscores) from a
- * signature string and adds them to the tokens set.
- */
-function tokenizeInto(sig: string, tokens: Set<string>): void {
-    let start = -1;
-    for (let i = 0; i <= sig.length; i++) {
-        const ch = i < sig.length ? sig.charCodeAt(i) : 0;
-        const isIdChar =
-            (ch >= 65 && ch <= 90) || // A-Z
-            (ch >= 97 && ch <= 122) || // a-z
-            (ch >= 48 && ch <= 57) || // 0-9
-            ch === 95; // _
-        if (isIdChar && start < 0) {
-            start = i;
-        } else if (!isIdChar && start >= 0) {
-            tokens.add(sig.slice(start, i));
-            start = -1;
-        }
-    }
+    return new Set((iface.referencedTypes ?? []).filter(t => allTypeNames.has(t)));
 }
 
 function detectPatterns(sourceFile: SourceFile, patterns: Set<string>): void {

@@ -286,7 +286,8 @@ public class MalformedOutputTests
         var typeAlias = new TypeScript.TypeAliasInfo
         {
             Name = "InputType",
-            Type = "string | MyEnum | OtherType"
+            Type = "string | MyEnum | OtherType",
+            ReferencedTypes = ["MyEnum", "OtherType"]
         };
         var allTypeNames = new HashSet<string>(["MyEnum", "OtherType", "InputType"]);
         var result = new HashSet<string>();

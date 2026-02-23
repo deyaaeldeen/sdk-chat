@@ -285,155 +285,241 @@ public static class TypeScriptFormatter
         int includedItems = 0;
         HashSet<string> includedTypeNames = [];
 
-        // Unified rendering: group types by (exportPath, conditionSet)
-        // This handles subpaths, conditions, or both simultaneously
+        // Unified rendering: group types by (exportPath, condition) pair.
+        // Each group becomes a `declare module` block in the output.
+        // Types use their own ExportPath if set, falling back to the module's.
         bool hasSubpaths = sortedExportPaths.Count > 1;
         bool needsSections = hasSubpaths || hasMultipleConditions;
 
         if (needsSections)
         {
-            // Build grouping key for each type: "exportPath||conditionSet"
-            var conditionSetKey = (string name) =>
-            {
-                if (hasMultipleConditions && typeConditions.TryGetValue(name, out var conds))
-                    return string.Join(", ", conds.OrderBy(c => c, StringComparer.Ordinal));
-                return "";
-            };
-
-            // Collect all section keys used by types
-            var sectionTypes = new Dictionary<string, (List<ClassInfo> Classes, List<InterfaceInfo> Interfaces,
+            // Group types by (exportPath, condition)
+            var moduleGroups = new Dictionary<string, (List<ClassInfo> Classes, List<InterfaceInfo> Interfaces,
                 List<EnumInfo> Enums, List<TypeAliasInfo> Types, List<FunctionInfo> Functions)>();
 
-            string SectionKey(string? exportPath, string condKey)
-            {
-                var ep = exportPath ?? "";
-                return hasSubpaths && hasMultipleConditions ? $"{ep}||{condKey}"
-                    : hasSubpaths ? ep
-                    : condKey;
-            }
-
-            void AddToSection(string key, ClassInfo? cls = null, InterfaceInfo? iface = null,
+            void AddToGroup(string groupKey, ClassInfo? cls = null, InterfaceInfo? iface = null,
                 EnumInfo? en = null, TypeAliasInfo? ta = null, FunctionInfo? fn = null)
             {
-                if (!sectionTypes.TryGetValue(key, out var g))
+                if (!moduleGroups.TryGetValue(groupKey, out var g))
                 {
                     g = ([], [], [], [], []);
-                    sectionTypes[key] = g;
+                    moduleGroups[groupKey] = g;
                 }
-                if (cls is not null) g.Classes.Add(cls);
-                if (iface is not null) g.Interfaces.Add(iface);
-                if (en is not null) g.Enums.Add(en);
-                if (ta is not null) g.Types.Add(ta);
-                if (fn is not null) g.Functions.Add(fn);
+                if (cls is not null && !g.Classes.Any(x => x.Name == cls.Name)) g.Classes.Add(cls);
+                if (iface is not null && !g.Interfaces.Any(x => x.Name == iface.Name)) g.Interfaces.Add(iface);
+                if (en is not null && !g.Enums.Any(x => x.Name == en.Name)) g.Enums.Add(en);
+                if (ta is not null && !g.Types.Any(x => x.Name == ta.Name)) g.Types.Add(ta);
+                if (fn is not null && !g.Functions.Any(x => x.Name == fn.Name)) g.Functions.Add(fn);
             }
 
-            foreach (var cls in allClasses) AddToSection(SectionKey(cls.ExportPath, conditionSetKey(cls.Name)), cls: cls);
-            foreach (var iface in allInterfaces) AddToSection(SectionKey(iface.ExportPath, conditionSetKey(iface.Name)), iface: iface);
-            foreach (var en in allEnums) AddToSection(SectionKey(null, conditionSetKey(en.Name)), en: en);
-            foreach (var ta in allTypes) AddToSection(SectionKey(null, conditionSetKey(ta.Name)), ta: ta);
-            foreach (var fn in allFunctions) AddToSection(SectionKey(fn.ExportPath, conditionSetKey(fn.Name)), fn: fn);
+            foreach (var module in index.Modules)
+            {
+                var condition = module.Condition ?? "default";
 
-            // Sort sections: by export path first (. before subpaths), then by condition count descending
-            var sortedSections = sectionTypes
-                .OrderBy(s =>
+                string GroupKey(string? typeExportPath)
                 {
-                    var parts = s.Key.Split("||");
-                    var ep = parts[0];
-                    return ep == "." || ep == "" ? "" : ep;
-                })
-                .ThenByDescending(s =>
+                    var ep = typeExportPath ?? module.ExportPath ?? ".";
+                    return $"{ep}||{condition}";
+                }
+
+                foreach (var c in module.Classes ?? []) AddToGroup(GroupKey(c.ExportPath), cls: c);
+                foreach (var i in module.Interfaces ?? []) AddToGroup(GroupKey(i.ExportPath), iface: i);
+                foreach (var e in module.Enums ?? []) AddToGroup(GroupKey(null), en: e);
+                foreach (var t in module.Types ?? []) AddToGroup(GroupKey(null), ta: t);
+                foreach (var f in module.Functions ?? []) AddToGroup(GroupKey(f.ExportPath), fn: f);
+            }
+
+            // Sort groups: by exportPath first (. before subpaths), then condition alphabetically
+            var sortedGroups = moduleGroups
+                .OrderBy(g =>
                 {
-                    var parts = s.Key.Split("||");
-                    var condKey = parts.Length > 1 ? parts[1] : parts[0];
-                    return condKey.Split(", ").Length;
+                    var ep = g.Key.Split("||")[0];
+                    return ep == "." ? "" : ep;
                 })
+                .ThenBy(g => g.Key.Split("||")[1])
                 .ToList();
 
-            foreach (var (key, section) in sortedSections)
+        // Pre-build dependency groups by condition for nesting inside main modules.
+        // Maps condition → list of (depModuleName, types) for rendering nested declare modules.
+        var depsByCondition = new Dictionary<string, List<(string ModuleName, List<ClassInfo> Classes,
+            List<InterfaceInfo> Interfaces, List<EnumInfo> Enums, List<TypeAliasInfo> Types,
+            List<FunctionInfo> Functions)>>();
+
+        if (index.ResolvedDependencies is not null)
+        {
+            // Collect all conditions available in each dependency
+            var depConditionMap = new Dictionary<string, HashSet<string>>(); // pkg → conditions
+            foreach (var dep in index.ResolvedDependencies)
+            {
+                var conds = new HashSet<string>(dep.Modules
+                    .Select(m => m.Condition ?? "default")
+                    .Distinct(StringComparer.Ordinal));
+                depConditionMap[dep.Package] = conds;
+            }
+
+            // For each main condition, find the matching (or fallback) dependency condition
+            var allMainConditions = new HashSet<string>();
+            foreach (var module in index.Modules)
+                allMainConditions.Add(module.Condition ?? "default");
+
+            foreach (var mainCond in allMainConditions)
+            {
+                var depsForCond = new List<(string ModuleName, List<ClassInfo> Classes,
+                    List<InterfaceInfo> Interfaces, List<EnumInfo> Enums, List<TypeAliasInfo> Types,
+                    List<FunctionInfo> Functions)>();
+
+                foreach (var dep in index.ResolvedDependencies)
+                {
+                    var depConds = depConditionMap.GetValueOrDefault(dep.Package, []);
+                    // Match condition: exact match first, then fall back to "default"
+                    var matchedCond = depConds.Contains(mainCond) ? mainCond
+                        : depConds.Contains("default") ? "default"
+                        : depConds.FirstOrDefault() ?? "default";
+
+                    // Collect types from matching condition modules
+                    var classes = new List<ClassInfo>();
+                    var interfaces = new List<InterfaceInfo>();
+                    var enums = new List<EnumInfo>();
+                    var types = new List<TypeAliasInfo>();
+                    var functions = new List<FunctionInfo>();
+                    var seenNames = new HashSet<string>();
+
+                    foreach (var module in dep.Modules.Where(m => (m.Condition ?? "default") == matchedCond))
+                    {
+                        foreach (var c in module.Classes ?? [])
+                            if (seenNames.Add(c.Name)) classes.Add(c);
+                        foreach (var i in module.Interfaces ?? [])
+                            if (seenNames.Add(i.Name)) interfaces.Add(i);
+                        foreach (var e in module.Enums ?? [])
+                            if (seenNames.Add(e.Name)) enums.Add(e);
+                        foreach (var t in module.Types ?? [])
+                            if (t.Type != "unresolved" && !IsSelfReferentialAlias(t) && seenNames.Add(t.Name)) types.Add(t);
+                        foreach (var f in module.Functions ?? [])
+                            if (f.Name is not null && seenNames.Add(f.Name)) functions.Add(f);
+                    }
+
+                    if (classes.Count + interfaces.Count + enums.Count + types.Count + functions.Count == 0)
+                        continue;
+
+                    var depHasMultipleConditions = depConds.Count > 1;
+                    var depModuleName = depHasMultipleConditions
+                        ? $"{dep.Package}/{matchedCond}"
+                        : dep.Package;
+
+                    depsForCond.Add((depModuleName, classes, interfaces, enums, types, functions));
+                }
+
+                if (depsForCond.Count > 0)
+                    depsByCondition[mainCond] = depsForCond;
+            }
+        }
+
+        // Helper to render types inside a declare module block
+        void RenderModuleTypes(StringBuilder target, List<ClassInfo> classes, List<InterfaceInfo> interfaces,
+            List<EnumInfo> enums, List<TypeAliasInfo> typeAliases, List<FunctionInfo> functions,
+            bool prioritize = false)
+        {
+            var renderClasses = prioritize ? GetPrioritizedClasses(classes, typeDeps) : classes;
+            foreach (var cls in renderClasses)
+            {
+                if (target.Length >= maxLength) break;
+                var classStr = IndentBlock(FormatClass(cls, insideDeclareModule: true));
+                if (target.Length + classStr.Length > maxLength - 100 && includedItems > 0) break;
+                target.Append(classStr);
+                includedTypeNames.Add(cls.Name);
+                includedItems++;
+            }
+            foreach (var iface in interfaces)
+            {
+                if (target.Length >= maxLength) break;
+                var ifaceStr = IndentBlock(FormatInterface(iface, insideDeclareModule: true));
+                if (target.Length + ifaceStr.Length <= maxLength) { target.Append(ifaceStr); includedTypeNames.Add(iface.Name); includedItems++; }
+            }
+            foreach (var en in enums)
+            {
+                if (target.Length >= maxLength) break;
+                var enumStr = IndentBlock(FormatEnum(en, insideDeclareModule: true));
+                if (target.Length + enumStr.Length <= maxLength) { target.Append(enumStr); includedTypeNames.Add(en.Name); includedItems++; }
+            }
+            foreach (var ta in typeAliases)
+            {
+                if (target.Length >= maxLength) break;
+                var typeStr = IndentBlock(FormatTypeAlias(ta, insideDeclareModule: true));
+                if (target.Length + typeStr.Length <= maxLength) { target.Append(typeStr); includedTypeNames.Add(ta.Name); includedItems++; }
+            }
+            foreach (var fn in functions)
+            {
+                if (target.Length >= maxLength) break;
+                var fnStr = IndentBlock(FormatFunction(fn, insideDeclareModule: true));
+                if (target.Length + fnStr.Length <= maxLength) { target.Append(fnStr); includedItems++; }
+            }
+        }
+
+        // Render modules grouped by condition: for each condition, emit dependency
+        // modules first, then the main package module with import statements.
+        // This keeps related modules together and ensures deps are declared before imports.
+            foreach (var (key, group) in sortedGroups)
             {
                 if (sb.Length >= maxLength) break;
 
-                // Build section header
-                var parts = key.Split("||");
-                string? exportPath = null;
-                string condKey = "";
-                if (hasSubpaths && hasMultipleConditions)
+                var keyParts = key.Split("||");
+                var exportPath = keyParts[0];
+                var condition = keyParts[1];
+
+                // Build module name: "pkg/condition" or "pkg/subpath/condition"
+                string moduleName;
+                if (exportPath is "." or "")
                 {
-                    exportPath = parts[0];
-                    condKey = parts.Length > 1 ? parts[1] : "";
-                }
-                else if (hasSubpaths)
-                {
-                    exportPath = parts[0];
+                    moduleName = hasMultipleConditions
+                        ? $"{index.Package}/{condition}"
+                        : index.Package;
                 }
                 else
                 {
-                    condKey = parts[0];
+                    var subpath = exportPath.StartsWith("./", StringComparison.Ordinal) ? exportPath[2..] : exportPath;
+                    moduleName = hasMultipleConditions
+                        ? $"{index.Package}/{subpath}/{condition}"
+                        : $"{index.Package}/{subpath}";
                 }
 
-                // Render header
-                var headerParts = new List<string>();
-                if (hasSubpaths && !string.IsNullOrEmpty(exportPath))
+                // Render dependency modules for this condition first
+                if (depsByCondition.TryGetValue(condition, out var depsForThisCondition))
                 {
-                    var importPath = exportPath == "."
-                        ? index.Package
-                        : $"{index.Package}/{(exportPath.StartsWith("./", StringComparison.Ordinal) ? exportPath[2..] : exportPath)}";
-                    headerParts.Add($"import {{ ... }} from \"{importPath}\"");
-                }
-                if (hasMultipleConditions && !string.IsNullOrEmpty(condKey))
-                {
-                    var condList = condKey.Split(", ");
-                    var condLabel = condList.Length == distinctConditions.Count
-                        ? $"Shared ({condKey})"
-                        : condKey;
-                    headerParts.Add(condLabel);
+                    foreach (var (depModuleName, depClasses, depInterfaces, depEnums, depTypes, depFunctions) in depsForThisCondition)
+                    {
+                        if (sb.Length >= maxLength) break;
+                        sb.AppendLine($"declare module \"{depModuleName}\" {{");
+                        sb.AppendLine();
+                        RenderModuleTypes(sb, depClasses, depInterfaces, depEnums, depTypes, depFunctions);
+                        sb.AppendLine("}");
+                        sb.AppendLine();
+                    }
                 }
 
-                if (headerParts.Count > 0)
+                // Render the main package module with import statements
+                sb.AppendLine($"declare module \"{moduleName}\" {{");
+                sb.AppendLine();
+
+                if (depsForThisCondition is not null)
                 {
-                    sb.AppendLine($"// ── {string.Join(" · ", headerParts)} ──");
+                    foreach (var (depModuleName, depClasses, depInterfaces, depEnums, depTypes, depFunctions) in depsForThisCondition)
+                    {
+                        var importNames = new List<string>();
+                        foreach (var c in depClasses) importNames.Add(c.Name);
+                        foreach (var i in depInterfaces) importNames.Add(i.Name);
+                        foreach (var e in depEnums) importNames.Add(e.Name);
+                        foreach (var t in depTypes) importNames.Add(t.Name);
+
+                        if (importNames.Count > 0)
+                            sb.AppendLine($"    import {{ {string.Join(", ", importNames)} }} from \"{depModuleName}\";");
+                    }
                     sb.AppendLine();
                 }
 
-                // Render types in section
-                var sectionClasses = GetPrioritizedClasses(section.Classes, typeDeps);
-                foreach (var cls in sectionClasses)
-                {
-                    if (sb.Length >= maxLength) break;
-                    if (includedTypeNames.Contains(cls.Name)) continue;
-                    var classStr = FormatClass(cls);
-                    if (sb.Length + classStr.Length > maxLength - 100 && includedItems > 0) break;
-                    sb.Append(classStr);
-                    includedTypeNames.Add(cls.Name);
-                    includedItems++;
-                }
-                foreach (var iface in section.Interfaces)
-                {
-                    if (sb.Length >= maxLength) break;
-                    if (includedTypeNames.Contains(iface.Name)) continue;
-                    var ifaceStr = FormatInterface(iface);
-                    if (sb.Length + ifaceStr.Length <= maxLength) { sb.Append(ifaceStr); includedTypeNames.Add(iface.Name); includedItems++; }
-                }
-                foreach (var en in section.Enums)
-                {
-                    if (sb.Length >= maxLength) break;
-                    if (includedTypeNames.Contains(en.Name)) continue;
-                    var enumStr = FormatEnum(en);
-                    if (sb.Length + enumStr.Length <= maxLength) { sb.Append(enumStr); includedTypeNames.Add(en.Name); includedItems++; }
-                }
-                foreach (var ta in section.Types)
-                {
-                    if (sb.Length >= maxLength) break;
-                    if (includedTypeNames.Contains(ta.Name)) continue;
-                    var typeStr = FormatTypeAlias(ta);
-                    if (sb.Length + typeStr.Length <= maxLength) { sb.Append(typeStr); includedTypeNames.Add(ta.Name); includedItems++; }
-                }
-                foreach (var fn in section.Functions)
-                {
-                    if (sb.Length >= maxLength) break;
-                    var fnStr = FormatFunction(fn);
-                    if (sb.Length + fnStr.Length <= maxLength) { sb.Append(fnStr); includedItems++; }
-                }
+                RenderModuleTypes(sb, group.Classes, group.Interfaces, group.Enums, group.Types, group.Functions, prioritize: true);
+
+                sb.AppendLine("}");
+                sb.AppendLine();
             }
         }
         else
@@ -540,9 +626,10 @@ public static class TypeScriptFormatter
             }
         }
 
-        // Include dependency types as top-level declarations
-        if (index.Dependencies is not null && index.Dependencies.Count > 0 && sb.Length < maxLength)
+        // Fallback: render flat dependency stubs when resolvedDependencies is not available
+        if (index.ResolvedDependencies is null && index.Dependencies is not null && index.Dependencies.Count > 0 && sb.Length < maxLength)
         {
+            // Fallback: render flat dependency stubs (legacy format)
             sb.AppendLine();
             sb.AppendLine("// ============================================================================");
             sb.AppendLine("// Dependencies");
@@ -636,7 +723,7 @@ public static class TypeScriptFormatter
         return result;
     }
 
-    private static string FormatClass(ClassInfo cls, bool exportKeyword = true)
+    private static string FormatClass(ClassInfo cls, bool exportKeyword = true, bool insideDeclareModule = false)
     {
         var sb = new StringBuilder();
         if (cls.IsDeprecated == true)
@@ -646,8 +733,8 @@ public static class TypeScriptFormatter
         var ext = !string.IsNullOrEmpty(cls.Extends) ? $" extends {cls.Extends}" : "";
         var impl = cls.Implements?.Count > 0 ? $" implements {string.Join(", ", cls.Implements)}" : "";
         var typeParams = !string.IsNullOrEmpty(cls.TypeParams) ? $"<{cls.TypeParams}>" : "";
-        var declare = exportKeyword ? "export declare " : "declare ";
-        sb.AppendLine($"{declare}class {cls.Name}{typeParams}{ext}{impl} {{");
+        var prefix = insideDeclareModule ? "export " : exportKeyword ? "export declare " : "declare ";
+        sb.AppendLine($"{prefix}class {cls.Name}{typeParams}{ext}{impl} {{");
 
         foreach (var prop in cls.Properties ?? [])
         {
@@ -656,6 +743,12 @@ public static class TypeScriptFormatter
             var opt = prop.Optional == true ? "?" : "";
             var ro = prop.Readonly == true ? "readonly " : "";
             sb.AppendLine($"    {ro}{prop.Name}{opt}: {prop.Type};");
+        }
+
+        foreach (var sig in cls.IndexSignatures ?? [])
+        {
+            var ro = sig.Readonly == true ? "readonly " : "";
+            sb.AppendLine($"    {ro}[{sig.KeyName}: {sig.KeyType}]: {sig.ValueType};");
         }
 
         foreach (var ctor in cls.Constructors ?? [])
@@ -670,8 +763,9 @@ public static class TypeScriptFormatter
             if (m.IsDeprecated == true)
                 sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(m.DeprecatedMessage) ? "" : $" {m.DeprecatedMessage}")} */");
             var stat = m.Static == true ? "static " : "";
+            var mTypeParams = !string.IsNullOrEmpty(m.TypeParams) ? $"<{m.TypeParams}>" : "";
             var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : ": void";
-            sb.AppendLine($"    {stat}{m.Name}({m.Sig}){ret};");
+            sb.AppendLine($"    {stat}{m.Name}{mTypeParams}({m.Sig}){ret};");
         }
 
         if ((cls.Properties?.Count ?? 0) == 0 && (cls.Constructors?.Count ?? 0) == 0 && (cls.Methods?.Count ?? 0) == 0)
@@ -684,7 +778,7 @@ public static class TypeScriptFormatter
         return sb.ToString();
     }
 
-    private static string FormatInterface(InterfaceInfo iface, bool exportKeyword = true)
+    private static string FormatInterface(InterfaceInfo iface, bool exportKeyword = true, bool insideDeclareModule = false)
     {
         var sb = new StringBuilder();
         if (iface.IsDeprecated == true)
@@ -693,8 +787,8 @@ public static class TypeScriptFormatter
             sb.AppendLine($"/** {iface.Doc} */");
         var ext = iface.Extends?.Count > 0 ? $" extends {string.Join(", ", iface.Extends)}" : "";
         var typeParams = !string.IsNullOrEmpty(iface.TypeParams) ? $"<{iface.TypeParams}>" : "";
-        var declare = exportKeyword ? "export declare " : "declare ";
-        sb.AppendLine($"{declare}interface {iface.Name}{typeParams}{ext} {{");
+        var prefix = insideDeclareModule ? "export " : exportKeyword ? "export declare " : "declare ";
+        sb.AppendLine($"{prefix}interface {iface.Name}{typeParams}{ext} {{");
 
         foreach (var prop in iface.Properties ?? [])
         {
@@ -705,12 +799,19 @@ public static class TypeScriptFormatter
             sb.AppendLine($"    {ro}{prop.Name}{opt}: {prop.Type};");
         }
 
+        foreach (var sig in iface.IndexSignatures ?? [])
+        {
+            var ro = sig.Readonly == true ? "readonly " : "";
+            sb.AppendLine($"    {ro}[{sig.KeyName}: {sig.KeyType}]: {sig.ValueType};");
+        }
+
         foreach (var m in iface.Methods ?? [])
         {
             if (m.IsDeprecated == true)
                 sb.AppendLine($"    /** @deprecated{(string.IsNullOrWhiteSpace(m.DeprecatedMessage) ? "" : $" {m.DeprecatedMessage}")} */");
+            var mTypeParams = !string.IsNullOrEmpty(m.TypeParams) ? $"<{m.TypeParams}>" : "";
             var ret = !string.IsNullOrEmpty(m.Ret) ? $": {m.Ret}" : ": void";
-            sb.AppendLine($"    {m.Name}({m.Sig}){ret};");
+            sb.AppendLine($"    {m.Name}{mTypeParams}({m.Sig}){ret};");
         }
 
         sb.AppendLine("}");
@@ -718,15 +819,15 @@ public static class TypeScriptFormatter
         return sb.ToString();
     }
 
-    private static string FormatEnum(EnumInfo e, bool exportKeyword = true)
+    private static string FormatEnum(EnumInfo e, bool exportKeyword = true, bool insideDeclareModule = false)
     {
         var sb = new StringBuilder();
         if (e.IsDeprecated == true)
             sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(e.DeprecatedMessage) ? "" : $" {e.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(e.Doc))
             sb.AppendLine($"/** {e.Doc} */");
-        var declare = exportKeyword ? "export declare " : "declare ";
-        sb.AppendLine($"{declare}enum {e.Name} {{");
+        var prefix = insideDeclareModule ? "export " : exportKeyword ? "export declare " : "declare ";
+        sb.AppendLine($"{prefix}enum {e.Name} {{");
         if (e.Values is not null)
             sb.AppendLine($"    {string.Join(", ", e.Values)}");
         sb.AppendLine("}");
@@ -734,30 +835,32 @@ public static class TypeScriptFormatter
         return sb.ToString();
     }
 
-    private static string FormatTypeAlias(TypeAliasInfo t, bool exportKeyword = true)
+    private static string FormatTypeAlias(TypeAliasInfo t, bool exportKeyword = true, bool insideDeclareModule = false)
     {
         var sb = new StringBuilder();
         if (t.IsDeprecated == true)
             sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(t.DeprecatedMessage) ? "" : $" {t.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(t.Doc))
             sb.AppendLine($"/** {t.Doc} */");
-        var declare = exportKeyword ? "export declare " : "declare ";
+        var prefix = insideDeclareModule ? "export " : exportKeyword ? "export declare " : "declare ";
         var typeParams = !string.IsNullOrEmpty(t.TypeParams) ? $"<{t.TypeParams}>" : "";
         var typeValue = t.Type == "unresolved" || t.Type == t.Name ? "unknown" : t.Type;
-        sb.AppendLine($"{declare}type {t.Name}{typeParams} = {typeValue};");
+        sb.AppendLine($"{prefix}type {t.Name}{typeParams} = {typeValue};");
         sb.AppendLine();
         return sb.ToString();
     }
 
-    private static string FormatFunction(FunctionInfo fn)
+    private static string FormatFunction(FunctionInfo fn, bool insideDeclareModule = false)
     {
         var sb = new StringBuilder();
         if (fn.IsDeprecated == true)
             sb.AppendLine($"/** @deprecated{(string.IsNullOrWhiteSpace(fn.DeprecatedMessage) ? "" : $" {fn.DeprecatedMessage}")} */");
         if (!string.IsNullOrEmpty(fn.Doc))
             sb.AppendLine($"/** {fn.Doc} */");
+        var prefix = insideDeclareModule ? "export " : "export declare ";
+        var fnTypeParams = !string.IsNullOrEmpty(fn.TypeParams) ? $"<{fn.TypeParams}>" : "";
         var ret = !string.IsNullOrEmpty(fn.Ret) ? $": {fn.Ret}" : ": void";
-        sb.AppendLine($"export declare function {fn.Name}({fn.Sig}){ret};");
+        sb.AppendLine($"{prefix}function {fn.Name}{fnTypeParams}({fn.Sig}){ret};");
         sb.AppendLine();
         return sb.ToString();
     }
@@ -790,5 +893,22 @@ public static class TypeScriptFormatter
             && type[t.Name.Length] == '<')
             return true;
         return false;
+    }
+
+    /// <summary>
+    /// Indents every non-empty line in the block by 4 spaces for declare module blocks.
+    /// </summary>
+    private static string IndentBlock(string block)
+    {
+        if (string.IsNullOrEmpty(block)) return block;
+        var sb = new StringBuilder();
+        foreach (var line in block.AsSpan().EnumerateLines())
+        {
+            if (line.IsWhiteSpace())
+                sb.AppendLine();
+            else
+                sb.Append("    ").Append(line).AppendLine();
+        }
+        return sb.ToString();
     }
 }

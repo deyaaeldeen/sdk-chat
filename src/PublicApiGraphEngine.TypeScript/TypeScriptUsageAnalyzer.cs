@@ -164,39 +164,11 @@ public class TypeScriptUsageAnalyzer : IUsageAnalyzer<ApiIndex>
                 HasOperations = iface.Methods?.Any() ?? false,
                 IsExplicitEntryPoint = iface.EntryPoint == true,
                 IsRootCandidate = false,
-                ReferencedTypes = GetReferencedTypes(iface, allTypeNames)
+                ReferencedTypes = iface.GetReferencedTypes(allTypeNames)
             });
         }
 
         return ReachabilityAnalyzer.FindReachable(typeNodes, additionalEdges, StringComparer.Ordinal);
-    }
-
-    private static HashSet<string> GetReferencedTypes(InterfaceInfo iface, HashSet<string> allTypeNames)
-    {
-        HashSet<string> tokens = [];
-
-        foreach (var baseEntry in iface.Extends ?? [])
-        {
-            var baseName = IApiIndex.NormalizeTypeName(baseEntry);
-            if (allTypeNames.Contains(baseName))
-            {
-                tokens.Add(baseName);
-            }
-        }
-
-        foreach (var method in iface.Methods ?? [])
-        {
-            SignatureTokenizer.TokenizeInto(method.Sig, tokens);
-            SignatureTokenizer.TokenizeInto(method.Ret, tokens);
-        }
-
-        foreach (var prop in iface.Properties ?? [])
-        {
-            SignatureTokenizer.TokenizeInto(prop.Type, tokens);
-        }
-
-        tokens.IntersectWith(allTypeNames);
-        return tokens;
     }
 
     /// <summary>

@@ -893,7 +893,8 @@ x.run()
                                 Name = p.Name,
                                 Type = p.Type
                             }).ToList()
-                            : null
+                            : null,
+                        ReferencedTypes = c.Properties.Select(p => p.Type).ToList()
                     }).ToList(),
                     Functions = functions.Select(f =>
                     {
@@ -1084,7 +1085,8 @@ x.run()
                                 Name = p.Name,
                                 Type = p.Type
                             }).ToList()
-                            : null
+                            : null,
+                        ReferencedTypes = (c.Implements ?? []).Concat(c.Properties.Select(p => p.Type)).ToList()
                     }).ToList(),
                     Interfaces = interfaces.Length > 0
                         ? interfaces.Select(i => new TypeScript.InterfaceInfo
