@@ -402,9 +402,74 @@ public static class TypeScriptFormatter
                         continue;
 
                     var depHasMultipleConditions = depConds.Count > 1;
-                    var depModuleName = depHasMultipleConditions
+                    var depModuleName = depHasMultipleConditions && matchedCond != "default"
                         ? $"{dep.Package}/{matchedCond}"
                         : dep.Package;
+
+                    depsForCond.Add((depModuleName, classes, interfaces, enums, types, functions));
+                }
+
+                if (depsForCond.Count > 0)
+                    depsByCondition[mainCond] = depsForCond;
+            }
+        }
+        else if (index.Dependencies is not null && index.Dependencies.Count > 0)
+        {
+            // Build condition groups from flat dependencies using condition metadata.
+            // Each dependency carries its export conditions (from its package.json).
+            // We match main-module conditions to dep conditions: exact match first,
+            // then "default", then first available. The dep module name includes
+            // the matched condition suffix when the dep has multiple conditions.
+            var allMainConditions = new HashSet<string>();
+            foreach (var module in index.Modules)
+                allMainConditions.Add(module.Condition ?? "default");
+
+            // Pre-compute condition sets per dependency
+            var depConditionSets = new Dictionary<string, HashSet<string>>();
+            foreach (var dep in index.Dependencies)
+            {
+                if (dep.IsNode) continue;
+                var conds = dep.Conditions is { Count: > 0 }
+                    ? new HashSet<string>(dep.Conditions, StringComparer.Ordinal)
+                    : new HashSet<string>(StringComparer.Ordinal);
+                depConditionSets[dep.Package] = conds;
+            }
+
+            foreach (var mainCond in allMainConditions)
+            {
+                var depsForCond = new List<(string ModuleName, List<ClassInfo> Classes,
+                    List<InterfaceInfo> Interfaces, List<EnumInfo> Enums, List<TypeAliasInfo> Types,
+                    List<FunctionInfo> Functions)>();
+
+                foreach (var dep in index.Dependencies)
+                {
+                    if (dep.IsNode) continue;
+                    var classes = dep.Classes?.ToList() ?? [];
+                    var interfaces = dep.Interfaces?.ToList() ?? [];
+                    var enums = dep.Enums?.ToList() ?? [];
+                    var types = dep.Types?.Where(t => t.Type != "unresolved" && !IsSelfReferentialAlias(t)).ToList() ?? [];
+                    List<FunctionInfo> functions = [];
+
+                    if (classes.Count + interfaces.Count + enums.Count + types.Count == 0)
+                        continue;
+
+                    // Determine module name using condition matching.
+                    // Exact match → dep/condition suffix; no match → bare package
+                    // name (represents the "default" export, matching tsconfig behavior).
+                    var depConds = depConditionSets.GetValueOrDefault(dep.Package, []);
+                    string depModuleName;
+                    if (depConds.Count > 0 && depConds.Contains(mainCond))
+                    {
+                        // Exact condition match — use suffix
+                        depModuleName = depConds.Count > 1
+                            ? $"{dep.Package}/{mainCond}"
+                            : dep.Package;
+                    }
+                    else
+                    {
+                        // No match or no conditions — fall back to bare package name (default)
+                        depModuleName = dep.Package;
+                    }
 
                     depsForCond.Add((depModuleName, classes, interfaces, enums, types, functions));
                 }
@@ -458,6 +523,7 @@ public static class TypeScriptFormatter
         // Render modules grouped by condition: for each condition, emit dependency
         // modules first, then the main package module with import statements.
         // This keeps related modules together and ensures deps are declared before imports.
+        var emittedDepModules = new HashSet<string>(StringComparer.Ordinal);
             foreach (var (key, group) in sortedGroups)
             {
                 if (sb.Length >= maxLength) break;
@@ -482,12 +548,15 @@ public static class TypeScriptFormatter
                         : $"{index.Package}/{subpath}";
                 }
 
-                // Render dependency modules for this condition first
+                // Render dependency modules for this condition first.
+                // Track emitted modules to avoid duplicates when flat deps are shared
+                // across conditions (same module name for all conditions).
                 if (depsByCondition.TryGetValue(condition, out var depsForThisCondition))
                 {
                     foreach (var (depModuleName, depClasses, depInterfaces, depEnums, depTypes, depFunctions) in depsForThisCondition)
                     {
                         if (sb.Length >= maxLength) break;
+                        if (!emittedDepModules.Add(depModuleName)) continue;
                         sb.AppendLine($"declare module \"{depModuleName}\" {{");
                         sb.AppendLine();
                         RenderModuleTypes(sb, depClasses, depInterfaces, depEnums, depTypes, depFunctions);
@@ -626,10 +695,10 @@ public static class TypeScriptFormatter
             }
         }
 
-        // Fallback: render flat dependency stubs when resolvedDependencies is not available
-        if (index.ResolvedDependencies is null && index.Dependencies is not null && index.Dependencies.Count > 0 && sb.Length < maxLength)
+        // Fallback for simple (non-sectioned) rendering: emit dependencies as
+        // declare module blocks when they weren't already rendered inline above.
+        if (index.Dependencies is not null && index.Dependencies.Count > 0 && !needsSections && sb.Length < maxLength)
         {
-            // Fallback: render flat dependency stubs (legacy format)
             sb.AppendLine();
             sb.AppendLine("// ============================================================================");
             sb.AppendLine("// Dependencies");
@@ -645,34 +714,36 @@ public static class TypeScriptFormatter
                 if (!hasContent) continue;
 
                 sb.AppendLine();
-                sb.AppendLine($"// From: {dep.Package}");
+                sb.AppendLine($"declare module \"{dep.Package}\" {{");
                 sb.AppendLine();
 
                 foreach (var iface in dep.Interfaces ?? [])
                 {
                     if (sb.Length >= maxLength) break;
-                    var ifaceStr = FormatInterface(iface, exportKeyword: false);
+                    var ifaceStr = IndentBlock(FormatInterface(iface, insideDeclareModule: true));
                     if (sb.Length + ifaceStr.Length <= maxLength) { sb.Append(ifaceStr); includedItems++; }
                 }
                 foreach (var cls in dep.Classes ?? [])
                 {
                     if (sb.Length >= maxLength) break;
-                    var clsStr = FormatClass(cls, exportKeyword: false);
+                    var clsStr = IndentBlock(FormatClass(cls, insideDeclareModule: true));
                     if (sb.Length + clsStr.Length <= maxLength) { sb.Append(clsStr); includedItems++; }
                 }
                 foreach (var e in dep.Enums ?? [])
                 {
                     if (sb.Length >= maxLength) break;
-                    var enumStr = FormatEnum(e, exportKeyword: false);
+                    var enumStr = IndentBlock(FormatEnum(e, insideDeclareModule: true));
                     if (sb.Length + enumStr.Length <= maxLength) { sb.Append(enumStr); includedItems++; }
                 }
                 foreach (var t in dep.Types ?? [])
                 {
                     if (sb.Length >= maxLength) break;
                     if (IsSelfReferentialAlias(t)) continue;
-                    var typeStr = FormatTypeAlias(t, exportKeyword: false);
+                    var typeStr = IndentBlock(FormatTypeAlias(t, insideDeclareModule: true));
                     if (sb.Length + typeStr.Length <= maxLength) { sb.Append(typeStr); includedItems++; }
                 }
+
+                sb.AppendLine("}");
             }
         }
 

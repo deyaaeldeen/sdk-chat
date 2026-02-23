@@ -175,6 +175,8 @@ export interface ApiIndex {
     modules: ModuleInfo[];
     /** Types from dependency packages that appear in the public API */
     dependencies?: DependencyInfo[];
+    /** Fully resolved dependency packages with condition-aware modules */
+    resolvedDependencies?: ApiIndex[];
 }
 
 /**
@@ -185,6 +187,8 @@ export interface DependencyInfo {
     package: string;
     /** Whether this dependency is from the Node.js runtime (@types/node) */
     isNode?: boolean;
+    /** Export conditions from the dependency's package.json (e.g. ["browser","import","require"]) */
+    conditions?: string[];
     /** Types from this package that are referenced in the API */
     classes?: ClassInfo[];
     interfaces?: InterfaceInfo[];
@@ -2271,6 +2275,11 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
     const dependencies = resolveTransitiveDependencies(baseResult, ctx, rootPath, reachableTypes);
     if (dependencies.length > 0) {
         baseResult.dependencies = dependencies;
+        // Build condition-aware resolved dependencies for proper declare module rendering
+        const resolvedDeps = buildResolvedDependencies(dependencies, rootPath, ctx);
+        if (resolvedDeps.length > 0) {
+            baseResult.resolvedDependencies = resolvedDeps;
+        }
     }
 
     // Phase 8: Emit structured diagnostics to stderr for unresolved dependencies.
@@ -2282,19 +2291,23 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
             if (unresolvedTypes.length > 0) {
                 const typeNames = unresolvedTypes.map(t => t.name).join(", ");
                 console.error(`Unresolved dependency: package '${dep.package}' has ${unresolvedTypes.length} unresolved type(s): ${typeNames}`);
-                reportedPackages.add(dep.package);
             }
+            // Track all resolved dependency packages so the "not installed" check
+            // below skips them. The dependency engine already resolved these types
+            // regardless of where node_modules lives.
+            reportedPackages.add(dep.package);
         }
     }
 
-    // Also check for imported packages that couldn't be resolved at all
+    // Also check for imported packages that couldn't be resolved at all.
+    // Walk up the directory tree to find node_modules (standard Node.js resolution)
+    // since rootPath may be a subdirectory like sdk/src rather than the project root.
     const importedPackages = ctx.typeRefs.getImportedPackages();
     for (const [, pkgName] of importedPackages) {
         if (reportedPackages.has(pkgName)) continue;
         // Node built-in modules are never in node_modules — skip them
         if (isNodeBuiltinModule(pkgName)) continue;
-        const pkgDir = path.join(rootPath, "node_modules", pkgName);
-        if (!fs.existsSync(pkgDir)) {
+        if (!findPackageInNodeModules(rootPath, pkgName)) {
             console.error(`Unresolved dependency: package '${pkgName}' is referenced but not installed`);
             reportedPackages.add(pkgName);
         }
@@ -2408,8 +2421,12 @@ function computeReachableTypes(api: ApiIndex): Set<string> {
  * Uses the existing project's module resolution to find types in dependencies,
  * handling named imports, default imports, and re-exports.
  */
-function buildImportResolutionMap(project: Project): Map<string, { packageName: string; resolvedFile: SourceFile }> {
-    const resolutionMap = new Map<string, { packageName: string; resolvedFile: SourceFile }>();
+function buildImportResolutionMap(project: Project): {
+    typeMap: Map<string, { packageName: string; resolvedFile: SourceFile }>;
+    packageMap: Map<string, SourceFile>;
+} {
+    const typeMap = new Map<string, { packageName: string; resolvedFile: SourceFile }>();
+    const packageMap = new Map<string, SourceFile>();
 
     for (const sourceFile of project.getSourceFiles()) {
         const filePath = sourceFile.getFilePath();
@@ -2427,8 +2444,8 @@ function buildImportResolutionMap(project: Project): Map<string, { packageName: 
                 const importedName = namedImport.getName();
                 const aliasName = namedImport.getAliasNode()?.getText();
                 const typeName = aliasName || importedName;
-                if (!resolutionMap.has(importedName)) {
-                    resolutionMap.set(importedName, { packageName: moduleSpecifier, resolvedFile });
+                if (!typeMap.has(importedName)) {
+                    typeMap.set(importedName, { packageName: moduleSpecifier, resolvedFile });
                 }
             }
 
@@ -2436,9 +2453,18 @@ function buildImportResolutionMap(project: Project): Map<string, { packageName: 
             const defaultImport = importDecl.getDefaultImport();
             if (defaultImport) {
                 const typeName = defaultImport.getText();
-                if (!resolutionMap.has(typeName)) {
-                    resolutionMap.set(typeName, { packageName: moduleSpecifier, resolvedFile });
+                if (!typeMap.has(typeName)) {
+                    typeMap.set(typeName, { packageName: moduleSpecifier, resolvedFile });
                 }
+            }
+
+            // Namespace imports: import * as X from "pkg"
+            // Store the package → resolvedFile mapping so types accessed via
+            // namespace-qualified syntax (e.g., X.Foo) can be resolved even
+            // though individual type names aren't in the per-type map.
+            const nsImport = importDecl.getNamespaceImport();
+            if (nsImport && !packageMap.has(moduleSpecifier)) {
+                packageMap.set(moduleSpecifier, resolvedFile);
             }
         }
 
@@ -2452,14 +2478,14 @@ function buildImportResolutionMap(project: Project): Map<string, { packageName: 
 
             for (const namedExport of exportDecl.getNamedExports()) {
                 const name = namedExport.getName();
-                if (!resolutionMap.has(name)) {
-                    resolutionMap.set(name, { packageName: moduleSpecifier, resolvedFile });
+                if (!typeMap.has(name)) {
+                    typeMap.set(name, { packageName: moduleSpecifier, resolvedFile });
                 }
             }
         }
     }
 
-    return resolutionMap;
+    return { typeMap, packageMap };
 }
 
 /**
@@ -2528,7 +2554,7 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
     }
 
     // Build import resolution map using the existing project's module resolution
-    const importResolutionMap = buildImportResolutionMap(ctx.project);
+    const { typeMap: importResolutionMap, packageMap: packageResolutionMap } = buildImportResolutionMap(ctx.project);
 
     // Collect default-imported type names for proper lookup strategy
     const defaultImportedTypes = new Set<string>();
@@ -2545,6 +2571,14 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
     // Additional files are added on-demand during sub-dependency traversal.
     for (const [, entry] of importResolutionMap) {
         const filePath = entry.resolvedFile.getFilePath();
+        if (!ctx.project.getSourceFile(filePath)) {
+            try {
+                ctx.project.addSourceFileAtPath(filePath);
+            } catch { /* benign — file may already be added */ }
+        }
+    }
+    for (const [, resolvedFile] of packageResolutionMap) {
+        const filePath = resolvedFile.getFilePath();
         if (!ctx.project.getSourceFile(filePath)) {
             try {
                 ctx.project.addSourceFileAtPath(filePath);
@@ -2585,6 +2619,15 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
                 if (resolution) {
                     const isDefault = defaultImportedTypes.has(typeName);
                     result = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault, ctx);
+                } else {
+                    // Fallback: for namespace-imported types (e.g., extLib.INetworkModule),
+                    // the per-type map has no entry because the type was accessed via
+                    // qualified syntax, not a named import. Use the package-level
+                    // resolved file from the namespace import.
+                    const pkgFile = packageResolutionMap.get(packageName);
+                    if (pkgFile) {
+                        result = extractTypeFromResolvedModule(typeName, pkgFile, false, ctx);
+                    }
                 }
 
                 if (!result) {
@@ -2731,6 +2774,15 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
         }
     }
 
+    // Populate export conditions from each dependency's package.json
+    for (const [, depInfo] of depByPackage) {
+        if (depInfo.isNode) continue;
+        const conditions = getPackageExportConditions(rootPath, depInfo.package);
+        if (conditions && conditions.length > 0) {
+            depInfo.conditions = conditions;
+        }
+    }
+
     return Array.from(depByPackage.values()).sort((a, b) => a.package.localeCompare(b.package));
 }
 
@@ -2760,6 +2812,231 @@ const NODE_BUILTIN_MODULES = new Set([
 function isNodeBuiltinModule(packageName: string): boolean {
     if (packageName.startsWith("node:")) return true;
     return NODE_BUILTIN_MODULES.has(packageName);
+}
+
+/**
+ * Walk up the directory tree from startDir to find a node_modules directory
+ * that contains the given package. This mimics Node.js module resolution,
+ * which is necessary when rootPath is a subdirectory (e.g. sdk/src) but
+ * node_modules lives at the project root (e.g. sdk/node_modules).
+ */
+function findPackageInNodeModules(startDir: string, packageName: string): boolean {
+    let current = path.resolve(startDir);
+    const root = path.parse(current).root;
+    while (true) {
+        const candidate = path.join(current, "node_modules", packageName);
+        if (fs.existsSync(candidate)) return true;
+        const parent = path.dirname(current);
+        if (parent === current || current === root) break;
+        current = parent;
+    }
+    return false;
+}
+
+/**
+ * Reads the export conditions from a dependency's package.json.
+ * Looks at the "." entry in the "exports" field and returns the condition keys
+ * (e.g. ["browser", "import", "require"]), filtering out meta-keys like
+ * "react-native" and "types".
+ */
+function getPackageExportConditions(startDir: string, packageName: string): string[] | undefined {
+    let current = path.resolve(startDir);
+    const root = path.parse(current).root;
+    while (true) {
+        const pkgJsonPath = path.join(current, "node_modules", packageName, "package.json");
+        if (fs.existsSync(pkgJsonPath)) {
+            try {
+                const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+                const exports = pkgJson.exports;
+                if (exports && typeof exports === "object" && exports["."] && typeof exports["."] === "object") {
+                    const dotExport = exports["."];
+                    // Filter to runtime conditions, excluding metadata keys
+                    const skipKeys = new Set(["types", "react-native", "default"]);
+                    const conditions = Object.keys(dotExport).filter(k => !skipKeys.has(k));
+                    return conditions.length > 0 ? conditions : undefined;
+                }
+            } catch { /* benign — can't read package.json */ }
+            return undefined;
+        }
+        const parent = path.dirname(current);
+        if (parent === current || current === root) break;
+        current = parent;
+    }
+    return undefined;
+}
+
+/**
+ * Resolves the ".d.ts" type entry point for each export condition in a package.
+ * Returns a map of condition name → absolute path to the .d.ts file.
+ * Includes a "default" entry from the package's top-level "types" field.
+ */
+function getPackageConditionTypePaths(startDir: string, packageName: string): Map<string, string> | undefined {
+    let current = path.resolve(startDir);
+    const root = path.parse(current).root;
+    while (true) {
+        const pkgJsonPath = path.join(current, "node_modules", packageName, "package.json");
+        if (fs.existsSync(pkgJsonPath)) {
+            const pkgDir = path.dirname(pkgJsonPath);
+            try {
+                const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+                const result = new Map<string, string>();
+                const exportsObj = pkgJson.exports;
+
+                if (exportsObj && typeof exportsObj === "object" && exportsObj["."] && typeof exportsObj["."] === "object") {
+                    const dotExport = exportsObj["."];
+                    // Skip metadata-only conditions
+                    const skipKeys = new Set(["types", "react-native"]);
+
+                    for (const [condition, value] of Object.entries(dotExport)) {
+                        if (skipKeys.has(condition)) continue;
+                        const typesPath = resolveTypesPathFromCondition(value);
+                        if (typesPath) {
+                            const absPath = path.resolve(pkgDir, typesPath);
+                            if (fs.existsSync(absPath)) {
+                                result.set(condition, absPath);
+                            }
+                        }
+                    }
+                }
+
+                // If no "default" entry, use the top-level "types" field
+                if (!result.has("default") && pkgJson.types) {
+                    const absPath = path.resolve(pkgDir, pkgJson.types);
+                    if (fs.existsSync(absPath)) {
+                        result.set("default", absPath);
+                    }
+                }
+
+                return result.size > 0 ? result : undefined;
+            } catch { /* benign */ }
+            return undefined;
+        }
+        const parent = path.dirname(current);
+        if (parent === current || current === root) break;
+        current = parent;
+    }
+    return undefined;
+}
+
+/** Extract the .d.ts types path from a condition value in package.json exports. */
+function resolveTypesPathFromCondition(value: unknown): string | undefined {
+    if (typeof value === "string") {
+        // Direct string — only if it's a .d.ts
+        return /\.d\.[mc]?ts$/.test(value) ? value : undefined;
+    }
+    if (typeof value === "object" && value !== null) {
+        const obj = value as Record<string, unknown>;
+        if ("types" in obj) {
+            const types = obj.types;
+            if (typeof types === "string") return types;
+            // Nested: { types: { import: "...", require: "..." } }
+            if (typeof types === "object" && types !== null) {
+                const nested = types as Record<string, unknown>;
+                for (const key of ["import", "require", "default"]) {
+                    if (typeof nested[key] === "string") return nested[key] as string;
+                }
+                // Take first string value
+                for (const v of Object.values(nested)) {
+                    if (typeof v === "string") return v as string;
+                }
+            }
+        }
+    }
+    return undefined;
+}
+
+/**
+ * Gets the set of exported type/value names from a .d.ts file.
+ * Uses ts-morph's getExportedDeclarations() which follows re-exports.
+ */
+function getExportedTypeNamesFromFile(dtsPath: string, project: Project): Set<string> {
+    const names = new Set<string>();
+    let sf = project.getSourceFile(dtsPath);
+    if (!sf) {
+        try { sf = project.addSourceFileAtPath(dtsPath); }
+        catch { return names; }
+    }
+    try {
+        for (const [name] of sf.getExportedDeclarations()) {
+            names.add(name);
+        }
+    } catch { /* benign — file may have parse errors */ }
+    return names;
+}
+
+/**
+ * Builds condition-aware resolved dependencies from flat DependencyInfo[].
+ * For each dep, reads its package.json exports to discover conditions,
+ * resolves the .d.ts entry point per condition, checks which of the needed
+ * types are exported from each, and builds ApiIndex[] with per-condition modules.
+ */
+function buildResolvedDependencies(
+    flatDeps: DependencyInfo[],
+    rootPath: string,
+    ctx: ExtractionContext
+): ApiIndex[] {
+    const result: ApiIndex[] = [];
+
+    for (const dep of flatDeps) {
+        if (dep.isNode) continue;
+
+        const hasContent = (dep.classes?.length ?? 0) + (dep.interfaces?.length ?? 0)
+            + (dep.enums?.length ?? 0) + (dep.types?.filter(t => t.type !== "unresolved").length ?? 0) > 0;
+        if (!hasContent) continue;
+
+        const conditionPaths = getPackageConditionTypePaths(rootPath, dep.package);
+
+        if (!conditionPaths || conditionPaths.size === 0) {
+            // No conditional exports — single unconditioned module with all types
+            result.push({
+                package: dep.package,
+                modules: [{
+                    name: dep.package,
+                    classes: dep.classes,
+                    interfaces: dep.interfaces,
+                    enums: dep.enums,
+                    types: dep.types?.filter(t => t.type !== "unresolved"),
+                }]
+            });
+            continue;
+        }
+
+        const modules: ModuleInfo[] = [];
+
+        for (const [condition, typesPath] of conditionPaths) {
+            const exportedNames = getExportedTypeNamesFromFile(typesPath, ctx.project);
+            if (exportedNames.size === 0) continue;
+
+            const classes = (dep.classes ?? []).filter(c => exportedNames.has(c.name));
+            const interfaces = (dep.interfaces ?? []).filter(i => exportedNames.has(i.name));
+            const enums = (dep.enums ?? []).filter(e => exportedNames.has(e.name));
+            const types = (dep.types ?? []).filter(t => t.type !== "unresolved" && exportedNames.has(t.name));
+
+            if (classes.length + interfaces.length + enums.length + types.length === 0) continue;
+
+            // "default" condition maps to undefined (null in C#), which the
+            // formatter treats as the fallback condition.
+            const conditionValue = condition === "default" ? undefined : condition;
+
+            modules.push({
+                name: dep.package,
+                condition: conditionValue,
+                classes: classes.length > 0 ? classes : undefined,
+                interfaces: interfaces.length > 0 ? interfaces : undefined,
+                enums: enums.length > 0 ? enums : undefined,
+                types: types.length > 0 ? types : undefined,
+            });
+        }
+
+        if (modules.length > 0) {
+            result.push({
+                package: dep.package,
+                modules,
+            });
+        }
+    }
+
+    return result;
 }
 
 // ============================================================================
@@ -2904,92 +3181,96 @@ export function formatStubs(api: ApiIndex): string {
         }
     }
 
-    // Add dependency types if present
+    // Add dependency types if present, each wrapped in a declare module block
     if (api.dependencies && api.dependencies.length > 0) {
         lines.push("");
         lines.push("// ============================================================================");
-        lines.push("// Types from Dependencies (referenced in API surface)");
+        lines.push("// Dependencies");
         lines.push("// ============================================================================");
-        lines.push("");
 
         for (const dep of api.dependencies) {
             if (dep.isNode) continue;
-            lines.push(`// From: ${dep.package}`);
             lines.push("");
+            lines.push(`declare module "${dep.package}" {`);
+            lines.push("");
+
+            const indent = "    ";
 
             // Interfaces
             for (const iface of dep.interfaces || []) {
-                if (iface.doc) lines.push(`/** ${iface.doc} */`);
+                if (iface.doc) lines.push(`${indent}/** ${iface.doc} */`);
                 const ext = iface.extends?.length ? ` extends ${iface.extends.join(", ")}` : "";
                 const typeParams = iface.typeParams ? `<${iface.typeParams}>` : "";
-                lines.push(`interface ${iface.name}${typeParams}${ext} {`);
+                lines.push(`${indent}export interface ${iface.name}${typeParams}${ext} {`);
 
                 for (const prop of iface.properties || []) {
                     const opt = prop.optional ? "?" : "";
                     const ro = prop.readonly ? "readonly " : "";
-                    lines.push(`    ${ro}${prop.name}${opt}: ${prop.type};`);
+                    lines.push(`${indent}    ${ro}${prop.name}${opt}: ${prop.type};`);
                 }
 
                 for (const sig of iface.indexSignatures || []) {
                     const ro = sig.readonly ? "readonly " : "";
-                    lines.push(`    ${ro}[${sig.keyName}: ${sig.keyType}]: ${sig.valueType};`);
+                    lines.push(`${indent}    ${ro}[${sig.keyName}: ${sig.keyType}]: ${sig.valueType};`);
                 }
 
                 for (const m of iface.methods || []) {
                     const ret = m.ret ? `: ${m.ret}` : "";
-                    lines.push(`    ${m.name}(${m.sig})${ret};`);
+                    lines.push(`${indent}    ${m.name}(${m.sig})${ret};`);
                 }
 
-                lines.push("}");
+                lines.push(`${indent}}`);
                 lines.push("");
             }
 
             // Classes
             for (const cls of dep.classes || []) {
-                if (cls.doc) lines.push(`/** ${cls.doc} */`);
+                if (cls.doc) lines.push(`${indent}/** ${cls.doc} */`);
                 const ext = cls.extends ? ` extends ${cls.extends}` : "";
                 const typeParams = cls.typeParams ? `<${cls.typeParams}>` : "";
-                lines.push(`class ${cls.name}${typeParams}${ext} {`);
+                lines.push(`${indent}export class ${cls.name}${typeParams}${ext} {`);
 
                 for (const prop of cls.properties || []) {
                     const opt = prop.optional ? "?" : "";
                     const ro = prop.readonly ? "readonly " : "";
-                    lines.push(`    ${ro}${prop.name}${opt}: ${prop.type};`);
+                    lines.push(`${indent}    ${ro}${prop.name}${opt}: ${prop.type};`);
                 }
 
                 for (const sig of cls.indexSignatures || []) {
                     const ro = sig.readonly ? "readonly " : "";
-                    lines.push(`    ${ro}[${sig.keyName}: ${sig.keyType}]: ${sig.valueType};`);
+                    lines.push(`${indent}    ${ro}[${sig.keyName}: ${sig.keyType}]: ${sig.valueType};`);
                 }
 
                 for (const m of cls.methods || []) {
                     const ret = m.ret ? `: ${m.ret}` : "";
-                    lines.push(`    ${m.name}(${m.sig})${ret};`);
+                    lines.push(`${indent}    ${m.name}(${m.sig})${ret};`);
                 }
 
                 if (!cls.properties?.length && !cls.methods?.length) {
-                    lines.push("    // empty");
+                    lines.push(`${indent}    // empty`);
                 }
 
-                lines.push("}");
+                lines.push(`${indent}}`);
                 lines.push("");
             }
 
             // Enums
             for (const e of dep.enums || []) {
-                if (e.doc) lines.push(`/** ${e.doc} */`);
-                lines.push(`enum ${e.name} {`);
-                lines.push(`    ${e.values.join(", ")}`);
-                lines.push("}");
+                if (e.doc) lines.push(`${indent}/** ${e.doc} */`);
+                lines.push(`${indent}export enum ${e.name} {`);
+                lines.push(`${indent}    ${e.values.join(", ")}`);
+                lines.push(`${indent}}`);
                 lines.push("");
             }
 
             // Type aliases
             for (const t of dep.types || []) {
-                if (t.doc) lines.push(`/** ${t.doc} */`);
-                lines.push(`type ${t.name} = ${t.type};`);
+                if (t.doc) lines.push(`${indent}/** ${t.doc} */`);
+                lines.push(`${indent}export type ${t.name} = ${t.type};`);
                 lines.push("");
             }
+
+            lines.push("}");
         }
     }
 

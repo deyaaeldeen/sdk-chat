@@ -159,6 +159,11 @@ public sealed record DependencyInfo
     [JsonPropertyName("types")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<TypeAliasInfo>? Types { get; init; }
+
+    /// <summary>Export conditions from the dependency's package.json (e.g. ["browser","import","require"]).</summary>
+    [JsonPropertyName("conditions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Conditions { get; init; }
 }
 
 /// <summary>A TypeScript module/file.</summary>
