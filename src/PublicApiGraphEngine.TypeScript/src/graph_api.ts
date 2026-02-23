@@ -20,6 +20,7 @@ import {
     JSDocableNode,
     Node,
     Type,
+    TypeNode,
     Symbol as TsSymbol,
     ts,
 } from "ts-morph";
@@ -220,6 +221,14 @@ const PRIMITIVE_TYPES = new Set([
 // Extraction Context — encapsulates all mutable state for a single extraction
 // ============================================================================
 
+/** Structured diagnostic emitted during extraction. */
+interface ExtractionDiagnostic {
+    readonly level: "info" | "warning" | "error";
+    readonly code: string;
+    readonly message: string;
+    readonly typeName?: string;
+}
+
 /**
  * Encapsulates all mutable state needed during a single package extraction.
  * Creating a new context for each extraction prevents state leaking between
@@ -234,29 +243,62 @@ class ExtractionContext {
     readonly typeRefs: TypeReferenceCollector;
     /** Cache for package.json name lookups by directory. */
     readonly pkgNameCache: Map<string, string | undefined>;
+    /** Structured diagnostics collected during extraction. */
+    readonly diagnostics: ExtractionDiagnostic[] = [];
 
     constructor(project: Project) {
         this.project = project;
         this.discoveredBuiltins = discoverBuiltinTypes(project);
-        this.typeRefs = new TypeReferenceCollector();
-        this.typeRefs.setProject(project);
+        this.typeRefs = new TypeReferenceCollector(this);
         this.pkgNameCache = new Map();
     }
+
+    /**
+     * Checks if a type name is a language-level builtin using dynamically discovered type names.
+     * Builtins are types defined in TypeScript's lib files (Promise, Array, Map, etc.).
+     * Note: @types/node types are NOT builtins — they are stdlib dependencies.
+     */
+    isBuiltinType(typeName: string): boolean {
+        if (PRIMITIVE_TYPES.has(typeName)) return true;
+        return this.discoveredBuiltins.has(typeName);
+    }
+
+    /**
+     * Walks up from a file path to find the nearest package.json and reads
+     * the "name" field. Results are cached per directory.
+     */
+    resolvePackageNameFromAncestorPkgJson(filePath: string): string | undefined {
+        let dir = path.dirname(filePath);
+        const root = path.parse(dir).root;
+
+        while (dir && dir !== root) {
+            if (this.pkgNameCache.has(dir)) return this.pkgNameCache.get(dir);
+
+            const pkgPath = path.join(dir, "package.json");
+            if (fs.existsSync(pkgPath)) {
+                try {
+                    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+                    const name: string | undefined = pkg.name;
+                    if (name) {
+                        this.pkgNameCache.set(dir, name);
+                        return name;
+                    }
+                    // package.json without "name" (e.g. {"type":"commonjs"}) — keep walking up
+                } catch {
+                    // Malformed JSON — keep walking up
+                }
+            }
+            dir = path.dirname(dir);
+        }
+        this.pkgNameCache.set(dir, undefined);
+        return undefined;
+    }
+
+    /** Records a structured diagnostic. */
+    warn(code: string, message: string, typeName?: string): void {
+        this.diagnostics.push({ level: "warning", code, message, typeName });
+    }
 }
-
-/**
- * Module-level extraction context, initialized at the start of each
- * extractPackage() call. Provides access to shared state (type collector,
- * builtin types, package name cache) without threading a parameter
- * through every function.
- */
-let extractionCtx: ExtractionContext;
-
-/**
- * Builtin type names — alias into the current extraction context for
- * backward compatibility with isBuiltinType() and other consumers.
- */
-let discoveredBuiltins = new Set<string>();
 
 /**
  * Scans all source files from TypeScript lib to collect
@@ -298,23 +340,6 @@ function discoverBuiltinTypes(project: Project): Set<string> {
     return builtins;
 }
 
-/**
- * Checks if a type name is a language-level builtin using dynamically discovered type names.
- * Builtins are types defined in TypeScript's lib files (Promise, Array, Map, etc.).
- * Note: @types/node types are NOT builtins — they are stdlib dependencies.
- */
-function isBuiltinType(typeName: string): boolean {
-    // Check primitives first (not resolvable to declarations)
-    if (PRIMITIVE_TYPES.has(typeName)) {
-        return true;
-    }
-
-    // Check against dynamically discovered builtins from TypeScript lib files.
-    // Symbol names from the compiler never include generic parameters,
-    // so no stripping is needed.
-    return discoveredBuiltins.has(typeName);
-}
-
 // ============================================================================
 // AST-Based Type Reference Collection
 // ============================================================================
@@ -338,13 +363,13 @@ interface ResolvedTypeRef {
  * This recursively resolves generic type arguments, union/intersection members, etc.
  *
  * @param type The Type object to analyze
- * @param project The ts-morph Project for resolution
+ * @param ctx The extraction context for this run
  * @param refs Set to collect resolved type references
  * @param visited Set of already visited type IDs to prevent infinite recursion
  */
 function collectTypeRefsFromType(
     type: Type,
-    project: Project,
+    ctx: ExtractionContext,
     refs: Set<ResolvedTypeRef>,
     visited: WeakSet<object> = new WeakSet()
 ): void {
@@ -380,19 +405,19 @@ function collectTypeRefsFromType(
         if (aliasSymbol) {
             const aliasName = aliasSymbol.getName();
             if (aliasName && aliasName !== "__type" && aliasName !== "__object" &&
-                !PRIMITIVE_TYPES.has(aliasName) && !isBuiltinType(aliasName)) {
+                !PRIMITIVE_TYPES.has(aliasName) && !ctx.isBuiltinType(aliasName)) {
                 const aliasDecls = aliasSymbol.getDeclarations();
                 if (aliasDecls && aliasDecls.length > 0) {
                     const aliasDecl = aliasDecls[0];
                     if (Node.isTypeAliasDeclaration(aliasDecl)) {
                         const sf = aliasDecl.getSourceFile();
-                        if (!isDefaultLibFile(project, sf)) {
+                        if (!isDefaultLibFile(ctx.project, sf)) {
                             const fp = sf.getFilePath();
                             refs.add({
                                 name: aliasName,
                                 fullName: aliasSymbol.getFullyQualifiedName?.() ?? aliasName,
                                 declarationPath: fp,
-                                packageName: resolvePackageNameFromPath(fp),
+                                packageName: resolvePackageNameFromPath(fp, ctx),
                             });
                         }
                     }
@@ -403,7 +428,7 @@ function collectTypeRefsFromType(
         // Handle union types
         if (type.isUnion()) {
             for (const unionType of type.getUnionTypes()) {
-                collectTypeRefsFromType(unionType, project, refs, visited);
+                collectTypeRefsFromType(unionType, ctx, refs, visited);
             }
             return;
         }
@@ -411,7 +436,7 @@ function collectTypeRefsFromType(
         // Handle intersection types
         if (type.isIntersection()) {
             for (const intersectionType of type.getIntersectionTypes()) {
-                collectTypeRefsFromType(intersectionType, project, refs, visited);
+                collectTypeRefsFromType(intersectionType, ctx, refs, visited);
             }
             return;
         }
@@ -420,7 +445,7 @@ function collectTypeRefsFromType(
         if (type.isArray()) {
             const elementType = type.getArrayElementType();
             if (elementType) {
-                collectTypeRefsFromType(elementType, project, refs, visited);
+                collectTypeRefsFromType(elementType, ctx, refs, visited);
             }
             return;
         }
@@ -428,7 +453,7 @@ function collectTypeRefsFromType(
         // Handle tuple types
         if (type.isTuple()) {
             for (const tupleElement of type.getTupleElements()) {
-                collectTypeRefsFromType(tupleElement, project, refs, visited);
+                collectTypeRefsFromType(tupleElement, ctx, refs, visited);
             }
             return;
         }
@@ -444,11 +469,11 @@ function collectTypeRefsFromType(
                         const paramDecls = param.getDeclarations();
                         if (paramDecls.length > 0) {
                             const paramType = getTypeFromDeclaration(paramDecls[0]);
-                            if (paramType) collectTypeRefsFromType(paramType, project, refs, visited);
+                            if (paramType) collectTypeRefsFromType(paramType, ctx, refs, visited);
                         }
                     }
-                    collectTypeRefsFromType(sig.getReturnType(), project, refs, visited);
-                } catch { /* skip */ }
+                    collectTypeRefsFromType(sig.getReturnType(), ctx, refs, visited);
+                } catch (e) { ctx.warn("TYPE_TRAVERSE", e instanceof Error ? e.message : String(e)); }
             }
             return;
         }
@@ -458,10 +483,10 @@ function collectTypeRefsFromType(
 
         // Skip primitives and builtins — but still process type arguments
         // for generic builtins like Promise<T>, Map<K,V>, Array<T>, etc.
-        if (!typeName || PRIMITIVE_TYPES.has(typeName) || isBuiltinType(typeName)) {
+        if (!typeName || PRIMITIVE_TYPES.has(typeName) || ctx.isBuiltinType(typeName)) {
             const typeArgs = type.getTypeArguments();
             for (const typeArg of typeArgs) {
-                collectTypeRefsFromType(typeArg, project, refs, visited);
+                collectTypeRefsFromType(typeArg, ctx, refs, visited);
             }
             return;
         }
@@ -477,9 +502,9 @@ function collectTypeRefsFromType(
                     const propDecls = prop.getDeclarations();
                     if (propDecls.length > 0) {
                         const propType = getTypeFromDeclaration(propDecls[0]);
-                        if (propType) collectTypeRefsFromType(propType, project, refs, visited);
+                        if (propType) collectTypeRefsFromType(propType, ctx, refs, visited);
                     }
-                } catch { /* skip */ }
+                } catch (e) { ctx.warn("TYPE_TRAVERSE", e instanceof Error ? e.message : String(e)); }
             }
             for (const sig of type.getCallSignatures()) {
                 try {
@@ -487,21 +512,21 @@ function collectTypeRefsFromType(
                         const paramDecls = param.getDeclarations();
                         if (paramDecls.length > 0) {
                             const paramType = getTypeFromDeclaration(paramDecls[0]);
-                            if (paramType) collectTypeRefsFromType(paramType, project, refs, visited);
+                            if (paramType) collectTypeRefsFromType(paramType, ctx, refs, visited);
                         }
                     }
-                    collectTypeRefsFromType(sig.getReturnType(), project, refs, visited);
-                } catch { /* skip */ }
+                    collectTypeRefsFromType(sig.getReturnType(), ctx, refs, visited);
+                } catch (e) { ctx.warn("TYPE_TRAVERSE", e instanceof Error ? e.message : String(e)); }
             }
             // Traverse index signature value types (e.g. { [key: string]: FormDataValue })
             try {
                 const stringIndexType = type.getStringIndexType();
-                if (stringIndexType) collectTypeRefsFromType(stringIndexType, project, refs, visited);
-            } catch { /* skip */ }
+                if (stringIndexType) collectTypeRefsFromType(stringIndexType, ctx, refs, visited);
+            } catch (e) { ctx.warn("TYPE_TRAVERSE", e instanceof Error ? e.message : String(e)); }
             try {
                 const numberIndexType = type.getNumberIndexType();
-                if (numberIndexType) collectTypeRefsFromType(numberIndexType, project, refs, visited);
-            } catch { /* skip */ }
+                if (numberIndexType) collectTypeRefsFromType(numberIndexType, ctx, refs, visited);
+            } catch (e) { ctx.warn("TYPE_TRAVERSE", e instanceof Error ? e.message : String(e)); }
             return;
         }
 
@@ -526,11 +551,11 @@ function collectTypeRefsFromType(
             for (const p of params) {
                 try {
                     const pType = p.getType();
-                    if (pType) collectTypeRefsFromType(pType, project, refs, visited);
-                } catch { /* skip */ }
+                    if (pType) collectTypeRefsFromType(pType, ctx, refs, visited);
+                } catch (e) { ctx.warn("TYPE_TRAVERSE", e instanceof Error ? e.message : String(e)); }
             }
             const retType = getReturnTypeFromDeclaration(declaration);
-            if (retType) collectTypeRefsFromType(retType, project, refs, visited);
+            if (retType) collectTypeRefsFromType(retType, ctx, refs, visited);
             return;
         }
 
@@ -538,17 +563,17 @@ function collectTypeRefsFromType(
         const filePath = sourceFile.getFilePath();
 
         // Check if this is from TypeScript's default library
-        if (isDefaultLibFile(project, sourceFile)) {
+        if (isDefaultLibFile(ctx.project, sourceFile)) {
             // Still process type arguments for generic builtins (e.g. Promise<T>)
             const typeArgs = type.getTypeArguments();
             for (const typeArg of typeArgs) {
-                collectTypeRefsFromType(typeArg, project, refs, visited);
+                collectTypeRefsFromType(typeArg, ctx, refs, visited);
             }
             return;
         }
 
         // Determine the package name from the source file path
-        const packageName = resolvePackageNameFromPath(filePath);
+        const packageName = resolvePackageNameFromPath(filePath, ctx);
 
         // Add the resolved reference
         refs.add({
@@ -561,17 +586,17 @@ function collectTypeRefsFromType(
         // Recursively process generic type arguments
         const typeArgs = type.getTypeArguments();
         for (const typeArg of typeArgs) {
-            collectTypeRefsFromType(typeArg, project, refs, visited);
+            collectTypeRefsFromType(typeArg, ctx, refs, visited);
         }
 
         // Process base types for classes/interfaces
         const baseTypes = type.getBaseTypes();
         for (const baseType of baseTypes) {
-            collectTypeRefsFromType(baseType, project, refs, visited);
+            collectTypeRefsFromType(baseType, ctx, refs, visited);
         }
-    } catch {
-        // Silently skip types that fail resolution (malformed declarations, circular refs, etc.)
-        // This is non-fatal - we just won't track this dependency
+    } catch (e) {
+        // Non-fatal — skip types that fail resolution (malformed declarations, circular refs, etc.)
+        ctx.warn("TYPE_TRAVERSE", e instanceof Error ? e.message : String(e));
     }
 }
 
@@ -580,7 +605,7 @@ function collectTypeRefsFromType(
  * Handles node_modules paths, and falls back to walking up directories
  * to find the nearest package.json (for monorepo symlink-resolved paths).
  */
-function resolvePackageNameFromPath(filePath: string): string | undefined {
+function resolvePackageNameFromPath(filePath: string, ctx: ExtractionContext): string | undefined {
     // Check if it's in node_modules
     const nodeModulesIndex = filePath.lastIndexOf("node_modules");
     if (nodeModulesIndex !== -1) {
@@ -605,41 +630,7 @@ function resolvePackageNameFromPath(filePath: string): string | undefined {
 
     // No node_modules in the path — walk up directories to find package.json
     // This handles monorepo setups where symlinks resolve to real paths
-    return resolvePackageNameFromAncestorPkgJson(filePath);
-}
-
-/** Package name cache — alias into the current extraction context. */
-let pkgNameCache = new Map<string, string | undefined>();
-
-/**
- * Walks up from a file path to find the nearest package.json and reads
- * the "name" field. Results are cached per directory.
- */
-function resolvePackageNameFromAncestorPkgJson(filePath: string): string | undefined {
-    let dir = path.dirname(filePath);
-    const root = path.parse(dir).root;
-
-    while (dir && dir !== root) {
-        if (pkgNameCache.has(dir)) return pkgNameCache.get(dir);
-
-        const pkgPath = path.join(dir, "package.json");
-        if (fs.existsSync(pkgPath)) {
-            try {
-                const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-                const name: string | undefined = pkg.name;
-                if (name) {
-                    pkgNameCache.set(dir, name);
-                    return name;
-                }
-                // package.json without "name" (e.g. {"type":"commonjs"}) — keep walking up
-            } catch {
-                // Malformed JSON — keep walking up
-            }
-        }
-        dir = path.dirname(dir);
-    }
-    pkgNameCache.set(dir, undefined);
-    return undefined;
+    return ctx.resolvePackageNameFromAncestorPkgJson(filePath);
 }
 
 /**
@@ -653,7 +644,7 @@ function resolvePackageNameFromAncestorPkgJson(filePath: string): string | undef
  */
 function collectTypeRefsFromTypeNode(
     node: Node,
-    project: Project,
+    ctx: ExtractionContext,
     refs: Set<ResolvedTypeRef>,
 ): void {
     try {
@@ -664,7 +655,7 @@ function collectTypeRefsFromTypeNode(
                 ? typeName.getRight().getText()
                 : typeName.getText();
 
-            if (!PRIMITIVE_TYPES.has(name) && !isBuiltinType(name)) {
+            if (!PRIMITIVE_TYPES.has(name) && !ctx.isBuiltinType(name)) {
                 try {
                     const symbol = typeName.getSymbol();
                     if (symbol) {
@@ -678,24 +669,24 @@ function collectTypeRefsFromTypeNode(
                                 Node.isEnumDeclaration(decl)
                             ) {
                                 const sf = decl.getSourceFile();
-                                if (!isDefaultLibFile(project, sf)) {
+                                if (!isDefaultLibFile(ctx.project, sf)) {
                                     const fp = sf.getFilePath();
                                     refs.add({
                                         name,
                                         fullName: symbol.getFullyQualifiedName?.() ?? name,
                                         declarationPath: fp,
-                                        packageName: resolvePackageNameFromPath(fp),
+                                        packageName: resolvePackageNameFromPath(fp, ctx),
                                     });
                                 }
                             }
                         }
                     }
-                } catch { /* skip unresolvable symbols */ }
+                } catch (e) { ctx.warn("TYPE_RESOLVE", `Unresolvable symbol '${name}': ${e instanceof Error ? e.message : String(e)}`, name); }
             }
 
             // Recurse into type arguments: Promise<Foo> → visit Foo
             for (const typeArg of node.getTypeArguments()) {
-                collectTypeRefsFromTypeNode(typeArg, project, refs);
+                collectTypeRefsFromTypeNode(typeArg, ctx, refs);
             }
             return;
         }
@@ -703,9 +694,9 @@ function collectTypeRefsFromTypeNode(
         // For compound type nodes (union, intersection, tuple, array, function, etc.)
         // recurse into all child nodes
         for (const child of node.forEachChildAsArray()) {
-            collectTypeRefsFromTypeNode(child, project, refs);
+            collectTypeRefsFromTypeNode(child, ctx, refs);
         }
-    } catch { /* Non-fatal */ }
+    } catch (e) { ctx.warn("TYPE_NODE_TRAVERSE", e instanceof Error ? e.message : String(e)); }
 }
 
 /**
@@ -716,14 +707,15 @@ function collectTypeRefsFromTypeNode(
  */
 class TypeReferenceCollector {
     private refs = new Set<ResolvedTypeRef>();
-    private project: Project | null = null;
+    private readonly ctx: ExtractionContext;
     private definedTypes = new Set<string>();
     private importedTypes = new Map<string, string>(); // typeName -> packageName
+    private namespaceImports = new Set<string>(); // namespace import aliases (import * as X)
     private contextStack: string[] = []; // stack of enclosing type names
     private refsByContext = new Map<string, Set<ResolvedTypeRef>>(); // context -> resolved refs
 
-    setProject(project: Project): void {
-        this.project = project;
+    constructor(ctx: ExtractionContext) {
+        this.ctx = ctx;
     }
 
     addDefinedType(name: string): void {
@@ -746,22 +738,20 @@ class TypeReferenceCollector {
     }
 
     collectFromType(type: Type): void {
-        if (!this.project) return;
         try {
-            // Collect into a separate set so we can identify only the new refs
             const newRefs = new Set<ResolvedTypeRef>();
-            collectTypeRefsFromType(type, this.project, newRefs);
-            // Merge into the global set and tag only new refs with context
-            const ctx = this.currentContext();
+            collectTypeRefsFromType(type, this.ctx, newRefs);
+            const contextName = this.currentContext();
             for (const ref of newRefs) {
                 this.refs.add(ref);
-                if (ctx) {
-                    if (!this.refsByContext.has(ctx)) this.refsByContext.set(ctx, new Set());
-                    this.refsByContext.get(ctx)!.add(ref);
+                if (contextName) {
+                    if (!this.refsByContext.has(contextName)) this.refsByContext.set(contextName, new Set());
+                    this.refsByContext.get(contextName)!.add(ref);
                 }
             }
-        } catch {
-            // Non-fatal - skip types that fail resolution
+        } catch (e) {
+            // Non-fatal — skip types that fail resolution
+            this.ctx.warn("TYPE_COLLECT", e instanceof Error ? e.message : String(e));
         }
     }
 
@@ -771,20 +761,20 @@ class TypeReferenceCollector {
      * (e.g., `type OperationRequest = PipelineRequest`).
      */
     collectFromTypeNode(typeNode: Node): void {
-        if (!this.project) return;
         try {
             const newRefs = new Set<ResolvedTypeRef>();
-            collectTypeRefsFromTypeNode(typeNode, this.project, newRefs);
-            const ctx = this.currentContext();
+            collectTypeRefsFromTypeNode(typeNode, this.ctx, newRefs);
+            const contextName = this.currentContext();
             for (const ref of newRefs) {
                 this.refs.add(ref);
-                if (ctx) {
-                    if (!this.refsByContext.has(ctx)) this.refsByContext.set(ctx, new Set());
-                    this.refsByContext.get(ctx)!.add(ref);
+                if (contextName) {
+                    if (!this.refsByContext.has(contextName)) this.refsByContext.set(contextName, new Set());
+                    this.refsByContext.get(contextName)!.add(ref);
                 }
             }
-        } catch {
+        } catch (e) {
             // Non-fatal
+            this.ctx.warn("TYPE_COLLECT", e instanceof Error ? e.message : String(e));
         }
     }
 
@@ -811,10 +801,14 @@ class TypeReferenceCollector {
                     this.importedTypes.set(named.getName(), moduleSpecifier);
                 }
 
-                // Namespace import
+                // Namespace import — track separately since these are module
+                // namespace aliases (e.g. `import * as msal from "pkg"`), not types.
+                // The compiler resolves qualified accesses like `msal.Foo` to the
+                // actual type `Foo`, so the namespace alias itself should not
+                // appear as an unresolved dependency type.
                 const nsImport = imp.getNamespaceImport();
                 if (nsImport) {
-                    this.importedTypes.set(nsImport.getText(), moduleSpecifier);
+                    this.namespaceImports.add(nsImport.getText());
                 }
             }
         }
@@ -856,6 +850,8 @@ class TypeReferenceCollector {
         for (const [typeName, packageName] of this.importedTypes) {
             if (resolvedNames.has(typeName)) continue;
             if (this.definedTypes.has(typeName)) continue;
+            // Skip namespace import aliases — they are module objects, not types
+            if (this.namespaceImports.has(typeName)) continue;
 
             resolved.push({
                 name: typeName,
@@ -898,12 +894,6 @@ class TypeReferenceCollector {
         return this.importedTypes;
     }
 }
-
-/**
- * Type reference collector — alias into the current extraction context.
- * Reassigned at the start of each extractPackage() call.
- */
-let typeCollector = new TypeReferenceCollector();
 
 // ============================================================================
 // Engine Functions
@@ -1000,21 +990,27 @@ function hasInternalOrHiddenTag(node: JSDocableNode): boolean {
     return false;
 }
 
-function formatParameter(p: ParameterDeclaration): string {
+/**
+ * Formats a type for display by stripping compiler-generated import() qualifiers.
+ * Prefers the developer-written type annotation (typeNode text) when available;
+ * falls back to compiler-inferred text scoped to the enclosing declaration.
+ */
+function displayType(typeNode: TypeNode | undefined, type: Type, enclosing?: Node): string {
+    return stripImportPrefix(typeNode?.getText() || type.getText(enclosing));
+}
+
+function formatParameter(p: ParameterDeclaration, ctx: ExtractionContext): string {
     let sig = p.getName();
     if (p.isOptional()) sig += "?";
     const type = p.getType();
     const typeNode = p.getTypeNode();
-    // Prefer the developer-written type annotation (always clean).
-    // Fall back to compiler-inferred text using the parameter as scope
-    // to minimize import() qualifiers.
-    const typeText = stripImportPrefix(typeNode?.getText() || type.getText(p));
+    const typeText = displayType(typeNode, type, p);
     if (typeText && typeText !== "any") {
         sig += `: ${typeText}`;
         // Collect type reference for dependency tracking
-        typeCollector.collectFromType(type);
+        ctx.typeRefs.collectFromType(type);
         // Also collect from TypeNode to catch simple type aliases resolved away by TS
-        if (typeNode) typeCollector.collectFromTypeNode(typeNode);
+        if (typeNode) ctx.typeRefs.collectFromTypeNode(typeNode);
     } else {
         sig += ": any";
     }
@@ -1022,9 +1018,7 @@ function formatParameter(p: ParameterDeclaration): string {
 }
 
 function extractParameterInfo(p: ParameterDeclaration): ParameterInfo {
-    const typeNodeText = p.getTypeNode()?.getText();
-    const inferredTypeText = p.getType().getText(p);
-    const type = stripImportPrefix(typeNodeText || inferredTypeText || "any");
+    const type = displayType(p.getTypeNode(), p.getType(), p) || "any";
 
     const info: ParameterInfo = {
         name: p.getName(),
@@ -1057,19 +1051,19 @@ function getDeprecatedInfo(node: Node | JSDocableNode): { deprecated?: boolean; 
     return {};
 }
 
-function extractMethod(method: MethodDeclaration): MethodInfo {
+function extractMethod(method: MethodDeclaration, ctx: ExtractionContext): MethodInfo {
     const paramInfos = method.getParameters().map(extractParameterInfo);
-    const params = method.getParameters().map(formatParameter).join(", ");
+    const params = method.getParameters().map(p => formatParameter(p, ctx)).join(", ");
     const returnType = method.getReturnType();
     const returnTypeNode = method.getReturnTypeNode();
-    const ret = stripImportPrefix(returnTypeNode?.getText() || returnType?.getText(method) || "");
+    const ret = displayType(returnTypeNode, returnType, method);
 
     // Collect return type reference
     if (returnType) {
-        typeCollector.collectFromType(returnType);
+        ctx.typeRefs.collectFromType(returnType);
     }
     // Also collect from TypeNode to catch simple type aliases resolved away by TS
-    if (returnTypeNode) typeCollector.collectFromTypeNode(returnTypeNode);
+    if (returnTypeNode) ctx.typeRefs.collectFromTypeNode(returnTypeNode);
 
     const typeParams = method.getTypeParameters().map(t => t.getText()).join(", ");
 
@@ -1097,18 +1091,18 @@ function extractMethod(method: MethodDeclaration): MethodInfo {
     return result;
 }
 
-function extractProperty(prop: PropertyDeclaration): PropertyInfo {
+function extractProperty(prop: PropertyDeclaration, ctx: ExtractionContext): PropertyInfo {
     const type = prop.getType();
     const typeNode = prop.getTypeNode();
 
     // Collect type reference for dependency tracking
-    typeCollector.collectFromType(type);
+    ctx.typeRefs.collectFromType(type);
     // Also collect from TypeNode to catch simple type aliases resolved away by TS
-    if (typeNode) typeCollector.collectFromTypeNode(typeNode);
+    if (typeNode) ctx.typeRefs.collectFromTypeNode(typeNode);
 
     const result: PropertyInfo = {
         name: prop.getName(),
-        type: stripImportPrefix(typeNode?.getText() || type.getText(prop)),
+        type: displayType(typeNode, type, prop),
     };
 
     if (prop.isReadonly()) result.readonly = true;
@@ -1124,10 +1118,10 @@ function extractProperty(prop: PropertyDeclaration): PropertyInfo {
     return result;
 }
 
-function extractConstructor(ctor: ConstructorDeclaration): ConstructorInfo {
+function extractConstructor(ctor: ConstructorDeclaration, ctx: ExtractionContext): ConstructorInfo {
     const paramInfos = ctor.getParameters().map(extractParameterInfo);
     const result: ConstructorInfo = {
-        sig: ctor.getParameters().map(formatParameter).join(", "),
+        sig: ctor.getParameters().map(p => formatParameter(p, ctx)).join(", "),
     };
 
     if (paramInfos.length) result.params = paramInfos;
@@ -1139,11 +1133,11 @@ function extractConstructor(ctor: ConstructorDeclaration): ConstructorInfo {
     return result;
 }
 
-function extractClass(cls: ClassDeclaration): ClassInfo {
+function extractClass(cls: ClassDeclaration, ctx: ExtractionContext): ClassInfo {
     const name = cls.getName();
     if (!name) throw new Error("Class must have a name");
 
-    typeCollector.pushContext(name);
+    ctx.typeRefs.pushContext(name);
 
     const result: ClassInfo = { name };
 
@@ -1157,7 +1151,7 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
         result.extends = ext.getText();
         // Collect base class type
         const baseType = ext.getType();
-        typeCollector.collectFromType(baseType);
+        ctx.typeRefs.collectFromType(baseType);
     }
 
     // Interfaces - collect type references
@@ -1168,7 +1162,7 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
         // Collect interface types
         for (const implExpr of implExprs) {
             const implType = implExpr.getType();
-            typeCollector.collectFromType(implType);
+            ctx.typeRefs.collectFromType(implType);
         }
     }
 
@@ -1179,25 +1173,27 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
     const doc = getDocString(cls);
     if (doc) result.doc = doc;
 
-    // Constructors
+    // Constructors — extract overload signatures when present, skip implementation
     const ctors = cls
         .getConstructors()
         .filter((c) => c.getScope() !== "private")
-        .map(extractConstructor);
+        .filter((c) => c.isOverload() || c.getOverloads().length === 0)
+        .map(c => extractConstructor(c, ctx));
     if (ctors.length) result.constructors = ctors;
 
-    // Methods
+    // Methods — extract overload signatures when present, skip implementation
     const methods = cls
         .getMethods()
         .filter((m) => m.getScope() !== "private" && !hasInternalOrHiddenTag(m))
-        .map(extractMethod);
+        .filter((m) => m.isOverload() || m.getOverloads().length === 0)
+        .map(m => extractMethod(m, ctx));
     if (methods.length) result.methods = methods;
 
     // Properties
     const props = cls
         .getProperties()
         .filter((p) => p.getScope() !== "private" && !hasInternalOrHiddenTag(p))
-        .map(extractProperty);
+        .map(p => extractProperty(p, ctx));
 
     // Get/Set Accessors — extract as properties with correct readonly flag
     const setAccessorNames = new Set(
@@ -1210,10 +1206,9 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
         .filter((a) => a.getScope() !== "private" && !hasInternalOrHiddenTag(a))
         .map((getter) => {
             const returnType = getter.getReturnType();
-            const typeText = stripImportPrefix(getter.getReturnTypeNode()?.getText()
-                || (returnType ? returnType.getText(getter) : "any"));
+            const typeText = displayType(getter.getReturnTypeNode(), returnType, getter);
             if (returnType) {
-                typeCollector.collectFromType(returnType);
+                ctx.typeRefs.collectFromType(returnType);
             }
             const accessorResult: PropertyInfo = {
                 name: getter.getName(),
@@ -1242,33 +1237,33 @@ function extractClass(cls: ClassDeclaration): ClassInfo {
         .map((sig) => {
             const keyParam = sig.getKeyName();
             const keyType = sig.getKeyType().getText();
-            const valueType = stripImportPrefix(sig.getReturnTypeNode()?.getText() || sig.getReturnType().getText(sig));
-            typeCollector.collectFromType(sig.getReturnType());
+            const valueType = displayType(sig.getReturnTypeNode(), sig.getReturnType(), sig);
+            ctx.typeRefs.collectFromType(sig.getReturnType());
             const indexSig: IndexSignatureInfo = { keyName: keyParam, keyType, valueType };
             if (sig.isReadonly()) indexSig.readonly = true;
             return indexSig;
         });
     if (classIndexSigs.length) result.indexSignatures = classIndexSigs;
 
-    typeCollector.popContext();
+    ctx.typeRefs.popContext();
     return result;
 }
 
-function extractInterfaceMethod(method: Node): MethodInfo | undefined {
+function extractInterfaceMethod(method: Node, ctx: ExtractionContext): MethodInfo | undefined {
     if (!Node.isMethodSignature(method)) return undefined;
 
     const paramInfos = method.getParameters().map(extractParameterInfo);
-    const params = method.getParameters().map(formatParameter).join(", ");
+    const params = method.getParameters().map(p => formatParameter(p, ctx)).join(", ");
     const returnType = method.getReturnType();
     const returnTypeNode = method.getReturnTypeNode();
-    const ret = stripImportPrefix(returnTypeNode?.getText() || returnType?.getText(method) || "");
+    const ret = displayType(returnTypeNode, returnType, method);
 
     // Collect return type reference
     if (returnType) {
-        typeCollector.collectFromType(returnType);
+        ctx.typeRefs.collectFromType(returnType);
     }
     // Also collect from TypeNode to catch simple type aliases resolved away by TS
-    if (returnTypeNode) typeCollector.collectFromTypeNode(returnTypeNode);
+    if (returnTypeNode) ctx.typeRefs.collectFromTypeNode(returnTypeNode);
 
     const typeParams = method.getTypeParameters().map(t => t.getText()).join(", ");
 
@@ -1293,24 +1288,24 @@ function extractInterfaceMethod(method: Node): MethodInfo | undefined {
     return result;
 }
 
-function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
+function extractInterfaceCallableProperty(prop: Node, ctx: ExtractionContext): MethodInfo | undefined {
     if (!Node.isPropertySignature(prop)) return undefined;
 
     const typeNode = prop.getTypeNode();
     if (!typeNode || !Node.isFunctionTypeNode(typeNode)) return undefined;
 
     const paramInfos = typeNode.getParameters().map(extractParameterInfo);
-    const params = typeNode.getParameters().map(formatParameter).join(", ");
+    const params = typeNode.getParameters().map(p => formatParameter(p, ctx)).join(", ");
     const returnType = typeNode.getReturnType();
     const returnTypeNode = typeNode.getReturnTypeNode();
-    const ret = stripImportPrefix(returnTypeNode?.getText() || returnType?.getText(prop) || "");
+    const ret = displayType(returnTypeNode, returnType, prop);
 
     // Collect return type reference
     if (returnType) {
-        typeCollector.collectFromType(returnType);
+        ctx.typeRefs.collectFromType(returnType);
     }
     // Also collect from TypeNode to catch simple type aliases resolved away by TS
-    if (returnTypeNode) typeCollector.collectFromTypeNode(returnTypeNode);
+    if (returnTypeNode) ctx.typeRefs.collectFromTypeNode(returnTypeNode);
 
     const result: MethodInfo = {
         name: prop.getName(),
@@ -1331,16 +1326,16 @@ function extractInterfaceCallableProperty(prop: Node): MethodInfo | undefined {
     return result;
 }
 
-function extractInterfaceProperty(prop: Node): PropertyInfo | undefined {
+function extractInterfaceProperty(prop: Node, ctx: ExtractionContext): PropertyInfo | undefined {
     if (!Node.isPropertySignature(prop)) return undefined;
 
     const typeNode = prop.getTypeNode();
-    const typeText = stripImportPrefix(typeNode?.getText() || prop.getType().getText(prop));
+    const typeText = displayType(typeNode, prop.getType(), prop);
 
     // Collect type reference for dependency tracking
-    typeCollector.collectFromType(prop.getType());
+    ctx.typeRefs.collectFromType(prop.getType());
     // Also collect from TypeNode to catch simple type aliases resolved away by TS
-    if (typeNode) typeCollector.collectFromTypeNode(typeNode);
+    if (typeNode) ctx.typeRefs.collectFromTypeNode(typeNode);
 
     const result: PropertyInfo = {
         name: prop.getName(),
@@ -1360,9 +1355,9 @@ function extractInterfaceProperty(prop: Node): PropertyInfo | undefined {
     return result;
 }
 
-function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
+function extractInterface(iface: InterfaceDeclaration, ctx: ExtractionContext): InterfaceInfo {
     const name = iface.getName();
-    typeCollector.pushContext(name);
+    ctx.typeRefs.pushContext(name);
 
     const result: InterfaceInfo = { name };
 
@@ -1371,7 +1366,7 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
     const ext = extExprs.map((e) => e.getText());
     if (ext.length) result.extends = ext;
     for (const extExpr of extExprs) {
-        typeCollector.collectFromType(extExpr.getType());
+        ctx.typeRefs.collectFromType(extExpr.getType());
     }
 
     // Type parameters
@@ -1391,7 +1386,7 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
         ...iface
             .getMethods()
             .filter((m) => !hasInternalOrHiddenTag(m))
-            .map((m) => extractInterfaceMethod(m))
+            .map((m) => extractInterfaceMethod(m, ctx))
             .filter((m): m is MethodInfo => m !== undefined),
     );
 
@@ -1399,12 +1394,12 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
     const props: PropertyInfo[] = [];
     for (const prop of iface.getProperties()) {
         if (Node.isPropertySignature(prop) && hasInternalOrHiddenTag(prop)) continue;
-        const callable = extractInterfaceCallableProperty(prop);
+        const callable = extractInterfaceCallableProperty(prop, ctx);
         if (callable) {
             methods.push(callable);
             continue;
         }
-        const graphed = extractInterfaceProperty(prop);
+        const graphed = extractInterfaceProperty(prop, ctx);
         if (graphed) props.push(graphed);
     }
 
@@ -1417,20 +1412,20 @@ function extractInterface(iface: InterfaceDeclaration): InterfaceInfo {
         .map((sig) => {
             const keyParam = sig.getKeyName();
             const keyType = sig.getKeyType().getText();
-            const valueType = stripImportPrefix(sig.getReturnTypeNode()?.getText() || sig.getReturnType().getText(sig));
-            typeCollector.collectFromType(sig.getReturnType());
+            const valueType = displayType(sig.getReturnTypeNode(), sig.getReturnType(), sig);
+            ctx.typeRefs.collectFromType(sig.getReturnType());
             const indexSig: IndexSignatureInfo = { keyName: keyParam, keyType, valueType };
             if (sig.isReadonly()) indexSig.readonly = true;
             return indexSig;
         });
     if (indexSigs.length) result.indexSignatures = indexSigs;
 
-    typeCollector.popContext();
+    ctx.typeRefs.popContext();
     return result;
 }
 
-function extractEnum(en: EnumDeclaration): EnumInfo {
-    typeCollector.pushContext(en.getName());
+function extractEnum(en: EnumDeclaration, ctx: ExtractionContext): EnumInfo {
+    ctx.typeRefs.pushContext(en.getName());
     const result: EnumInfo = {
         name: en.getName(),
         doc: getDocString(en),
@@ -1441,17 +1436,17 @@ function extractEnum(en: EnumDeclaration): EnumInfo {
     if (deprecated.deprecated) result.deprecated = true;
     if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
-    typeCollector.popContext();
+    ctx.typeRefs.popContext();
     return result;
 }
 
-function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
+function extractTypeAlias(alias: TypeAliasDeclaration, ctx: ExtractionContext): TypeAliasInfo {
     const name = alias.getName();
-    typeCollector.pushContext(name);
+    ctx.typeRefs.pushContext(name);
     const type = alias.getType();
 
     // Collect type reference for dependency tracking
-    typeCollector.collectFromType(type);
+    ctx.typeRefs.collectFromType(type);
 
     // Use the type node text (original source) rather than Type.getText()
     // which can resolve to the alias name itself for complex types.
@@ -1459,16 +1454,11 @@ function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
     // prefer the compiler-resolved type since it gives the concrete type name.
     const typeNode = alias.getTypeNode();
     let typeText: string;
-    const typeNodeText = typeNode?.getText();
-    const resolvedText = type.getText(alias);
     if (typeNode && typeNode.getKind() === ts.SyntaxKind.IndexedAccessType) {
-        // Indexed access type (e.g., AppSettings["database"]) — use compiler-resolved
-        // type since the concrete type name is more useful than the access expression.
-        typeText = stripImportPrefix(resolvedText);
-    } else if (typeNodeText) {
-        typeText = stripImportPrefix(typeNodeText);
+        // Indexed access type — use compiler-resolved type for the concrete name.
+        typeText = displayType(undefined, type, alias);
     } else {
-        typeText = stripImportPrefix(resolvedText);
+        typeText = displayType(typeNode, type, alias);
     }
 
     const result: TypeAliasInfo = {
@@ -1485,24 +1475,24 @@ function extractTypeAlias(alias: TypeAliasDeclaration): TypeAliasInfo {
     if (deprecated.deprecated) result.deprecated = true;
     if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
-    typeCollector.popContext();
+    ctx.typeRefs.popContext();
     return result;
 }
 
-function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
+function extractFunction(fn: FunctionDeclaration, ctx: ExtractionContext): FunctionInfo | undefined {
     const name = fn.getName();
     if (!name) return undefined;
 
-    typeCollector.pushContext(name);
+    ctx.typeRefs.pushContext(name);
 
     const paramInfos = fn.getParameters().map(extractParameterInfo);
-    const params = fn.getParameters().map(formatParameter).join(", ");
+    const params = fn.getParameters().map(p => formatParameter(p, ctx)).join(", ");
     const returnType = fn.getReturnType();
-    const ret = stripImportPrefix(fn.getReturnTypeNode()?.getText() || returnType?.getText(fn) || "");
+    const ret = displayType(fn.getReturnTypeNode(), returnType, fn);
 
     // Collect return type reference
     if (returnType) {
-        typeCollector.collectFromType(returnType);
+        ctx.typeRefs.collectFromType(returnType);
     }
 
     const typeParams = fn.getTypeParameters().map(t => t.getText()).join(", ");
@@ -1527,42 +1517,43 @@ function extractFunction(fn: FunctionDeclaration): FunctionInfo | undefined {
     if (deprecated.deprecated) result.deprecated = true;
     if (deprecated.deprecatedMsg) result.deprecatedMsg = deprecated.deprecatedMsg;
 
-    typeCollector.popContext();
+    ctx.typeRefs.popContext();
     return result;
 }
 
-function extractModule(sourceFile: SourceFile, moduleName: string): ModuleInfo | null {
+function extractModule(sourceFile: SourceFile, moduleName: string, ctx: ExtractionContext): ModuleInfo | null {
     const result: ModuleInfo = { name: moduleName };
 
     // Get exported declarations, filtering out @internal/@hidden tagged items
     const classes = sourceFile
         .getClasses()
         .filter((c) => c.isExported() && c.getName() && !hasInternalOrHiddenTag(c))
-        .map(extractClass);
+        .map(c => extractClass(c, ctx));
     if (classes.length) result.classes = classes;
 
     const interfaces = sourceFile
         .getInterfaces()
         .filter((i) => i.isExported() && !hasInternalOrHiddenTag(i))
-        .map(extractInterface);
+        .map(i => extractInterface(i, ctx));
     if (interfaces.length) result.interfaces = interfaces;
 
     const enums = sourceFile
         .getEnums()
         .filter((e) => e.isExported() && !hasInternalOrHiddenTag(e))
-        .map(extractEnum);
+        .map(e => extractEnum(e, ctx));
     if (enums.length) result.enums = enums;
 
     const typeAliases = sourceFile
         .getTypeAliases()
         .filter((t) => t.isExported() && !hasInternalOrHiddenTag(t))
-        .map(extractTypeAlias);
+        .map(t => extractTypeAlias(t, ctx));
     if (typeAliases.length) result.types = typeAliases;
 
     const functions = sourceFile
         .getFunctions()
         .filter((f) => f.isExported() && !hasInternalOrHiddenTag(f))
-        .map(extractFunction)
+        .filter((f) => f.isOverload() || f.getOverloads().length === 0)
+        .map(f => extractFunction(f, ctx))
         .filter((f): f is FunctionInfo => f !== undefined);
     if (functions.length) result.functions = functions;
 
@@ -1792,7 +1783,6 @@ function getConditionPriority(condition: string): number {
  * Resolution strategy (in order):
  * 1. Direct path or extension-converted path (e.g. .js → .d.ts in compiled mode)
  * 2. TypeScript module resolution via ts.resolveModuleName (respects tsconfig paths/rootDirs)
- * 3. Common output-to-source directory mappings (source mode only, e.g. dist/ → src/)
  */
 function resolveToSourceFile(rootPath: string, outputPath: string, options: EngineOptions): string | null {
     const filePath = outputPath.replace(/^\.\//, "");
@@ -1834,8 +1824,7 @@ function resolveCompiledFile(rootPath: string, filePath: string, options: Engine
  * Source mode: resolve an output path (e.g. ./dist/index.js) to the corresponding
  * source file (e.g. ./src/index.ts).
  *
- * Tries direct lookup first, then TypeScript module resolution, then falls back
- * to common directory mappings (dist→src, lib→src, etc.).
+ * Tries direct lookup first, then TypeScript module resolution.
  */
 function resolveSourceFile(rootPath: string, filePath: string): string | null {
     // 1. Direct path with extension conversion (.js → .ts)
@@ -1993,16 +1982,7 @@ function extractExportedSymbols(project: Project, entryEntries: ExportEntry[]): 
                     }
                 }
 
-                if (exportDecl.isNamespaceExport()) {
-                    const markerName = `__namespace_reexport__${moduleSpecifier}`;
-                    if (!exportedSymbols.has(markerName)) {
-                        exportedSymbols.set(markerName, {
-                            exportPath: entry.exportPath,
-                            condition: entry.condition,
-                            reExportedFrom: moduleSpecifier
-                        });
-                    }
-                }
+
             }
         }
     }
@@ -2074,10 +2054,7 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
 
     // Initialize extraction context — consolidates all mutable state
     // (builtins, type collector, package name cache) for this extraction run.
-    extractionCtx = new ExtractionContext(project);
-    discoveredBuiltins = extractionCtx.discoveredBuiltins;
-    typeCollector = extractionCtx.typeRefs;
-    pkgNameCache = extractionCtx.pkgNameCache;
+    const ctx = new ExtractionContext(project);
 
     // Find source files
     const srcDir = path.join(rootPath, "src");
@@ -2108,7 +2085,7 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
         const fp = sf.getFilePath();
         return !fp.includes("node_modules");
     });
-    typeCollector.collectFromImportDeclarations(sourceFilesForImports);
+    ctx.typeRefs.collectFromImportDeclarations(sourceFilesForImports);
 
     const modules: ModuleInfo[] = [];
     const moduleSourceFileMap: Array<[ModuleInfo, SourceFile]> = []; // for condition propagation
@@ -2138,7 +2115,7 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
             moduleName = moduleName.slice(0, -6) || "index";
         }
 
-        const module = extractModule(sourceFile, moduleName);
+        const module = extractModule(sourceFile, moduleName, ctx);
         if (module) {
             // Set module condition+exportPath from entryEntries by file path.
             // Pick the most general (lowest-priority) condition for the module itself,
@@ -2249,7 +2226,7 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
 
     // Populate referencedTypes on all entities from compiler-resolved type refs.
     // This must happen before computeReachableTypes so BFS can use the data.
-    const contextRefNames = typeCollector.getContextRefNames();
+    const contextRefNames = ctx.typeRefs.getContextRefNames();
     for (const mod of baseResult.modules) {
         for (const cls of mod.classes || []) {
             const refs = contextRefNames.get(cls.name);
@@ -2291,7 +2268,7 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
     }
 
     // Resolve transitive dependencies (scoped to reachable types)
-    const dependencies = resolveTransitiveDependencies(baseResult, project, rootPath, reachableTypes);
+    const dependencies = resolveTransitiveDependencies(baseResult, ctx, rootPath, reachableTypes);
     if (dependencies.length > 0) {
         baseResult.dependencies = dependencies;
     }
@@ -2311,13 +2288,28 @@ export function extractPackage(rootPath: string, options: EngineOptions = { mode
     }
 
     // Also check for imported packages that couldn't be resolved at all
-    const importedPackages = typeCollector.getImportedPackages();
+    const importedPackages = ctx.typeRefs.getImportedPackages();
     for (const [, pkgName] of importedPackages) {
         if (reportedPackages.has(pkgName)) continue;
+        // Node built-in modules are never in node_modules — skip them
+        if (isNodeBuiltinModule(pkgName)) continue;
         const pkgDir = path.join(rootPath, "node_modules", pkgName);
         if (!fs.existsSync(pkgDir)) {
             console.error(`Unresolved dependency: package '${pkgName}' is referenced but not installed`);
             reportedPackages.add(pkgName);
+        }
+    }
+
+    // Emit collected extraction diagnostics to stderr.
+    // The C# host parses each stderr line as an ApiDiagnostic.
+    // Deduplicate and summarize to avoid noise from repetitive type traversal warnings.
+    if (ctx.diagnostics.length > 0) {
+        const byCode = new Map<string, number>();
+        for (const d of ctx.diagnostics) {
+            byCode.set(d.code, (byCode.get(d.code) ?? 0) + 1);
+        }
+        for (const [code, count] of byCode) {
+            console.error(`Extraction diagnostic: ${code} occurred ${count} time(s)`);
         }
     }
 
@@ -2478,7 +2470,8 @@ function buildImportResolutionMap(project: Project): Map<string, { packageName: 
 function extractTypeFromResolvedModule(
     typeName: string,
     resolvedFile: SourceFile,
-    isDefaultImport: boolean
+    isDefaultImport: boolean,
+    ctx: ExtractionContext,
 ): { graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo; declaration: Node; kind: "class" | "interface" | "enum" | "type" } | null {
     try {
         const exportedDecls = resolvedFile.getExportedDeclarations();
@@ -2496,21 +2489,21 @@ function extractTypeFromResolvedModule(
                 const kind = decl.getKindName();
 
                 if (kind === "ClassDeclaration") {
-                    return { graphed: extractClass(decl as ClassDeclaration), declaration: decl, kind: "class" };
+                    return { graphed: extractClass(decl as ClassDeclaration, ctx), declaration: decl, kind: "class" };
                 }
                 if (kind === "InterfaceDeclaration") {
-                    return { graphed: extractInterface(decl as InterfaceDeclaration), declaration: decl, kind: "interface" };
+                    return { graphed: extractInterface(decl as InterfaceDeclaration, ctx), declaration: decl, kind: "interface" };
                 }
                 if (kind === "EnumDeclaration") {
-                    return { graphed: extractEnum(decl as EnumDeclaration), declaration: decl, kind: "enum" };
+                    return { graphed: extractEnum(decl as EnumDeclaration, ctx), declaration: decl, kind: "enum" };
                 }
                 if (kind === "TypeAliasDeclaration") {
-                    return { graphed: extractTypeAlias(decl as TypeAliasDeclaration), declaration: decl, kind: "type" };
+                    return { graphed: extractTypeAlias(decl as TypeAliasDeclaration, ctx), declaration: decl, kind: "type" };
                 }
             }
         }
-    } catch {
-        // Ignore errors from packages with invalid type definitions
+    } catch (e) {
+        ctx.warn("DEP_EXTRACT", `Failed to extract '${typeName}': ${e instanceof Error ? e.message : String(e)}`, typeName);
     }
 
     return null;
@@ -2520,26 +2513,26 @@ function extractTypeFromResolvedModule(
  * Resolves transitive dependencies from the API surface.
  * Uses AST-based type collection for accurate dependency tracking.
  */
-function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath: string, reachableTypes?: Set<string>): DependencyInfo[] {
+function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, rootPath: string, reachableTypes?: Set<string>): DependencyInfo[] {
     // Register all defined types with the collector (to exclude from dependencies)
     const definedTypes = getDefinedTypes(api);
     for (const typeName of definedTypes) {
-        typeCollector.addDefinedType(typeName);
+        ctx.typeRefs.addDefinedType(typeName);
     }
 
     // Get the AST-collected external type references, scoped to reachable types
-    const externalRefs = typeCollector.getExternalRefs(reachableTypes);
+    const externalRefs = ctx.typeRefs.getExternalRefs(reachableTypes);
 
     if (externalRefs.length === 0) {
         return [];
     }
 
     // Build import resolution map using the existing project's module resolution
-    const importResolutionMap = buildImportResolutionMap(project);
+    const importResolutionMap = buildImportResolutionMap(ctx.project);
 
     // Collect default-imported type names for proper lookup strategy
     const defaultImportedTypes = new Set<string>();
-    for (const sourceFile of project.getSourceFiles()) {
+    for (const sourceFile of ctx.project.getSourceFiles()) {
         if (sourceFile.getFilePath().includes("node_modules")) continue;
         for (const importDecl of sourceFile.getImportDeclarations()) {
             const defImport = importDecl.getDefaultImport();
@@ -2552,10 +2545,10 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
     // Additional files are added on-demand during sub-dependency traversal.
     for (const [, entry] of importResolutionMap) {
         const filePath = entry.resolvedFile.getFilePath();
-        if (!project.getSourceFile(filePath)) {
+        if (!ctx.project.getSourceFile(filePath)) {
             try {
-                project.addSourceFileAtPath(filePath);
-            } catch { /* ignore if already added */ }
+                ctx.project.addSourceFileAtPath(filePath);
+            } catch { /* benign — file may already be added */ }
         }
     }
 
@@ -2591,7 +2584,7 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
 
                 if (resolution) {
                     const isDefault = defaultImportedTypes.has(typeName);
-                    result = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault);
+                    result = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault, ctx);
                 }
 
                 if (!result) {
@@ -2606,7 +2599,7 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                 try {
                     const declType = getTypeFromDeclaration(result.declaration);
                     if (declType) {
-                        collectTypeRefsFromType(declType, project, subRefs);
+                        collectTypeRefsFromType(declType, ctx, subRefs);
                     }
                     // For classes/interfaces, also traverse members' types
                     const decl = result.declaration;
@@ -2614,28 +2607,28 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                         for (const member of decl.getMembers()) {
                             try {
                                 const memberType = getTypeFromDeclaration(member);
-                                if (memberType) collectTypeRefsFromType(memberType, project, subRefs);
+                                if (memberType) collectTypeRefsFromType(memberType, ctx, subRefs);
                                 // Also collect from TypeNodes to catch simple type aliases
                                 // that TypeScript resolves away (e.g., type X = Y)
                                 if (Node.isPropertySignature(member) || Node.isPropertyDeclaration(member)) {
                                     const memberTypeNode = member.getTypeNode();
-                                    if (memberTypeNode) collectTypeRefsFromTypeNode(memberTypeNode, project, subRefs);
+                                    if (memberTypeNode) collectTypeRefsFromTypeNode(memberTypeNode, ctx, subRefs);
                                 }
                                 const params = getParametersFromDeclaration(member);
                                 for (const p of params) {
                                     const pType = p.getType();
-                                    if (pType) collectTypeRefsFromType(pType, project, subRefs);
+                                    if (pType) collectTypeRefsFromType(pType, ctx, subRefs);
                                     const pTypeNode = p.getTypeNode();
-                                    if (pTypeNode) collectTypeRefsFromTypeNode(pTypeNode, project, subRefs);
+                                    if (pTypeNode) collectTypeRefsFromTypeNode(pTypeNode, ctx, subRefs);
                                 }
                                 const retType = getReturnTypeFromDeclaration(member);
-                                if (retType) collectTypeRefsFromType(retType, project, subRefs);
+                                if (retType) collectTypeRefsFromType(retType, ctx, subRefs);
                                 // Collect from return type node
                                 if (Node.isMethodSignature(member) || Node.isMethodDeclaration(member)) {
                                     const retTypeNode = member.getReturnTypeNode();
-                                    if (retTypeNode) collectTypeRefsFromTypeNode(retTypeNode, project, subRefs);
+                                    if (retTypeNode) collectTypeRefsFromTypeNode(retTypeNode, ctx, subRefs);
                                 }
-                            } catch { /* skip members that fail */ }
+                            } catch (e) { ctx.warn("DEP_MEMBER_TRAVERSE", `Failed for member of '${typeName}': ${e instanceof Error ? e.message : String(e)}`, typeName); }
                         }
                     }
                     // For type aliases, also traverse the underlying type's structure
@@ -2643,10 +2636,10 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                         const typeNode = result.declaration.getTypeNode();
                         if (typeNode) {
                             const resolvedType = typeNode.getType();
-                            if (resolvedType) collectTypeRefsFromType(resolvedType, project, subRefs);
+                            if (resolvedType) collectTypeRefsFromType(resolvedType, ctx, subRefs);
                         }
                     }
-                } catch { /* skip types that fail traversal */ }
+                } catch (e) { ctx.warn("DEP_TYPE_TRAVERSE", `Failed for '${typeName}': ${e instanceof Error ? e.message : String(e)}`, typeName); }
 
                 // Queue discovered sub-refs for resolution
                 for (const subRef of subRefs) {
@@ -2662,12 +2655,12 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
                         // Prefer the exact declaration file when available — this handles
                         // multi-module packages where different types live in different files
                         if (subRef.declarationPath) {
-                            resolvedFile = project.getSourceFile(subRef.declarationPath) ?? undefined;
+                            resolvedFile = ctx.project.getSourceFile(subRef.declarationPath) ?? undefined;
                             // Lazy loading: add the declaration file to the project on-demand
                             if (!resolvedFile && fs.existsSync(subRef.declarationPath)) {
                                 try {
-                                    resolvedFile = project.addSourceFileAtPath(subRef.declarationPath);
-                                } catch { /* ignore if already added */ }
+                                    resolvedFile = ctx.project.addSourceFileAtPath(subRef.declarationPath);
+                                } catch { /* benign — file may already be added */ }
                             }
                         }
                         // Fall back to any existing entry for the same package
@@ -2717,7 +2710,8 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
         }
     }
 
-    // Add unresolved types
+    // Add unresolved types (skip Node built-in modules — they don't have
+    // installable type packages and would always be unresolved)
     for (const typeName of allUnresolved) {
         // Find which package it was supposed to come from
         let pkg: string | undefined;
@@ -2729,6 +2723,7 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
             if (res) pkg = res.packageName;
         }
         if (pkg) {
+            if (isNodeBuiltinModule(pkg)) continue;
             if (!depByPackage.has(pkg)) {
                 depByPackage.set(pkg, { package: pkg, isNode: isNodePackage(pkg) || undefined });
             }
@@ -2749,7 +2744,22 @@ function resolveTransitiveDependencies(api: ApiIndex, project: Project, rootPath
  * Currently only @types/node is considered a Node.js runtime package.
  */
 function isNodePackage(packageName: string): boolean {
-    return packageName === "@types/node" || packageName.startsWith("@types/node/");
+    return packageName === "@types/node" || packageName.startsWith("@types/node/") || isNodeBuiltinModule(packageName);
+}
+
+/** Node.js built-in modules that don't have installable type packages. */
+const NODE_BUILTIN_MODULES = new Set([
+    "assert", "buffer", "child_process", "cluster", "console", "constants",
+    "crypto", "dgram", "dns", "domain", "events", "fs", "http", "http2",
+    "https", "inspector", "module", "net", "os", "path", "perf_hooks",
+    "process", "punycode", "querystring", "readline", "repl", "stream",
+    "string_decoder", "sys", "timers", "tls", "trace_events", "tty", "url",
+    "util", "v8", "vm", "wasi", "worker_threads", "zlib",
+]);
+
+function isNodeBuiltinModule(packageName: string): boolean {
+    if (packageName.startsWith("node:")) return true;
+    return NODE_BUILTIN_MODULES.has(packageName);
 }
 
 // ============================================================================
@@ -3105,13 +3115,14 @@ function baseTypeName(typeStr: string): string {
 }
 
 /**
- * Strips compiler-generated `import("…")` qualifiers from type text.
+ * Internal: Strips compiler-generated `import("…")` qualifiers from type text.
+ * Used by `displayType()` and `baseTypeName()`.
+ *
  *   import("./path").TypeName         → TypeName
  *   import("./path").Foo<import("./p").Bar> → Foo<Bar>
  *   typeof import("./path")           → typeof path-last-segment
  *
- * When `baseOnly` is true, also strips generic parameters (delegates to
- * baseTypeName logic).  Callers that need the full generic text pass false.
+ * When `baseOnly` is true, also strips generic parameters.
  */
 function stripImportPrefix(text: string, baseOnly = false): string {
     let result = text;
