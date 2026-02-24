@@ -22,6 +22,7 @@ import {
     Type,
     TypeNode,
     Symbol as TsSymbol,
+    ExportedDeclarations,
     ts,
 } from "ts-morph";
 import * as fs from "fs";
@@ -194,6 +195,7 @@ export interface DependencyInfo {
     interfaces?: InterfaceInfo[];
     enums?: EnumInfo[];
     types?: TypeAliasInfo[];
+    functions?: FunctionInfo[];
 }
 
 // ============================================================================
@@ -2488,6 +2490,41 @@ function buildImportResolutionMap(project: Project): {
     return { typeMap, packageMap };
 }
 
+type ExtractResult = {
+    graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | FunctionInfo;
+    declaration: Node;
+    kind: "class" | "interface" | "enum" | "type" | "function";
+};
+
+/**
+ * Attempts to extract a type from a single AST declaration node.
+ * Handles ClassDeclaration, InterfaceDeclaration, EnumDeclaration,
+ * TypeAliasDeclaration, and FunctionDeclaration.
+ */
+function extractDeclaration(
+    decl: Node,
+    ctx: ExtractionContext,
+): ExtractResult | null {
+    const kind = decl.getKindName();
+    if (kind === "ClassDeclaration") {
+        return { graphed: extractClass(decl as ClassDeclaration, ctx), declaration: decl, kind: "class" };
+    }
+    if (kind === "InterfaceDeclaration") {
+        return { graphed: extractInterface(decl as InterfaceDeclaration, ctx), declaration: decl, kind: "interface" };
+    }
+    if (kind === "EnumDeclaration") {
+        return { graphed: extractEnum(decl as EnumDeclaration, ctx), declaration: decl, kind: "enum" };
+    }
+    if (kind === "TypeAliasDeclaration") {
+        return { graphed: extractTypeAlias(decl as TypeAliasDeclaration, ctx), declaration: decl, kind: "type" };
+    }
+    if (kind === "FunctionDeclaration") {
+        const fnInfo = extractFunction(decl as FunctionDeclaration, ctx);
+        if (fnInfo) return { graphed: fnInfo, declaration: decl, kind: "function" };
+    }
+    return null;
+}
+
 /**
  * Extracts a type definition from a resolved dependency module.
  * Uses getExportedDeclarations() to follow re-exports to the actual declaration.
@@ -2498,33 +2535,54 @@ function extractTypeFromResolvedModule(
     resolvedFile: SourceFile,
     isDefaultImport: boolean,
     ctx: ExtractionContext,
-): { graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo; declaration: Node; kind: "class" | "interface" | "enum" | "type" } | null {
+): ExtractResult | null {
     try {
-        const exportedDecls = resolvedFile.getExportedDeclarations();
-
         // For default imports, check both "default" and the type name
         const lookupKeys = isDefaultImport
             ? ["default", typeName]
             : [typeName];
 
-        for (const key of lookupKeys) {
-            const decls = exportedDecls.get(key);
-            if (!decls) continue;
+        // Collect all export sources: file-level exports + ambient module
+        // declarations (e.g., `declare module "buffer" { ... }`). Ambient
+        // modules are a standard TypeScript pattern used by @types/* packages
+        // and other libraries that augment the global scope or declare modules.
+        const exportSources: ReadonlyMap<string, ExportedDeclarations[]>[] = [
+            resolvedFile.getExportedDeclarations(),
+        ];
+        for (const mod of resolvedFile.getModules()) {
+            exportSources.push(mod.getExportedDeclarations());
+        }
 
-            for (const decl of decls) {
-                const kind = decl.getKindName();
+        for (const exportedDecls of exportSources) {
+            for (const key of lookupKeys) {
+                const decls = exportedDecls.get(key);
+                if (!decls) continue;
 
-                if (kind === "ClassDeclaration") {
-                    return { graphed: extractClass(decl as ClassDeclaration, ctx), declaration: decl, kind: "class" };
-                }
-                if (kind === "InterfaceDeclaration") {
-                    return { graphed: extractInterface(decl as InterfaceDeclaration, ctx), declaration: decl, kind: "interface" };
-                }
-                if (kind === "EnumDeclaration") {
-                    return { graphed: extractEnum(decl as EnumDeclaration, ctx), declaration: decl, kind: "enum" };
-                }
-                if (kind === "TypeAliasDeclaration") {
-                    return { graphed: extractTypeAlias(decl as TypeAliasDeclaration, ctx), declaration: decl, kind: "type" };
+                for (const decl of decls) {
+                    const result = extractDeclaration(decl, ctx);
+                    if (result) return result;
+
+                    // Follow symbol alias chains for re-export patterns
+                    // (e.g., `export = EventEmitter` in @types/node events.d.ts).
+                    // The aliased symbol points to the actual declaration behind
+                    // the import, which may be a class, interface, etc.
+                    if (decl.getKindName() === "ImportEqualsDeclaration") {
+                        const aliased = decl.getSymbol()?.getAliasedSymbol();
+                        if (aliased) {
+                            const aliasedDecls = aliased.getDeclarations();
+                            // Prefer ClassDeclaration when both class and interface
+                            // exist (TypeScript declaration merging).
+                            const classDecl = aliasedDecls.find(d => d.getKindName() === "ClassDeclaration");
+                            if (classDecl) {
+                                const r = extractDeclaration(classDecl, ctx);
+                                if (r) return r;
+                            }
+                            for (const aDecl of aliasedDecls) {
+                                const r = extractDeclaration(aDecl, ctx);
+                                if (r) return r;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2586,10 +2644,35 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
         }
     }
 
-    // Group initial refs by package name
+    // Enrich the import resolution map with compiler-resolved declaration paths.
+    // The TypeScript compiler resolves type declarations during type-checking
+    // using the full `exports` condition map in package.json (e.g., "import"
+    // vs "require" conditions), while ts-morph's getModuleSpecifierSourceFile()
+    // uses simpler heuristics (the top-level "types" field). When both resolve,
+    // the compiler result is authoritative because it reflects the actual
+    // declaration file the type-checker used. We always prefer it.
+    for (const ref of externalRefs) {
+        if (!ref.packageName || !ref.declarationPath) continue;
+        if (ref.packageName === api.package) continue;
+
+        let resolvedFile = ctx.project.getSourceFile(ref.declarationPath) ?? undefined;
+        if (!resolvedFile && fs.existsSync(ref.declarationPath)) {
+            try { resolvedFile = ctx.project.addSourceFileAtPath(ref.declarationPath); } catch { /* benign */ }
+        }
+        if (resolvedFile) {
+            // Override any existing mapping — the compiler resolution
+            // is more precise than ts-morph's module specifier resolution.
+            importResolutionMap.set(ref.name, { packageName: ref.packageName, resolvedFile });
+        }
+    }
+
+    // Group initial refs by package name, skipping self-references.
+    // Self-references occur when a package's star-exports (export * from "./foo")
+    // cause types to be attributed to the same package being extracted.
     const typesByPackage = new Map<string, Set<string>>();
     for (const ref of externalRefs) {
         if (!ref.packageName) continue;
+        if (ref.packageName === api.package) continue;
         if (!typesByPackage.has(ref.packageName)) {
             typesByPackage.set(ref.packageName, new Set());
         }
@@ -2600,7 +2683,7 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
     // When a dependency type is resolved, we use ts-morph's type system to
     // walk its declaration and find all referenced external types — no string
     // tokenization or heuristics.
-    const allResolved = new Map<string, { packageName: string; type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo; kind: "class" | "interface" | "enum" | "type" }>();
+    const allResolved = new Map<string, { packageName: string; type: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | FunctionInfo; kind: "class" | "interface" | "enum" | "type" | "function" }>();
     const allUnresolved = new Set<string>();
     const processed = new Set<string>();
 
@@ -2614,16 +2697,16 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
                 processed.add(typeName);
 
                 const resolution = importResolutionMap.get(typeName);
-                let result: { graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo; declaration: Node; kind: "class" | "interface" | "enum" | "type" } | null = null;
+                let result: { graphed: ClassInfo | InterfaceInfo | EnumInfo | TypeAliasInfo | FunctionInfo; declaration: Node; kind: "class" | "interface" | "enum" | "type" | "function" } | null = null;
 
                 if (resolution) {
                     const isDefault = defaultImportedTypes.has(typeName);
                     result = extractTypeFromResolvedModule(typeName, resolution.resolvedFile, isDefault, ctx);
                 } else {
-                    // Fallback: for namespace-imported types (e.g., extLib.INetworkModule),
-                    // the per-type map has no entry because the type was accessed via
-                    // qualified syntax, not a named import. Use the package-level
-                    // resolved file from the namespace import.
+                    // For namespace-imported types (e.g., extLib.INetworkModule),
+                    // the per-type map has no entry because the type was accessed
+                    // via qualified syntax, not a named import. Use the package-
+                    // level resolved file from the namespace import.
                     const pkgFile = packageResolutionMap.get(packageName);
                     if (pkgFile) {
                         result = extractTypeFromResolvedModule(typeName, pkgFile, false, ctx);
@@ -2681,6 +2764,21 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
                             const resolvedType = typeNode.getType();
                             if (resolvedType) collectTypeRefsFromType(resolvedType, ctx, subRefs);
                         }
+                    }
+                    // For functions, traverse parameter and return types for sub-dependencies
+                    if (Node.isFunctionDeclaration(result.declaration)) {
+                        for (const param of result.declaration.getParameters()) {
+                            try {
+                                const pType = param.getType();
+                                if (pType) collectTypeRefsFromType(pType, ctx, subRefs);
+                                const pTypeNode = param.getTypeNode();
+                                if (pTypeNode) collectTypeRefsFromTypeNode(pTypeNode, ctx, subRefs);
+                            } catch (e) { ctx.warn("DEP_FUNC_PARAM_TRAVERSE", `Failed for param of '${typeName}': ${e instanceof Error ? e.message : String(e)}`, typeName); }
+                        }
+                        const retType = getReturnTypeFromDeclaration(result.declaration);
+                        if (retType) collectTypeRefsFromType(retType, ctx, subRefs);
+                        const retTypeNode = result.declaration.getReturnTypeNode();
+                        if (retTypeNode) collectTypeRefsFromTypeNode(retTypeNode, ctx, subRefs);
                     }
                 } catch (e) { ctx.warn("DEP_TYPE_TRAVERSE", `Failed for '${typeName}': ${e instanceof Error ? e.message : String(e)}`, typeName); }
 
@@ -2749,6 +2847,9 @@ function resolveTransitiveDependencies(api: ApiIndex, ctx: ExtractionContext, ro
                 break;
             case "type":
                 (depInfo.types ??= []).push(type as TypeAliasInfo);
+                break;
+            case "function":
+                (depInfo.functions ??= []).push(type as FunctionInfo);
                 break;
         }
     }
@@ -2981,7 +3082,8 @@ function buildResolvedDependencies(
         if (dep.isNode) continue;
 
         const hasContent = (dep.classes?.length ?? 0) + (dep.interfaces?.length ?? 0)
-            + (dep.enums?.length ?? 0) + (dep.types?.filter(t => t.type !== "unresolved").length ?? 0) > 0;
+            + (dep.enums?.length ?? 0) + (dep.types?.filter(t => t.type !== "unresolved").length ?? 0)
+            + (dep.functions?.length ?? 0) > 0;
         if (!hasContent) continue;
 
         const conditionPaths = getPackageConditionTypePaths(rootPath, dep.package);
@@ -2996,6 +3098,7 @@ function buildResolvedDependencies(
                     interfaces: dep.interfaces,
                     enums: dep.enums,
                     types: dep.types?.filter(t => t.type !== "unresolved"),
+                    functions: dep.functions,
                 }]
             });
             continue;
@@ -3011,8 +3114,9 @@ function buildResolvedDependencies(
             const interfaces = (dep.interfaces ?? []).filter(i => exportedNames.has(i.name));
             const enums = (dep.enums ?? []).filter(e => exportedNames.has(e.name));
             const types = (dep.types ?? []).filter(t => t.type !== "unresolved" && exportedNames.has(t.name));
+            const functions = (dep.functions ?? []).filter(f => f.name && exportedNames.has(f.name));
 
-            if (classes.length + interfaces.length + enums.length + types.length === 0) continue;
+            if (classes.length + interfaces.length + enums.length + types.length + functions.length === 0) continue;
 
             // "default" condition maps to undefined (null in C#), which the
             // formatter treats as the fallback condition.
@@ -3025,6 +3129,7 @@ function buildResolvedDependencies(
                 interfaces: interfaces.length > 0 ? interfaces : undefined,
                 enums: enums.length > 0 ? enums : undefined,
                 types: types.length > 0 ? types : undefined,
+                functions: functions.length > 0 ? functions : undefined,
             });
         }
 
@@ -3267,6 +3372,16 @@ export function formatStubs(api: ApiIndex): string {
             for (const t of dep.types || []) {
                 if (t.doc) lines.push(`${indent}/** ${t.doc} */`);
                 lines.push(`${indent}export type ${t.name} = ${t.type};`);
+                lines.push("");
+            }
+
+            // Functions
+            for (const fn of dep.functions || []) {
+                if (fn.doc) lines.push(`${indent}/** ${fn.doc} */`);
+                const async = fn.async ? "async " : "";
+                const ret = fn.ret ? `: ${fn.ret}` : "";
+                const typeParams = fn.typeParams ? `<${fn.typeParams}>` : "";
+                lines.push(`${indent}export ${async}function ${fn.name}${typeParams}(${fn.sig})${ret};`);
                 lines.push("");
             }
 

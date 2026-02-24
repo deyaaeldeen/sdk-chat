@@ -495,6 +495,7 @@ public class TsCompiled_CombinedImportTests : IClassFixture<TypeScriptNamespaceA
     /// <summary>
     /// Node built-in types should be grouped under @types/node with isNode=true,
     /// rather than creating separate dependency entries per module.
+    /// Types are resolved to their actual declarations (classes, interfaces, etc.)
     /// </summary>
     [Fact]
     [Trait("Category", "CompiledOnly")]
@@ -507,11 +508,24 @@ public class TsCompiled_CombinedImportTests : IClassFixture<TypeScriptNamespaceA
         Assert.NotNull(nodeTypeDep);
         Assert.Equal("@types/node", nodeTypeDep.Package);
 
-        // It should contain the Node built-in types used in the source
-        var typeNames = (nodeTypeDep.Types ?? []).Select(t => t.Name).ToHashSet();
-        Assert.Contains("ChildProcess", typeNames);
-        Assert.Contains("EventEmitter", typeNames);
-        Assert.Contains("Readable", typeNames);
+        // Collect all type names across all collections (classes, interfaces, types, enums)
+        var allNames = (nodeTypeDep.Classes ?? []).Select(c => c.Name)
+            .Concat((nodeTypeDep.Interfaces ?? []).Select(i => i.Name))
+            .Concat((nodeTypeDep.Types ?? []).Select(t => t.Name))
+            .Concat((nodeTypeDep.Enums ?? []).Select(e => e.Name))
+            .ToHashSet();
+
+        // Node built-in types used in the source should be present (resolved or unresolved)
+        Assert.Contains("ChildProcess", allNames);
+        Assert.Contains("EventEmitter", allNames);
+        Assert.Contains("Readable", allNames);
+
+        // ChildProcess, EventEmitter, Readable should be resolved as classes
+        // (from ambient module declarations in @types/node .d.ts files)
+        var classNames = (nodeTypeDep.Classes ?? []).Select(c => c.Name).ToHashSet();
+        Assert.Contains("ChildProcess", classNames);
+        Assert.Contains("EventEmitter", classNames);
+        Assert.Contains("Readable", classNames);
     }
 
     /// <summary>
