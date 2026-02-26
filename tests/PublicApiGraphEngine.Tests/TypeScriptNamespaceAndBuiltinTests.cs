@@ -349,22 +349,29 @@ public class TsCompiled_NodeBuiltinTests : IClassFixture<TypeScriptNamespaceAndB
     }
 
     /// <summary>
-    /// No dependency entry should exist for "node:child_process", "events",
-    /// or "node:stream". Node built-ins should be completely suppressed.
+    /// Node built-in types should appear as per-module node:* dependencies
+    /// with isNode=true. Bare module names (without node: prefix) and
+    /// the old grouped @types/node entry should NOT appear.
     /// </summary>
     [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void NoDependencyEntry_ForNodeBuiltins()
+    public void NodeBuiltins_ArePerModuleDependencies()
     {
-        var depPackages = (Api.Dependencies ?? [])
-            .Select(d => d.Package)
-            .ToList();
+        var deps = Api.Dependencies ?? [];
+        var depPackages = deps.Select(d => d.Package).ToList();
 
-        Assert.DoesNotContain(depPackages, p =>
-            p.StartsWith("node:", StringComparison.Ordinal) ||
-            p == "child_process" ||
-            p == "events" ||
-            p == "stream");
+        // Per-module node:* dependencies should exist with isNode=true
+        Assert.Contains(deps, d => d.Package == "node:child_process" && d.IsNode);
+        Assert.Contains(deps, d => d.Package == "node:events" && d.IsNode);
+        Assert.Contains(deps, d => d.Package == "node:stream" && d.IsNode);
+
+        // Bare module names should NOT exist as separate entries
+        Assert.DoesNotContain("child_process", depPackages);
+        Assert.DoesNotContain("events", depPackages);
+        Assert.DoesNotContain("stream", depPackages);
+
+        // Old grouped @types/node should NOT exist
+        Assert.DoesNotContain("@types/node", depPackages);
     }
 
     /// <summary>
@@ -404,23 +411,24 @@ public class TsCompiled_NodeBuiltinTests : IClassFixture<TypeScriptNamespaceAndB
     }
 
     /// <summary>
-    /// The "node:" prefix form of built-in imports should be handled.
-    /// Verifies that both "node:child_process" and bare "events" are suppressed.
+    /// The "node:" prefix form of built-in imports should be used for
+    /// per-module dependencies. Bare module names should be normalized
+    /// to the node: prefix form.
     /// </summary>
     [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void BothNodePrefixAndBareModuleName_AreSuppressed()
+    public void NodeImports_NormalizedToNodePrefix()
     {
-        // Check that neither node:-prefixed nor bare names create dependency entries
         var depPackages = (Api.Dependencies ?? [])
             .Select(d => d.Package)
             .ToHashSet();
 
-        // node: prefix forms
-        Assert.DoesNotContain("node:child_process", depPackages);
-        Assert.DoesNotContain("node:stream", depPackages);
+        // node: prefix forms should exist as per-module dependencies
+        Assert.Contains("node:child_process", depPackages);
+        Assert.Contains("node:events", depPackages);
+        Assert.Contains("node:stream", depPackages);
 
-        // Bare module name forms
+        // Bare module name forms should NOT exist (normalized to node: prefix)
         Assert.DoesNotContain("child_process", depPackages);
         Assert.DoesNotContain("events", depPackages);
         Assert.DoesNotContain("stream", depPackages);
@@ -428,10 +436,9 @@ public class TsCompiled_NodeBuiltinTests : IClassFixture<TypeScriptNamespaceAndB
 
     /// <summary>
     /// Node built-in types should NOT appear as unresolved types in non-Node
-    /// dependency entries. The engine groups Node built-in types under a
-    /// @types/node dependency with isNode=true, which is the correct behavior.
-    /// The key guarantee is that no individual Node module packages (like
-    /// node:child_process) create separate dependency entries.
+    /// dependency entries. The engine creates per-module node:* dependencies
+    /// with isNode=true for each imported Node built-in module.
+    /// The key guarantee is that Node types don't leak into non-Node entries.
     /// </summary>
     [Fact]
     [Trait("Category", "CompiledOnly")]
@@ -468,8 +475,8 @@ public class TsCompiled_CombinedImportTests : IClassFixture<TypeScriptNamespaceA
 
     /// <summary>
     /// ext-lib should be present as a dependency. Node built-in modules
-    /// should not create separate dependency entries — they may only appear
-    /// grouped under @types/node with isNode=true.
+    /// should appear as per-module node:* dependencies with isNode=true.
+    /// Bare module names and non-imported Node modules should not appear.
     /// </summary>
     [Fact]
     [Trait("Category", "CompiledOnly")]
@@ -481,51 +488,54 @@ public class TsCompiled_CombinedImportTests : IClassFixture<TypeScriptNamespaceA
         Assert.Contains(Api.Dependencies, d =>
             d.Package == "ext-lib");
 
-        // No individual Node built-in module should appear as a dependency
+        // Per-module Node dependencies should exist with isNode=true
+        Assert.Contains(Api.Dependencies, d =>
+            d.Package == "node:child_process" && d.IsNode);
+        Assert.Contains(Api.Dependencies, d =>
+            d.Package == "node:events" && d.IsNode);
+        Assert.Contains(Api.Dependencies, d =>
+            d.Package == "node:stream" && d.IsNode);
+
+        // Bare module names should NOT exist
         var depPackages = Api.Dependencies
             .Select(d => d.Package)
             .ToList();
 
         Assert.DoesNotContain(depPackages, p =>
-            p.StartsWith("node:", StringComparison.Ordinal) ||
             p == "child_process" || p == "events" ||
             p == "stream" || p == "fs" || p == "path");
     }
 
     /// <summary>
-    /// Node built-in types should be grouped under @types/node with isNode=true,
-    /// rather than creating separate dependency entries per module.
-    /// Types are resolved to their actual declarations (classes, interfaces, etc.)
+    /// Node built-in types should appear as per-module node:* dependencies
+    /// with isNode=true. Each module contains the types it exports.
     /// </summary>
     [Fact]
     [Trait("Category", "CompiledOnly")]
-    public void NodeBuiltinTypes_GroupedUnder_AtTypesNode()
+    public void NodeBuiltinTypes_PerModuleDependencies()
     {
-        var nodeTypeDep = (Api.Dependencies ?? [])
-            .FirstOrDefault(d => d.IsNode);
+        var nodeDeps = (Api.Dependencies ?? [])
+            .Where(d => d.IsNode)
+            .ToList();
 
-        // A @types/node dep with isNode=true should exist
-        Assert.NotNull(nodeTypeDep);
-        Assert.Equal("@types/node", nodeTypeDep.Package);
+        // Per-module node:* dependencies should exist
+        Assert.True(nodeDeps.Count >= 3, $"Expected at least 3 node deps, got {nodeDeps.Count}");
 
-        // Collect all type names across all collections (classes, interfaces, types, enums)
-        var allNames = (nodeTypeDep.Classes ?? []).Select(c => c.Name)
-            .Concat((nodeTypeDep.Interfaces ?? []).Select(i => i.Name))
-            .Concat((nodeTypeDep.Types ?? []).Select(t => t.Name))
-            .Concat((nodeTypeDep.Enums ?? []).Select(e => e.Name))
-            .ToHashSet();
+        // Each module should contain its corresponding type
+        var childProcDep = nodeDeps.FirstOrDefault(d => d.Package == "node:child_process");
+        Assert.NotNull(childProcDep);
+        var cpTypes = (childProcDep.Types ?? []).Select(t => t.Name).ToHashSet();
+        Assert.Contains("ChildProcess", cpTypes);
 
-        // Node built-in types used in the source should be present (resolved or unresolved)
-        Assert.Contains("ChildProcess", allNames);
-        Assert.Contains("EventEmitter", allNames);
-        Assert.Contains("Readable", allNames);
+        var eventsDep = nodeDeps.FirstOrDefault(d => d.Package == "node:events");
+        Assert.NotNull(eventsDep);
+        var evTypes = (eventsDep.Types ?? []).Select(t => t.Name).ToHashSet();
+        Assert.Contains("EventEmitter", evTypes);
 
-        // ChildProcess, EventEmitter, Readable should be resolved as classes
-        // (from ambient module declarations in @types/node .d.ts files)
-        var classNames = (nodeTypeDep.Classes ?? []).Select(c => c.Name).ToHashSet();
-        Assert.Contains("ChildProcess", classNames);
-        Assert.Contains("EventEmitter", classNames);
-        Assert.Contains("Readable", classNames);
+        var streamDep = nodeDeps.FirstOrDefault(d => d.Package == "node:stream");
+        Assert.NotNull(streamDep);
+        var stTypes = (streamDep.Types ?? []).Select(t => t.Name).ToHashSet();
+        Assert.Contains("Readable", stTypes);
     }
 
     /// <summary>
@@ -545,6 +555,16 @@ public class TsCompiled_CombinedImportTests : IClassFixture<TypeScriptNamespaceA
         Assert.DoesNotContain("ChildProcess = unknown", stubs);
         Assert.DoesNotContain("EventEmitter = unknown", stubs);
         Assert.DoesNotContain("Readable = unknown", stubs);
+
+        // Node types should appear as per-module import statements
+        Assert.Contains("import {", stubs);
+        Assert.Contains("from \"node:child_process\"", stubs);
+        Assert.Contains("from \"node:events\"", stubs);
+        Assert.Contains("from \"node:stream\"", stubs);
+
+        // Old grouped @types/node import should NOT exist
+        Assert.DoesNotContain("from \"@types/node\"", stubs);
+        Assert.DoesNotContain("declare module \"@types/node\"", stubs);
     }
 
     /// <summary>
