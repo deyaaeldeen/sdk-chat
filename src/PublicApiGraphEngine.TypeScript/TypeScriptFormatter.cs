@@ -328,12 +328,14 @@ public static class TypeScriptFormatter
                 if (cls is not null && !g.Classes.Any(x => x.Name == cls.Name))
                 {
                     g.Classes.Add(cls);
-                    // Class shadows any type alias with the same name
+                    // Class already creates a type in the same name — remove any type alias
+                    // to avoid TS2300 "Duplicate identifier" (type aliases don't merge)
                     g.Types.RemoveAll(x => x.Name == cls.Name);
                 }
                 if (iface is not null && !g.Interfaces.Any(x => x.Name == iface.Name)) g.Interfaces.Add(iface);
                 if (en is not null && !g.Enums.Any(x => x.Name == en.Name)) g.Enums.Add(en);
-                // Skip type aliases that are shadowed by a class or interface with the same name
+                // Skip type aliases that collide with a class or interface in the same scope
+                // (type aliases don't participate in declaration merging → TS2300)
                 if (ta is not null && !g.Types.Any(x => x.Name == ta.Name)
                     && !g.Classes.Any(x => x.Name == ta.Name)
                     && !g.Interfaces.Any(x => x.Name == ta.Name)) g.Types.Add(ta);

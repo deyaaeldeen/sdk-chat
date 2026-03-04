@@ -610,17 +610,37 @@ function collectTypeRefsFromType(
             collectTypeRefsFromType(baseType, ctx, refs, visited);
         }
 
-        // Process members (properties, methods, call/construct/index signatures)
+        // Process PUBLIC members (properties, methods, call/construct/index signatures)
         // of named class/interface types to discover type references within
         // their declarations (e.g., method parameter and return types).
         // This ensures transitive dependency resolution discovers types like
         // WebResource, HttpOperationResponse, ProxyOptions, etc. that appear
         // in member signatures of dep types.
+        //
+        // IMPORTANT: Skip private and protected members — they are implementation
+        // details and should not contribute to the public API type reference graph.
+        // Without this filter, protected members like StorageClient.storageClientContext
+        // leak generated operation interfaces (e.g. Blob, Container) and their
+        // transitive types (e.g. BlobDownloadResponse) into referencedTypes.
         for (const prop of type.getProperties()) {
             try {
                 const propDecls = prop.getDeclarations();
                 if (propDecls.length > 0) {
-                    const propType = getTypeFromDeclaration(propDecls[0]);
+                    const decl = propDecls[0];
+                    // Check for private/protected access modifiers on the declaration.
+                    // Interface members are always public (no modifiers), so this
+                    // only filters class members with explicit private/protected scope.
+                    const modFlags = ts.getCombinedModifierFlags(decl.compilerNode as ts.Declaration);
+                    if (modFlags & (ts.ModifierFlags.Private | ts.ModifierFlags.Protected)) {
+                        continue;
+                    }
+                    // Also skip ECMAScript private fields (e.g. #field) which use
+                    // NamedDeclaration with a PrivateIdentifier name.
+                    const name = prop.getName();
+                    if (name.startsWith("#")) {
+                        continue;
+                    }
+                    const propType = getTypeFromDeclaration(decl);
                     if (propType) collectTypeRefsFromType(propType, ctx, refs, visited);
                 }
             } catch (e) { ctx.warn("TYPE_TRAVERSE", e instanceof Error ? e.message : String(e)); }
@@ -1344,37 +1364,46 @@ function extractClass(cls: ClassDeclaration, ctx: ExtractionContext): ClassInfo 
     const doc = getDocString(cls);
     if (doc) result.doc = doc;
 
-    // Constructors — extract overload signatures when present, skip implementation
+    // Constructors — extract overload signatures when present, skip implementation.
+    // Exclude private and protected constructors — they are not part of the public API.
     const ctors = cls
         .getConstructors()
-        .filter((c) => c.getScope() !== "private")
+        .filter((c) => c.getScope() !== "private" && c.getScope() !== "protected")
         .filter((c) => c.isOverload() || c.getOverloads().length === 0)
         .map(c => extractConstructor(c, ctx));
     if (ctors.length) result.constructors = ctors;
 
-    // Methods — extract overload signatures when present, skip implementation
+    // Methods — extract overload signatures when present, skip implementation.
+    // Exclude private and protected methods — they are not part of the public API.
     const methods = cls
         .getMethods()
-        .filter((m) => m.getScope() !== "private" && !hasInternalOrHiddenTag(m))
+        .filter((m) => m.getScope() !== "private" && m.getScope() !== "protected" && !hasInternalOrHiddenTag(m))
         .filter((m) => m.isOverload() || m.getOverloads().length === 0)
         .map(m => extractMethod(m, ctx));
     if (methods.length) result.methods = methods;
 
-    // Properties
+    // Properties — exclude private, protected, and ES private (#field) members.
+    // Protected members are implementation details whose types should not
+    // leak into the public API type reference graph.
+    // ES private fields (#field) use ECMAScript private name syntax rather
+    // than TypeScript's `private` keyword, so getScope() returns undefined
+    // for them — we must also check the field name prefix.
     const props = cls
         .getProperties()
-        .filter((p) => p.getScope() !== "private" && !hasInternalOrHiddenTag(p))
+        .filter((p) => p.getScope() !== "private" && p.getScope() !== "protected"
+            && !p.getName().startsWith("#") && !hasInternalOrHiddenTag(p))
         .map(p => extractProperty(p, ctx));
 
-    // Get/Set Accessors — extract as properties with correct readonly flag
+    // Get/Set Accessors — extract as properties with correct readonly flag.
+    // Exclude private and protected accessors — they are not part of the public API.
     const setAccessorNames = new Set(
         cls.getSetAccessors()
-            .filter((a) => a.getScope() !== "private")
+            .filter((a) => a.getScope() !== "private" && a.getScope() !== "protected")
             .map((a) => a.getName())
     );
     const accessorProps: PropertyInfo[] = cls
         .getGetAccessors()
-        .filter((a) => a.getScope() !== "private" && !hasInternalOrHiddenTag(a))
+        .filter((a) => a.getScope() !== "private" && a.getScope() !== "protected" && !hasInternalOrHiddenTag(a))
         .map((getter) => {
             const returnType = getter.getReturnType();
             const typeText = displayType(getter.getReturnTypeNode(), returnType, getter);
