@@ -63,9 +63,9 @@
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="[10.0.2]" />
 
     <!-- OpenTelemetry for observability - PINNED to exact versions -->
-    <PackageReference Include="OpenTelemetry" Version="[1.15.0]" />
+    <PackageReference Include="OpenTelemetry" Version="[1.15.2]" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="[1.15.0]" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="[1.15.0]" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="[1.15.2]" />
 
     <!-- Threading/async analyzers -->
     <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="17.12.19" PrivateAssets="all" />
